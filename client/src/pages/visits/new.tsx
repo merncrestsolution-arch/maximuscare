@@ -1,0 +1,380 @@
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
+import { useAuth } from "@/context/auth-context";
+import { usePatients, useCreateVisit } from "@/hooks/useData";
+import { useStaff } from "@/hooks/useData";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowLeft, Camera, UploadCloud, Loader2 } from "lucide-react";
+import { format } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+
+export default function NewVisit() {
+  const [location, setLocation] = useLocation();
+  const searchParams = new URLSearchParams(window.location.search);
+  const preselectedPatientId = searchParams.get("patientId");
+
+  const { user } = useAuth();
+  const { data: patients = [], isLoading: loadingPatients, error: patientsError } = usePatients();
+  const { data: staff = [], isLoading: loadingStaff } = useStaff();
+  const createVisit = useCreateVisit();
+  const { toast } = useToast();
+
+  const preselectedPatient = patients.find((p) => p.id === preselectedPatientId);
+
+  const [formData, setFormData] = useState({
+    patientId: preselectedPatientId || "",
+    sessionNumber: "1",
+    condition: preselectedPatient?.condition || "",
+    treatment: "",
+    visitDate: format(new Date(), "yyyy-MM-dd"),
+    startTime: format(new Date(), "HH:mm"),
+    endTime: format(new Date(new Date().setHours(new Date().getHours() + 1)), "HH:mm"),
+    branch: user?.branch || "Colombo",
+    visitType: "Clinic",
+    status: "Follow-up",
+    paymentAmount: "2500",
+    paymentStatus: "Paid",
+    paymentMode: "Cash",
+    notes: "",
+    improvements: "",
+    treatingStaffId: user?.id || "", // Default to self
+  });
+
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!staff.length || !user) return;
+    setFormData((prev) => {
+      if (staff.some((s) => s.id === prev.treatingStaffId)) return prev;
+      const fallback = staff.some((s) => s.id === user.id) ? user.id : staff[0].id;
+      return { ...prev, treatingStaffId: fallback };
+    });
+  }, [staff, user]);
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    try {
+      // Find name for selected treating staff ID
+      const treatingStaff = staff.find(s => s.id === formData.treatingStaffId) || user;
+
+      await createVisit.mutateAsync({
+        patientId: formData.patientId,
+        sessionNumber: parseInt(formData.sessionNumber) || 1,
+        condition: formData.condition,
+        treatment: formData.treatment,
+        visitDate: formData.visitDate,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        branch: formData.branch,
+        visitType: formData.visitType,
+        status: formData.status,
+        paymentAmount: formData.paymentAmount || "0",
+        paymentStatus: formData.paymentStatus,
+        paymentMode: formData.paymentMode,
+        notes: formData.notes?.trim() || null,
+        improvements: formData.improvements?.trim() || null,
+        reportImageUri: imagePreview || null,
+        createdByStaffId: user.id,
+        createdByName: user.name,
+        treatingStaffId: formData.treatingStaffId,
+        treatingStaffName: treatingStaff.name,
+      });
+
+      toast({
+        title: "Visit Recorded",
+        description: "The patient visit has been successfully saved.",
+      });
+
+      setLocation(preselectedPatientId ? `/patients/${preselectedPatientId}` : "/patients");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to create visit",
+        variant: "destructive",
+      });
+    }
+  };
+
+  if (loadingPatients || loadingStaff) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (patientsError) {
+    return (
+      <div className="min-h-screen bg-background p-4">
+        <Alert variant="destructive">
+          <AlertDescription>
+            Failed to load patients: {patientsError instanceof Error ? patientsError.message : 'Unknown error'}
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background pb-28 md:pb-8">
+      <div className="max-w-[720px] mx-auto bg-background">
+        <div className="flex items-center gap-2 sticky top-0 bg-background/95 backdrop-blur z-20 py-3 px-4 border-b safe-top">
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()} className="-ml-2 h-10 w-10" data-testid="button-back-new-visit">
+            <ArrowLeft className="h-6 w-6" />
+          </Button>
+          <h1 className="text-xl font-bold text-foreground">New Visit Record</h1>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-8">
+          <div className="space-y-6">
+            <h3 className="text-lg font-semibold text-primary/80 border-b pb-2">Visit Details</h3>
+            
+            <div className="space-y-3">
+              <Label className="text-base font-semibold">Patient</Label>
+              <Select 
+                value={formData.patientId} 
+                onValueChange={(v) => {
+                  const selected = patients.find((p) => p.id === v);
+                  setFormData({
+                    ...formData,
+                    patientId: v,
+                    condition: selected?.condition && !(formData.condition || "").trim() ? selected.condition : formData.condition,
+                  });
+                }}
+                disabled={!!preselectedPatientId}
+              >
+                <SelectTrigger className="h-14 text-base bg-card border-input">
+                  <SelectValue placeholder="Select Patient" />
+                </SelectTrigger>
+                <SelectContent>
+                  {patients.map(p => (
+                    <SelectItem key={p.id} value={p.id} className="py-3 text-base">{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-base font-semibold">Treating Staff</Label>
+              <Select 
+                value={formData.treatingStaffId} 
+                onValueChange={(v) => setFormData({...formData, treatingStaffId: v})}
+              >
+                <SelectTrigger className="h-14 text-base bg-card border-input">
+                  <SelectValue placeholder="Select Staff" />
+                </SelectTrigger>
+                <SelectContent>
+                  {staff.map(s => (
+                    <SelectItem key={s.id} value={s.id} className="py-3 text-base">{s.name} ({s.role})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Session #</Label>
+                <Input 
+                  type="number" 
+                  className="h-14 text-base bg-card"
+                  value={formData.sessionNumber}
+                  onChange={(e) => setFormData({...formData, sessionNumber: e.target.value})}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Date</Label>
+                <Input 
+                  type="date" 
+                  className="h-14 text-base bg-card"
+                  value={formData.visitDate}
+                  onChange={(e) => setFormData({...formData, visitDate: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Start Time</Label>
+                <Input 
+                  type="time" 
+                  className="h-14 text-base bg-card"
+                  value={formData.startTime}
+                  onChange={(e) => setFormData({...formData, startTime: e.target.value})}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">End Time</Label>
+                <Input 
+                  type="time" 
+                  className="h-14 text-base bg-card"
+                  value={formData.endTime}
+                  onChange={(e) => setFormData({...formData, endTime: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-base font-semibold">Condition</Label>
+              <Input 
+                className="h-14 text-base bg-card"
+                placeholder="e.g. Lower Back Pain"
+                value={formData.condition}
+                onChange={(e) => setFormData({...formData, condition: e.target.value})}
+              />
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-base font-semibold">Treatment Provided</Label>
+              <Textarea 
+                placeholder="Details of therapy..."
+                value={formData.treatment}
+                onChange={(e) => setFormData({...formData, treatment: e.target.value})}
+                className="min-h-[120px] text-base bg-card p-4 leading-relaxed"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-base font-semibold">Improvements (if any)</Label>
+              <Textarea 
+                placeholder="e.g. pain reduced, mobility improved..."
+                value={formData.improvements}
+                onChange={(e) => setFormData({...formData, improvements: e.target.value})}
+                className="min-h-[80px] text-base bg-card p-4 leading-relaxed"
+              />
+            </div>
+
+             <div className="space-y-3">
+              <Label className="text-base font-semibold">Attach Report / Photo</Label>
+              <div className="flex items-center gap-4">
+                <Button type="button" variant="outline" className="w-full relative overflow-hidden h-14 border-dashed text-base text-muted-foreground hover:text-primary hover:border-primary/50 bg-card" onClick={() => document.getElementById('file-upload-new')?.click()}>
+                  <Camera className="mr-3 h-5 w-5" />
+                  {imagePreview ? 'Change Photo' : 'Take Photo'}
+                  <input 
+                    id="file-upload-new" 
+                    type="file" 
+                    accept="image/*" 
+                    className="absolute inset-0 opacity-0 cursor-pointer" 
+                    onChange={handleImageUpload}
+                  />
+                </Button>
+              </div>
+              {imagePreview && (
+                <div className="mt-4 relative rounded-xl overflow-hidden border aspect-video bg-muted shadow-sm">
+                  <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-6 pt-2">
+             <h3 className="text-lg font-semibold text-primary/80 border-b pb-2">Status & Payment</h3>
+             
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Status</Label>
+                <Select value={formData.status} onValueChange={(v) => setFormData({...formData, status: v})}>
+                  <SelectTrigger className="h-14 text-base bg-card">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Follow-up">Follow-up</SelectItem>
+                    <SelectItem value="Finished">Finished</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Visit Type</Label>
+                <Select value={formData.visitType} onValueChange={(v) => setFormData({...formData, visitType: v})}>
+                  <SelectTrigger className="h-14 text-base bg-card">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Clinic">Clinic</SelectItem>
+                    <SelectItem value="Home">Home</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Branch</Label>
+                <Select value={formData.branch} onValueChange={(v) => setFormData({...formData, branch: v as typeof formData.branch})}>
+                  <SelectTrigger className="h-14 text-base bg-card" data-testid="select-new-visit-branch">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Colombo">Colombo</SelectItem>
+                    <SelectItem value="Bandaragama">Bandaragama</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-3">
+                <Label className="text-base font-semibold">Amount (LKR)</Label>
+                <Input 
+                  type="number"
+                  className="h-14 text-base bg-card"
+                  value={formData.paymentAmount}
+                  onChange={(e) => setFormData({...formData, paymentAmount: e.target.value})}
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:contents">
+                <div className="space-y-3">
+                  <Label className="text-base font-semibold">Payment</Label>
+                  <Select value={formData.paymentStatus} onValueChange={(v) => setFormData({...formData, paymentStatus: v})}>
+                    <SelectTrigger className="h-14 text-base bg-card">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Paid">Paid</SelectItem>
+                      <SelectItem value="Unpaid">Unpaid</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-3">
+                  <Label className="text-base font-semibold">Mode</Label>
+                  <Select value={formData.paymentMode} onValueChange={(v) => setFormData({...formData, paymentMode: v})}>
+                    <SelectTrigger className="h-14 text-base bg-card">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Cash">Cash</SelectItem>
+                      <SelectItem value="Online">Online</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+
+        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200 bg-white safe-area-bottom shadow-[0_-2px_12px_rgba(0,0,0,0.06)] md:static md:z-auto md:border-0 md:bg-transparent md:shadow-none">
+           <div className="mx-auto flex max-w-[720px] p-4 md:px-6 md:pt-6 md:pb-0 md:justify-end">
+             <Button type="submit" className="h-12 w-full text-base font-semibold shadow-md md:h-10 md:w-auto md:min-w-[10rem] md:text-sm" onClick={handleSubmit} data-testid="button-save-visit">
+               Save Visit Record
+             </Button>
+           </div>
+        </div>
+      </div>
+    </div>
+  );
+}

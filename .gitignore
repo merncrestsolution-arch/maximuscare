@@ -1,0 +1,10 @@
+maximus-clinic-manager.zip
+*.tar.gz
+.env
+.env.local
+.env.production
+node_modules
+dist
+data/*.db
+.idea/
+*.iml

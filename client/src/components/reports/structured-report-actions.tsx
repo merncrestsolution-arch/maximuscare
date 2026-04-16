@@ -1,0 +1,249 @@
+import { useEffect, useState } from "react";
+import { FileSpreadsheet, FileText, Loader2 } from "lucide-react";
+import { jsPDF } from "jspdf";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+
+export type ReportColumn = {
+  key: string;
+  label: string;
+};
+
+type StructuredReportActionsProps = {
+  reportTitle: string;
+  fileBaseName: string;
+  columns: ReportColumn[];
+  rows: Record<string, unknown>[];
+  meta?: Array<{ label: string; value: string }>;
+  logoUri?: string;
+  themeColor?: string;
+};
+
+function sanitizeName(input: string) {
+  return input.toLowerCase().replace(/[^a-z0-9-_]+/g, "-").replace(/-+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function toDisplay(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+export function StructuredReportActions({
+  reportTitle,
+  fileBaseName,
+  columns,
+  rows,
+  meta = [],
+  logoUri,
+  themeColor = "#2D9D8B",
+}: StructuredReportActionsProps) {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [logoDataUrl, setLogoDataUrl] = useState<string>("");
+  const safeBase = sanitizeName(fileBaseName) || "report";
+
+  useEffect(() => {
+    let active = true;
+    async function loadLogo() {
+      if (!logoUri) {
+        setLogoDataUrl("");
+        return;
+      }
+      try {
+        const res = await fetch(logoUri);
+        const blob = await res.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (!active) return;
+          setLogoDataUrl(typeof reader.result === "string" ? reader.result : "");
+        };
+        reader.readAsDataURL(blob);
+      } catch {
+        if (active) setLogoDataUrl("");
+      }
+    }
+    void loadLogo();
+    return () => {
+      active = false;
+    };
+  }, [logoUri]);
+
+  const exportCsv = () => {
+    const header = columns.map((c) => `"${c.label.replaceAll('"', '""')}"`).join(",");
+    const lines = rows.map((row) =>
+      columns
+        .map((c) => `"${toDisplay(row[c.key]).replaceAll('"', '""')}"`)
+        .join(",")
+    );
+    const csv = [header, ...lines].join("\n");
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8;" }), `${safeBase}.csv`);
+  };
+
+  const exportPdf = () => {
+    const doc = new jsPDF("p", "mm", "a4");
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 12;
+    let y = margin;
+
+    doc.setFillColor(themeColor);
+    doc.rect(0, 0, pageWidth, 28, "F");
+
+    if (logoDataUrl) {
+      try {
+        doc.addImage(logoDataUrl, "PNG", margin, 6, 14, 14);
+      } catch {
+        // ignore bad logo format
+      }
+    }
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(15);
+    doc.text(reportTitle, margin + (logoDataUrl ? 18 : 0), 14);
+    doc.setFontSize(9);
+    doc.text("Maximus Care", margin + (logoDataUrl ? 18 : 0), 20);
+    doc.setTextColor(30, 30, 30);
+    y = 35;
+    doc.setFontSize(10);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
+    y += 6;
+    meta.forEach((m) => {
+      doc.text(`${m.label}: ${m.value}`, margin, y);
+      y += 5;
+    });
+    y += 2;
+
+    const colWidth = (pageWidth - margin * 2) / columns.length;
+    doc.setFont("helvetica", "bold");
+    doc.setFillColor(240, 248, 246);
+    doc.rect(margin - 1, y - 4, pageWidth - margin * 2 + 2, 6, "F");
+    columns.forEach((c, i) => {
+      doc.text(c.label, margin + i * colWidth, y);
+    });
+    doc.setFont("helvetica", "normal");
+    y += 5;
+
+    rows.forEach((row) => {
+      if (y > pageHeight - margin) {
+        doc.addPage();
+        y = margin;
+      }
+      columns.forEach((c, i) => {
+        const text = toDisplay(row[c.key]).slice(0, 28);
+        doc.text(text, margin + i * colWidth, y);
+      });
+      y += 5;
+    });
+
+    doc.save(`${safeBase}.pdf`);
+  };
+
+  const exportXlsx = async () => {
+    const exceljs = await import("exceljs");
+    const workbook = new exceljs.Workbook();
+    const sheet = workbook.addWorksheet("Report");
+
+    sheet.addRow([reportTitle]);
+    sheet.addRow([`Generated: ${new Date().toLocaleString()}`]);
+    meta.forEach((m) => sheet.addRow([`${m.label}: ${m.value}`]));
+    sheet.addRow([]);
+
+    sheet.columns = columns.map((c) => ({ header: c.label, key: c.key, width: 24 }));
+    rows.forEach((row) => {
+      const out: Record<string, string> = {};
+      columns.forEach((c) => {
+        out[c.key] = toDisplay(row[c.key]);
+      });
+      sheet.addRow(out);
+    });
+
+    const headRow = sheet.getRow(meta.length + 5);
+    headRow.font = { bold: true };
+    headRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE8F6F2" },
+    };
+
+    if (logoDataUrl) {
+      try {
+        const imageId = workbook.addImage({
+          base64: logoDataUrl,
+          extension: "png",
+        });
+        sheet.addImage(imageId, {
+          tl: { col: 7.2, row: 0.2 },
+          ext: { width: 64, height: 64 },
+        });
+      } catch {
+        // ignore bad logo format
+      }
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    downloadBlob(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `${safeBase}.xlsx`);
+  };
+
+  const runExport = async (type: "xlsx" | "csv" | "pdf") => {
+    setBusy(type);
+    try {
+      if (type === "xlsx") await exportXlsx();
+      if (type === "csv") exportCsv();
+      if (type === "pdf") exportPdf();
+      toast({ title: `${type.toUpperCase()} generated`, description: `Saved ${safeBase}.${type}` });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description: error instanceof Error ? error.message : "Could not generate report",
+        variant: "destructive",
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap gap-2 print:hidden">
+      <Button
+        size="sm"
+        className="bg-emerald-600 text-white hover:bg-emerald-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200"
+        disabled={busy !== null}
+        onClick={() => runExport("xlsx")}
+      >
+        {busy === "xlsx" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-1 h-4 w-4" />}
+        Excel
+      </Button>
+      <Button
+        size="sm"
+        className="bg-sky-600 text-white hover:bg-sky-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200"
+        disabled={busy !== null}
+        onClick={() => runExport("csv")}
+      >
+        {busy === "csv" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileText className="mr-1 h-4 w-4" />}
+        CSV
+      </Button>
+      <Button
+        size="sm"
+        className="bg-rose-600 text-white hover:bg-rose-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200"
+        disabled={busy !== null}
+        onClick={() => runExport("pdf")}
+      >
+        {busy === "pdf" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileText className="mr-1 h-4 w-4" />}
+        PDF
+      </Button>
+    </div>
+  );
+}
