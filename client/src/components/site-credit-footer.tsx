@@ -75,7 +75,7 @@ export function SiteCreditFooter() {
           <span className="text-muted-foreground/45" aria-hidden>
             ·
           </span>
-          <span className="text-secondary">2026/04/17</span>
+          <span className="text-secondary">2026/04/18</span>
         </span>
       </div>
       <p className="flex max-w-[min(100%,22rem)] flex-wrap items-center justify-center gap-1 text-center text-[9px] leading-snug tracking-tight text-muted-foreground/90">

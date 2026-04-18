@@ -1,19 +1,26 @@
-import { useRoute } from "wouter";
+import { useState } from "react";
+import { Link, useRoute } from "wouter";
+import { addDays, format, parseISO } from "date-fns";
 import { useAuth } from "@/context/auth-context";
-import { useVisits, useAttendance, useStaffMember, usePatients } from "@/hooks/useData";
+import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Edit2, CalendarCheck, Stethoscope, Pencil } from "lucide-react";
-import { Link } from "wouter";
-import { format } from "date-fns";
 import { calculateVisitStats } from "@/lib/stats";
 import { VisitStatsCards } from "@/components/dashboard/visit-stats-cards";
 import { isVisitForStaff } from "@/lib/visitAccess";
+import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
 
 export default function StaffProfilePage() {
   const [match, params] = useRoute("/staff/:id");
   const { user: currentUser } = useAuth();
   const staffId = params?.id || "";
+  const [ipSessionDate, setIpSessionDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const ipDayEnd = format(addDays(parseISO(ipSessionDate), 1), "yyyy-MM-dd");
+  const { data: ipSessions = [] } = useInPatientSessionsForStaffRange(
+    { startDate: ipSessionDate, endDate: ipDayEnd, staffId },
+    !!staffId
+  );
   const { data: profileUser, isLoading: staffLoading, error: staffError } = useStaffMember(staffId);
   const { data: allVisits = [] } = useVisits();
   const { data: patients = [] } = usePatients();
@@ -122,8 +129,12 @@ export default function StaffProfilePage() {
                     {visit.branch} · {visit.visitType}
                   </span>
                   <span
-                    className={`px-2 py-0.5 rounded-full font-medium ${visit.paymentStatus === "Paid" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${paymentStatusBadgeClass(visit.paymentStatus)}`}
                   >
+                    <span
+                      className={`h-2 w-2 shrink-0 rounded-full ${isPaidStatus(visit.paymentStatus) ? "bg-emerald-600" : "bg-red-600"}`}
+                      aria-hidden
+                    />
                     {visit.paymentStatus}
                   </span>
                 </div>
@@ -144,6 +155,61 @@ export default function StaffProfilePage() {
               ) : null}
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-white border border-border/60 shadow-sm">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Stethoscope className="h-4 w-4 text-primary" />
+            In-patient sessions
+          </CardTitle>
+          <input
+            type="date"
+            value={ipSessionDate}
+            onChange={(e) => setIpSessionDate(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            data-testid="input-staff-ip-date"
+          />
+        </CardHeader>
+        <CardContent>
+          {ipSessions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No in-patient sessions on this date.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border text-sm">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-muted/50 text-left text-xs font-semibold text-muted-foreground">
+                    <th className="p-2">Patient</th>
+                    <th className="p-2">Physio</th>
+                    <th className="p-2">Session</th>
+                    <th className="p-2 whitespace-nowrap">Date</th>
+                    <th className="p-2 w-20">Edit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ipSessions.map((s: any) => (
+                    <tr key={s.id} className="border-t">
+                      <td className="p-2">{s.patientName}</td>
+                      <td className="p-2">{s.treatingStaffName}</td>
+                      <td className="p-2 max-w-[200px]">
+                        <span className="text-xs text-muted-foreground">#{s.sessionNumber}</span>{" "}
+                        <span className="line-clamp-2">{s.treatmentProvided}</span>
+                      </td>
+                      <td className="p-2 whitespace-nowrap text-muted-foreground text-xs">
+                        {s.sessionDate ? format(parseISO(s.sessionDate), "dd MMM yyyy") : "—"}
+                      </td>
+                      <td className="p-2">
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`/inpatients/${s.admissionId}`}>Edit</Link>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
 

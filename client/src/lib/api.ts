@@ -242,6 +242,19 @@ export const inPatientApi = {
       method: 'DELETE',
     }),
 
+  /** Staff-scoped sessions (optional staffId for Admin/MD) */
+  getSessionsByDateRange: (params: { startDate: string; endDate: string; staffId?: string }) => {
+    const q = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate });
+    if (params.staffId) q.append('staffId', params.staffId);
+    return apiRequest<any[]>(`/inpatients/sessions?${q.toString()}`);
+  },
+
+  /** Admin/MD — all IP sessions in range (incentive reports) */
+  getAllSessionsInDateRange: (params: { startDate: string; endDate: string }) => {
+    const q = new URLSearchParams(params);
+    return apiRequest<any[]>(`/inpatients/sessions/all?${q.toString()}`);
+  },
+
   // Discharge
   getDischarge: (admissionId: string) =>
     apiRequest<any>(`/inpatients/${admissionId}/discharge`),
@@ -321,6 +334,29 @@ export const revenueApi = {
     const queryString = query.toString() ? `?${query.toString()}` : '';
     return apiRequest<{ totalIncome: number; totalExpenses: number; netRevenue: number }>(`/revenue-summary${queryString}`);
   },
+};
+
+// Staff fines (Admin/MD manage; staff see own via GET without staffId)
+export const staffFinesApi = {
+  getAll: (params: { startDate: string; endDate: string; staffId?: string }) => {
+    const q = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate });
+    if (params.staffId) q.append('staffId', params.staffId);
+    return apiRequest<any[]>(`/staff-fines?${q.toString()}`);
+  },
+  create: (data: any) =>
+    apiRequest<any>('/staff-fines', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: any) =>
+    apiRequest<any>(`/staff-fines/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    apiRequest<{ message: string }>(`/staff-fines/${id}`, {
+      method: 'DELETE',
+    }),
 };
 
 // Appointment API

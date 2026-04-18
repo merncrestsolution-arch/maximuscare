@@ -1,20 +1,34 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
-import { useStaff } from "@/hooks/useData";
+import { useStaff, useDeleteStaff } from "@/hooks/useData";
 import { useLocation } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, UserPlus, Phone, MapPin, MoreVertical, Loader2 } from "lucide-react";
+import { Search, UserPlus, MapPin, MoreVertical, Loader2, Trash2 } from "lucide-react";
 import { Link } from "wouter";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function StaffListPage() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const { data: staff = [], isLoading, error } = useStaff();
+  const deleteStaff = useDeleteStaff();
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   if (!user || !['Admin', 'MD'].includes(user.role)) return <div className="p-4">Unauthorized</div>;
 
@@ -40,6 +54,21 @@ export default function StaffListPage() {
     s.name.toLowerCase().includes(search.toLowerCase()) || 
     s.role.toLowerCase().includes(search.toLowerCase())
   );
+
+  const handleDeleteStaff = async () => {
+    if (!deleteId) return;
+    try {
+      await deleteStaff.mutateAsync(deleteId);
+      toast({ title: "Staff removed", description: "The staff account was deleted." });
+    } catch (e) {
+      toast({
+        title: "Could not delete staff",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+    setDeleteId(null);
+  };
 
   return (
     <div className="space-y-4">
@@ -91,6 +120,15 @@ export default function StaffListPage() {
                   <DropdownMenuItem onClick={() => setLocation(`/staff/${member.id}/edit`)}>
                     Edit Details
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    disabled={member.id === user?.id}
+                    onClick={() => setDeleteId(member.id)}
+                    data-testid={`menu-delete-staff-${member.id}`}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </CardContent>
@@ -98,7 +136,26 @@ export default function StaffListPage() {
         ))}
       </div>
 
-      {/* Edit now uses dedicated page route */}
+      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this staff member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes their login and profile. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteStaff}
+              disabled={deleteStaff.isPending}
+            >
+              {deleteStaff.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

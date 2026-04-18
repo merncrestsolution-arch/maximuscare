@@ -64,6 +64,8 @@ export interface Visit {
   createdByName: string;
   treatingStaffId: string;
   treatingStaffName: string;
+  lastUpdatedByStaffId?: string | null;
+  lastUpdatedByName?: string | null;
   createdAt: string;
   updatedAt: string;
 }

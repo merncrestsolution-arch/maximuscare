@@ -94,58 +94,117 @@ export function StructuredReportActions({
 
   const exportPdf = () => {
     const doc = new jsPDF("p", "mm", "a4");
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 12;
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 16;
+    const innerW = pageW - margin * 2;
     let y = margin;
 
-    doc.setFillColor(themeColor);
-    doc.rect(0, 0, pageWidth, 28, "F");
+    let r = 45,
+      g = 157,
+      b = 139;
+    if (/^#[0-9A-Fa-f]{6}$/.test(themeColor)) {
+      const hex = themeColor.slice(1);
+      r = parseInt(hex.slice(0, 2), 16);
+      g = parseInt(hex.slice(2, 4), 16);
+      b = parseInt(hex.slice(4, 6), 16);
+    }
+    doc.setFillColor(r, g, b);
+    doc.rect(0, 0, pageW, 24, "F");
 
     if (logoDataUrl) {
       try {
-        doc.addImage(logoDataUrl, "PNG", margin, 6, 14, 14);
+        doc.addImage(logoDataUrl, "PNG", margin, 5, 11, 11);
       } catch {
-        // ignore bad logo format
+        /* ignore */
       }
     }
 
+    const titleX = margin + (logoDataUrl ? 14 : 0);
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(15);
-    doc.text(reportTitle, margin + (logoDataUrl ? 18 : 0), 14);
-    doc.setFontSize(9);
-    doc.text("Maximus Care", margin + (logoDataUrl ? 18 : 0), 20);
-    doc.setTextColor(30, 30, 30);
-    y = 35;
-    doc.setFontSize(10);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
-    y += 6;
-    meta.forEach((m) => {
-      doc.text(`${m.label}: ${m.value}`, margin, y);
-      y += 5;
-    });
-    y += 2;
-
-    const colWidth = (pageWidth - margin * 2) / columns.length;
     doc.setFont("helvetica", "bold");
-    doc.setFillColor(240, 248, 246);
-    doc.rect(margin - 1, y - 4, pageWidth - margin * 2 + 2, 6, "F");
-    columns.forEach((c, i) => {
-      doc.text(c.label, margin + i * colWidth, y);
-    });
+    doc.setFontSize(12);
+    doc.text(doc.splitTextToSize(reportTitle, innerW - 18), titleX, 11);
     doc.setFont("helvetica", "normal");
-    y += 5;
+    doc.setFontSize(8);
+    doc.text("Maximus Care", titleX, 18);
+    doc.setTextColor(33, 37, 41);
 
-    rows.forEach((row) => {
-      if (y > pageHeight - margin) {
+    y = 30;
+    doc.setFontSize(8.5);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, margin, y);
+    y += 4;
+    meta.forEach((m) => {
+      const block = doc.splitTextToSize(`${m.label}: ${m.value}`, innerW);
+      doc.text(block, margin, y);
+      y += block.length * 3.8 + 0.5;
+    });
+    y += 4;
+
+    const labelLens = columns.map((c) => c.label.length);
+    const contentLens = rows.map((row) => columns.map((c) => toDisplay(row[c.key]).length));
+    const maxPerCol = columns.map((_, i) =>
+      Math.max(labelLens[i] ?? 8, ...contentLens.map((r) => Math.min(90, r[i] ?? 0)), 10)
+    );
+    const weightSum = maxPerCol.reduce((a, x) => a + x, 0);
+    const colW = maxPerCol.map((w) => (w / weightSum) * innerW);
+
+    const lineH = 3.6;
+    const cellPad = 1.8;
+
+    const drawHeaderRow = () => {
+      const headerLines = columns.map((c, i) => doc.splitTextToSize(c.label, colW[i] - cellPad * 2));
+      const headerH = Math.max(8, ...headerLines.map((l) => l.length * lineH)) + 2;
+      if (y + headerH > pageH - margin) {
         doc.addPage();
         y = margin;
       }
-      columns.forEach((c, i) => {
-        const text = toDisplay(row[c.key]).slice(0, 28);
-        doc.text(text, margin + i * colWidth, y);
-      });
-      y += 5;
+      doc.setFillColor(241, 245, 249);
+      doc.rect(margin, y, innerW, headerH, "F");
+      doc.setDrawColor(200, 210, 220);
+      doc.rect(margin, y, innerW, headerH, "S");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      let cx = margin + cellPad;
+      for (let i = 0; i < columns.length; i++) {
+        doc.text(headerLines[i], cx, y + 5);
+        if (i < columns.length - 1) {
+          const lineX = cx + colW[i] - cellPad;
+          doc.line(lineX, y, lineX, y + headerH);
+        }
+        cx += colW[i];
+      }
+      y += headerH;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+    };
+
+    drawHeaderRow();
+
+    rows.forEach((row) => {
+      const cellLines = columns.map((c, i) =>
+        doc.splitTextToSize(toDisplay(row[c.key]), colW[i] - cellPad * 2)
+      );
+      const rowH = Math.max(6, ...cellLines.map((l) => l.length * lineH)) + 2;
+
+      if (y + rowH > pageH - margin) {
+        doc.addPage();
+        y = margin;
+        drawHeaderRow();
+      }
+
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(margin, y, innerW, rowH, "S");
+      let cx = margin + cellPad;
+      for (let i = 0; i < columns.length; i++) {
+        doc.text(cellLines[i], cx, y + 4.5);
+        if (i < columns.length - 1) {
+          const lineX = cx + colW[i] - cellPad;
+          doc.line(lineX, y, lineX, y + rowH);
+        }
+        cx += colW[i];
+      }
+      y += rowH;
     });
 
     doc.save(`${safeBase}.pdf`);

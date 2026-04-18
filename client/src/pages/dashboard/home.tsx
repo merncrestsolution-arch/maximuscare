@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useAuth } from "@/context/auth-context";
-import { usePatients, useVisits, useAttendance, useRevenueSummary, useExpenses, useMyExpenses, useDeleteExpense } from "@/hooks/useData";
+import { usePatients, useVisits, useAttendance, useRevenueSummary, useExpenses, useMyExpenses, useDeleteExpense, useDeleteVisit } from "@/hooks/useData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Users, Calendar, DollarSign, Activity, TrendingUp, Loader2, Plus, Pencil, Trash2, Wallet, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, subDays, startOfMonth, addMonths, subMonths, getDaysInMonth } from "date-fns";
+import { addDays, format, parseISO, subDays, startOfMonth, addMonths, subMonths, getDaysInMonth } from "date-fns";
+import { useInPatientSessionsForStaffRange, useAllInPatientSessionsInRange } from "@/hooks/useData";
 
 import { calculateVisitStats } from "@/lib/stats";
 import { isVisitForStaff } from "@/lib/visitAccess";
@@ -35,7 +36,9 @@ export default function Dashboard() {
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
+  const [visitDeleteId, setVisitDeleteId] = useState<string | null>(null);
   const [selectedVisitDate, setSelectedVisitDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [ipSessionDate, setIpSessionDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
   const role = (user?.role || "").toLowerCase();
   const isManagement = role === "admin" || role === "md";
@@ -61,6 +64,19 @@ export default function Dashboard() {
   const { data: myExpenses = [], isLoading: loadingMyExpenses } = useMyExpenses(isStaff);
   
   const deleteExpense = useDeleteExpense();
+  const deleteVisit = useDeleteVisit();
+
+  const ipDayEnd = useMemo(() => format(addDays(parseISO(ipSessionDate), 1), "yyyy-MM-dd"), [ipSessionDate]);
+  const { data: ipSessionsAll = [] } = useAllInPatientSessionsInRange(
+    { startDate: ipSessionDate, endDate: ipDayEnd },
+    isManagement
+  );
+  const { data: ipSessionsMine = [] } = useInPatientSessionsForStaffRange(
+    { startDate: ipSessionDate, endDate: ipDayEnd, staffId: user?.id || "" },
+    !isManagement && !!user?.id
+  );
+  const ipSessionsForDash = isManagement ? ipSessionsAll : ipSessionsMine;
+
   const patientNameById = useMemo(
     () => new Map(patients.map((p) => [p.id, p.name])),
     [patients]
@@ -75,6 +91,17 @@ export default function Dashboard() {
       setDeletingExpenseId(null);
     } catch (error: any) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const handleDeleteVisit = async () => {
+    if (!visitDeleteId) return;
+    try {
+      await deleteVisit.mutateAsync(visitDeleteId);
+      toast({ title: "Visit deleted", description: "The visit record was removed." });
+      setVisitDeleteId(null);
+    } catch (error: any) {
+      toast({ title: "Error", description: error?.message || "Failed to delete visit", variant: "destructive" });
     }
   };
 
@@ -302,9 +329,23 @@ export default function Dashboard() {
                     <div className="text-sm font-semibold truncate">{patientNameById.get(visit.patientId) || "Unknown patient"}</div>
                     <div className="text-xs text-muted-foreground truncate">{visit.condition}</div>
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => navigate(`/visits/edit/${visit.id}`)} data-testid={`button-edit-unpaid-${visit.id}`}>
-                    Edit
-                  </Button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button variant="outline" size="sm" onClick={() => navigate(`/visits/edit/${visit.id}`)} data-testid={`button-edit-unpaid-${visit.id}`}>
+                      Edit
+                    </Button>
+                    {isManagement && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setVisitDeleteId(visit.id)}
+                        data-testid={`button-delete-unpaid-${visit.id}`}
+                        aria-label="Delete visit"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -333,13 +374,79 @@ export default function Dashboard() {
                   <div className="text-sm"><span className="font-medium">Pt:</span> {patientNameById.get(visit.patientId) || "Unknown"}</div>
                   <div className="text-sm"><span className="font-medium">Condition:</span> {visit.condition}</div>
                   <div className="text-sm"><span className="font-medium">Physio:</span> {visit.treatingStaffName || "-"}</div>
-                  <div className="flex justify-start md:justify-end">
+                  <div className="flex justify-start md:justify-end gap-1">
                     <Button variant="outline" size="sm" onClick={() => navigate(`/visits/edit/${visit.id}`)} data-testid={`button-edit-date-visit-${visit.id}`}>
                       Edit
                     </Button>
+                    {isManagement && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => setVisitDeleteId(visit.id)}
+                        data-testid={`button-delete-date-visit-${visit.id}`}
+                        aria-label="Delete visit"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+          <CardTitle>In-patient sessions</CardTitle>
+          <input
+            type="date"
+            value={ipSessionDate}
+            onChange={(e) => setIpSessionDate(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+            data-testid="input-ip-session-date"
+          />
+        </CardHeader>
+        <CardContent>
+          {ipSessionsForDash.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No in-patient sessions on this date.</div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/50 text-left text-xs font-semibold text-muted-foreground">
+                    <th className="p-2">Patient</th>
+                    <th className="p-2">Physio</th>
+                    <th className="p-2">Session</th>
+                    <th className="p-2 whitespace-nowrap">Date</th>
+                    <th className="p-2 w-24">Edit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ipSessionsForDash.map((s: any) => (
+                    <tr key={s.id} className="border-t border-border/60">
+                      <td className="p-2 align-top">{s.patientName}</td>
+                      <td className="p-2 align-top">{s.treatingStaffName}</td>
+                      <td className="p-2 align-top max-w-[220px]">
+                        <span className="text-xs text-muted-foreground">#{s.sessionNumber}</span>{" "}
+                        <span className="line-clamp-2">{s.treatmentProvided}</span>
+                      </td>
+                      <td className="p-2 align-top whitespace-nowrap text-muted-foreground">
+                        {s.sessionDate ? format(parseISO(s.sessionDate), "dd MMM yyyy") : "—"}
+                      </td>
+                      <td className="p-2 align-top">
+                        <Button variant="outline" size="sm" asChild>
+                          <Link href={`/inpatients/${s.admissionId}`} data-testid={`link-ip-session-${s.id}`}>
+                            Edit
+                          </Link>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </CardContent>
@@ -502,6 +609,22 @@ export default function Dashboard() {
             <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
             <Button variant="destructive" onClick={handleDeleteExpense} disabled={deleteExpense.isPending} data-testid="button-confirm-delete-expense">
               {deleteExpense.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!visitDeleteId} onOpenChange={(open) => !open && setVisitDeleteId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete visit</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-foreground">This permanently removes the visit record. Continue?</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVisitDeleteId(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteVisit} disabled={deleteVisit.isPending} data-testid="button-confirm-delete-visit">
+              {deleteVisit.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Delete
             </Button>
           </DialogFooter>

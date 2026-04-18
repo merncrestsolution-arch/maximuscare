@@ -17,6 +17,7 @@ function parseJsonArrays<T extends Record<string, unknown>>(row: T, keys: (keyof
   return out;
 }
 import { db, schema } from "./db";
+import { isStrictlyBeforeNoon } from "./clinicTime";
 
 /** Same check as server/db.ts — raw SQL below must run on the active driver. */
 const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
@@ -39,6 +40,7 @@ const {
   expenses,
   incentiveSettings,
   appointments,
+  staffFines,
 } = schema;
 
 import type {
@@ -76,6 +78,9 @@ import type {
   Appointment,
   InsertAppointment,
   UpdateAppointment,
+  StaffFine,
+  InsertStaffFine,
+  UpdateStaffFine,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -176,6 +181,19 @@ export interface IStorage {
   createAppointment(data: InsertAppointment): Promise<Appointment>;
   updateAppointment(id: string, data: UpdateAppointment): Promise<Appointment | undefined>;
   deleteAppointment(id: string): Promise<boolean>;
+
+  // Staff fines
+  getStaffFinesByDateRange(startDate: string, endDate: string): Promise<StaffFine[]>;
+  getStaffFinesByStaffAndDateRange(staffId: string, startDate: string, endDate: string): Promise<StaffFine[]>;
+  getStaffFine(id: string): Promise<StaffFine | undefined>;
+  createStaffFine(data: InsertStaffFine): Promise<StaffFine>;
+  updateStaffFine(id: string, data: UpdateStaffFine): Promise<StaffFine | undefined>;
+  deleteStaffFine(id: string): Promise<boolean>;
+  staffHasVisitOrIpSessionBeforeNoon(staffId: string, day: string): Promise<boolean>;
+  deleteAutoFineForStaffDate(staffId: string, fineDate: string): Promise<void>;
+  ensureAutoFineForStaffDate(staffId: string, staffName: string, fineDate: string): Promise<void>;
+  getInPatientSessionsByStaffAndDateRange(staffId: string, startDate: string, endDate: string): Promise<InPatientSession[]>;
+  getAllInPatientSessionsInDateRange(startDate: string, endDate: string): Promise<InPatientSession[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -739,6 +757,127 @@ export class DatabaseStorage implements IStorage {
   async deleteAppointment(id: string): Promise<boolean> {
     const result = await db.delete(appointments).where(eq(appointments.id, id)).returning();
     return result.length > 0;
+  }
+
+  // --- Staff fines (manual + automatic) ---
+
+  async getStaffFinesByDateRange(startDate: string, endDate: string): Promise<StaffFine[]> {
+    return await db
+      .select()
+      .from(staffFines)
+      .where(and(gte(staffFines.fineDate, startDate), sql`${staffFines.fineDate} < ${endDate}`))
+      .orderBy(desc(staffFines.fineDate));
+  }
+
+  async getStaffFinesByStaffAndDateRange(staffId: string, startDate: string, endDate: string): Promise<StaffFine[]> {
+    return await db
+      .select()
+      .from(staffFines)
+      .where(
+        and(
+          eq(staffFines.staffId, staffId),
+          gte(staffFines.fineDate, startDate),
+          sql`${staffFines.fineDate} < ${endDate}`
+        )
+      )
+      .orderBy(desc(staffFines.fineDate));
+  }
+
+  async getStaffFine(id: string): Promise<StaffFine | undefined> {
+    const result = await db.select().from(staffFines).where(eq(staffFines.id, id)).limit(1);
+    return result[0];
+  }
+
+  async createStaffFine(data: InsertStaffFine): Promise<StaffFine> {
+    const result = await db.insert(staffFines).values(data as any).returning();
+    return result[0];
+  }
+
+  async updateStaffFine(id: string, data: UpdateStaffFine): Promise<StaffFine | undefined> {
+    const result = await db
+      .update(staffFines)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(staffFines.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteStaffFine(id: string): Promise<boolean> {
+    const result = await db.delete(staffFines).where(eq(staffFines.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async staffHasVisitOrIpSessionBeforeNoon(staffId: string, day: string): Promise<boolean> {
+    const dayVisits = await db
+      .select()
+      .from(visits)
+      .where(and(eq(visits.treatingStaffId, staffId), eq(visits.visitDate, day)));
+    for (const v of dayVisits) {
+      if (isStrictlyBeforeNoon(String(v.startTime))) return true;
+    }
+    const dayIp = await db
+      .select()
+      .from(inPatientSessions)
+      .where(and(eq(inPatientSessions.treatingStaffId, staffId), eq(inPatientSessions.sessionDate, day)));
+    for (const s of dayIp) {
+      if (isStrictlyBeforeNoon(String(s.startTime))) return true;
+    }
+    return false;
+  }
+
+  async deleteAutoFineForStaffDate(staffId: string, fineDate: string): Promise<void> {
+    await db
+      .delete(staffFines)
+      .where(and(eq(staffFines.staffId, staffId), eq(staffFines.fineDate, fineDate), eq(staffFines.source, "auto_no_session")));
+  }
+
+  async ensureAutoFineForStaffDate(staffId: string, staffName: string, fineDate: string): Promise<void> {
+    const existing = await db
+      .select()
+      .from(staffFines)
+      .where(
+        and(eq(staffFines.staffId, staffId), eq(staffFines.fineDate, fineDate), eq(staffFines.source, "auto_no_session"))
+      )
+      .limit(1);
+    if (existing.length > 0) return;
+    await this.createStaffFine({
+      staffId,
+      staffName,
+      fineDate,
+      amount: "500",
+      reason: "No session recorded before 12 PM",
+      source: "auto_no_session",
+    } as InsertStaffFine);
+  }
+
+  async getInPatientSessionsByStaffAndDateRange(
+    staffId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<InPatientSession[]> {
+    const rows = await db
+      .select()
+      .from(inPatientSessions)
+      .where(
+        and(
+          eq(inPatientSessions.treatingStaffId, staffId),
+          gte(inPatientSessions.sessionDate, startDate),
+          sql`${inPatientSessions.sessionDate} < ${endDate}`
+        )
+      )
+      .orderBy(desc(inPatientSessions.sessionDate), asc(inPatientSessions.sessionNumber));
+    return rows.map((r: any) => parseJsonArrays(r as any, ["attachments"]) as InPatientSession);
+  }
+
+  async getAllInPatientSessionsInDateRange(startDate: string, endDate: string): Promise<InPatientSession[]> {
+    const rows = await db
+      .select()
+      .from(inPatientSessions)
+      .where(
+        and(gte(inPatientSessions.sessionDate, startDate), sql`${inPatientSessions.sessionDate} < ${endDate}`)
+      )
+      .orderBy(desc(inPatientSessions.sessionDate));
+    return rows.map((r: any) => parseJsonArrays(r as any, ["attachments"]) as InPatientSession);
   }
 }
 

@@ -149,4 +149,23 @@
   .focus-ring {
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
   }
+
+  .animate-ecg-line {
+    stroke-dasharray: 420;
+    stroke-dashoffset: 420;
+    animation: ecg-line 1.25s ease-in-out infinite;
+  }
 }
+
+@keyframes ecg-line {
+  0% {
+    stroke-dashoffset: 420;
+  }
+  50% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -420;
+  }
+}
+

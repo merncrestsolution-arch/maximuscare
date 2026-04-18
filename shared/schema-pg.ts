@@ -71,11 +71,19 @@ export const visits = pgTable("visits", {
   createdByName: text("created_by_name").notNull(),
   treatingStaffId: varchar("treating_staff_id").notNull().references(() => staff.id),
   treatingStaffName: text("treating_staff_name").notNull(),
+  lastUpdatedByStaffId: varchar("last_updated_by_staff_id"),
+  lastUpdatedByName: text("last_updated_by_name"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const insertVisitSchema = createInsertSchema(visits).omit({ id: true, createdAt: true, updatedAt: true }).extend({
+export const insertVisitSchema = createInsertSchema(visits).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastUpdatedByStaffId: true,
+  lastUpdatedByName: true,
+}).extend({
   paymentAmount: z.union([z.string(), z.number()]).transform((v) => String(v)),
   notes: z.string().nullable().optional(),
   improvements: z.string().nullable().optional(),
@@ -320,3 +328,31 @@ export const updateAppointmentSchema = insertAppointmentSchema.partial();
 export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;
 export type UpdateAppointment = z.infer<typeof updateAppointmentSchema>;
 export type Appointment = typeof appointments.$inferSelect;
+
+export const staffFines = pgTable("staff_fines", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  staffName: text("staff_name").notNull(),
+  fineDate: date("fine_date").notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull().default("500"),
+  reason: text("reason").notNull(),
+  source: text("source").notNull().default("manual"),
+  createdByStaffId: varchar("created_by_staff_id"),
+  createdByName: text("created_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertStaffFineSchema = createInsertSchema(staffFines).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  createdByStaffId: true,
+  createdByName: true,
+}).extend({
+  amount: z.union([z.string(), z.number()]).transform((v) => String(v)),
+});
+export const updateStaffFineSchema = insertStaffFineSchema.partial();
+export type InsertStaffFine = z.infer<typeof insertStaffFineSchema>;
+export type UpdateStaffFine = z.infer<typeof updateStaffFineSchema>;
+export type StaffFine = typeof staffFines.$inferSelect;

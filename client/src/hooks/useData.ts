@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { patientApi, visitApi, attendanceApi, staffApi, reportsApi, inPatientApi, expenseApi, revenueApi, incentiveSettingsApi, appointmentApi } from '@/lib/api';
+import { patientApi, visitApi, attendanceApi, staffApi, reportsApi, inPatientApi, expenseApi, revenueApi, incentiveSettingsApi, appointmentApi, staffFinesApi } from '@/lib/api';
 import { useAuth } from '@/context/auth-context';
 
 // Patient hooks
@@ -73,6 +73,7 @@ export function useCreateVisit() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['visits'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
   });
 }
@@ -84,6 +85,7 @@ export function useUpdateVisit() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['visits'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
   });
 }
@@ -95,6 +97,7 @@ export function useDeleteVisit() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['visits'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
   });
 }
@@ -199,6 +202,65 @@ export function useVisitStats(params: { startDate: string; endDate: string; staf
   });
 }
 
+// Staff fines
+export function useStaffFines(params: { startDate: string; endDate: string; staffId?: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['staff-fines', params],
+    queryFn: () => staffFinesApi.getAll(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useCreateStaffFine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: staffFinesApi.create,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
+    },
+  });
+}
+
+export function useUpdateStaffFine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => staffFinesApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
+    },
+  });
+}
+
+export function useDeleteStaffFine() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: staffFinesApi.delete,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
+    },
+  });
+}
+
+/** IP sessions in range; pass staffId (required for non-admin routes). */
+export function useInPatientSessionsForStaffRange(
+  params: { startDate: string; endDate: string; staffId?: string },
+  enabled = true
+) {
+  return useQuery({
+    queryKey: ['inpatients', 'sessions-range', params],
+    queryFn: () => inPatientApi.getSessionsByDateRange(params),
+    enabled: enabled && !!params.startDate && !!params.endDate && !!params.staffId,
+  });
+}
+
+export function useAllInPatientSessionsInRange(params: { startDate: string; endDate: string }, enabled: boolean) {
+  return useQuery({
+    queryKey: ['inpatients', 'sessions-all', params],
+    queryFn: () => inPatientApi.getAllSessionsInDateRange(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
 // Incentive Settings hooks
 export function useIncentiveSettings() {
   return useQuery({
@@ -288,6 +350,8 @@ export function useCreateInPatientSession() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['inpatients'] });
       queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-range'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-all'] });
     },
   });
 }
@@ -300,6 +364,9 @@ export function useUpdateInPatientSession() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['inpatients'] });
       queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-range'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-all'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
   });
 }
@@ -312,6 +379,9 @@ export function useDeleteInPatientSession() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['inpatients'] });
       queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-range'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-all'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
   });
 }

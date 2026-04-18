@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { db, schema } from "./db";
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
+import { syncAutoFineForStaffDate } from "./autoFineSync";
 
 const {
   staff: staffTable,
@@ -28,6 +29,8 @@ const {
   updateInPatientExtraExpenseSchema,
   insertAppointmentSchema,
   updateAppointmentSchema,
+  insertStaffFineSchema,
+  updateStaffFineSchema,
 } = schema;
 import { z } from "zod";
 
@@ -119,6 +122,23 @@ async function autoMarkMissingAttendanceForPreviousDay() {
       date,
       status: "Absent",
     } as any);
+  }
+}
+
+/** Reconcile auto fines for recent days (present + no session before noon). Runs on boot and daily. */
+async function runAutoFineSweepForRecentDays() {
+  const allStaff = await storage.getAllStaff();
+  const physios = allStaff.filter((s) => !["Admin", "MD"].includes(s.role));
+  const dates: string[] = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().split("T")[0]);
+  }
+  for (const s of physios) {
+    for (const fineDate of dates) {
+      await syncAutoFineForStaffDate(storage, s.id, fineDate);
+    }
   }
 }
 
@@ -352,7 +372,7 @@ export async function registerRoutes(
   });
 
   // Delete staff (Admin only)
-  app.delete("/api/staff/:id", requireAuth, requireRole("Admin"), async (req: Request, res: Response) => {
+  app.delete("/api/staff/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
       const deleted = await storage.deleteStaff(id);
@@ -487,6 +507,7 @@ export async function registerRoutes(
     try {
       const validatedData = insertVisitSchema.parse(req.body);
       const visit = await storage.createVisit(validatedData);
+      await syncAutoFineForStaffDate(storage, visit.treatingStaffId, visit.visitDate);
       return res.status(201).json(visit);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -500,12 +521,37 @@ export async function registerRoutes(
   app.patch("/api/visits/:id", requireAuth, requireRole("Physiotherapist", "Admin", "MD", "Receptionist", "Staff"), async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
+      const user = (req as any).user;
+      const before = await storage.getVisit(id);
+      if (!before) {
+        return res.status(404).json({ message: "Visit not found" });
+      }
+      const canEdit =
+        ["Admin", "MD", "Receptionist"].includes(user.role) ||
+        ["Physiotherapist", "Staff"].includes(user.role) ||
+        before.treatingStaffId === user.staffId ||
+        before.createdByStaffId === user.staffId;
+      if (!canEdit) {
+        return res.status(403).json({ message: "Forbidden: insufficient permissions" });
+      }
       const validatedData = updateVisitSchema.parse(req.body);
-      const visit = await storage.updateVisit(id, validatedData);
-      
+      const {
+        lastUpdatedByStaffId: _luSid,
+        lastUpdatedByName: _luNm,
+        ...restPatch
+      } = validatedData as Record<string, unknown>;
+      const editor = await storage.getStaff(user.staffId);
+      const visit = await storage.updateVisit(id, {
+        ...restPatch,
+        lastUpdatedByStaffId: user.staffId,
+        lastUpdatedByName: editor?.name ?? "",
+      } as any);
+
       if (!visit) {
         return res.status(404).json({ message: "Visit not found" });
       }
+      await syncAutoFineForStaffDate(storage, before.treatingStaffId, before.visitDate);
+      await syncAutoFineForStaffDate(storage, visit.treatingStaffId, visit.visitDate);
       return res.json(visit);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -515,13 +561,17 @@ export async function registerRoutes(
     }
   });
 
-  // Delete visit
-  app.delete("/api/visits/:id", requireAuth, requireRole("Physiotherapist", "Admin", "MD"), async (req: Request, res: Response) => {
+  // Delete visit (Admin / MD only)
+  app.delete("/api/visits/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
+      const before = await storage.getVisit(id);
       const deleted = await storage.deleteVisit(id);
       if (!deleted) {
         return res.status(404).json({ message: "Visit not found" });
+      }
+      if (before) {
+        await syncAutoFineForStaffDate(storage, before.treatingStaffId, before.visitDate);
       }
       return res.json({ message: "Visit deleted successfully" });
     } catch (error: any) {
@@ -639,6 +689,7 @@ export async function registerRoutes(
         const updateData: Record<string, any> = { status, updatedAt: new Date() };
         if (checkInTime) updateData.checkInTime = checkInTime;
         const updated = await storage.updateAttendance(existing.id, updateData);
+        await syncAutoFineForStaffDate(storage, targetStaffId, attendanceDate);
         return res.json(updated);
       }
 
@@ -652,6 +703,7 @@ export async function registerRoutes(
       };
 
       const result = await storage.createAttendance(attendanceData);
+      await syncAutoFineForStaffDate(storage, targetStaffId, attendanceDate);
       return res.status(201).json(result);
     } catch (error: any) {
       console.error(`[ATTENDANCE ERROR]`, error.message || error);
@@ -720,6 +772,9 @@ export async function registerRoutes(
       }
       
       const attendance = await storage.updateAttendance(id, patch as any);
+      if (attendance) {
+        await syncAutoFineForStaffDate(storage, attendance.staffId, attendance.date as string);
+      }
       return res.json(attendance);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -738,6 +793,7 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Attendance record not found" });
       }
       await storage.deleteAttendance(id);
+      await syncAutoFineForStaffDate(storage, existing.staffId, existing.date as string);
       return res.json({ message: "Attendance record deleted" });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -880,6 +936,49 @@ export async function registerRoutes(
     }
   });
 
+  // All in-patient sessions in range (reports / incentives — Admin & MD)
+  app.get("/api/inpatients/sessions/all", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+    try {
+      const startDate = req.query.startDate as string | undefined;
+      const endDate = req.query.endDate as string | undefined;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
+      }
+      const sessions = await storage.getAllInPatientSessionsInDateRange(startDate, endDate);
+      return res.json(sessions);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // In-patient sessions for a staff member in a date range (dashboard / staff profile). Admin/MD may pass staffId.
+  app.get("/api/inpatients/sessions", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const startDate = req.query.startDate as string | undefined;
+      const endDate = req.query.endDate as string | undefined;
+      const queryStaffId = req.query.staffId as string | undefined;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
+      }
+      let targetStaffId = user.staffId;
+      if (["Admin", "MD"].includes(user.role) && queryStaffId) {
+        targetStaffId = queryStaffId;
+      }
+      const sessions = await storage.getInPatientSessionsByStaffAndDateRange(targetStaffId, startDate, endDate);
+      const admissions = await storage.getAllInPatientAdmissions();
+      const admMap = new Map(admissions.map((a) => [a.id, a]));
+      return res.json(
+        sessions.map((s) => ({
+          ...s,
+          admission: admMap.get(s.admissionId) ? { id: (admMap.get(s.admissionId) as any).id, patientName: (admMap.get(s.admissionId) as any).patientName } : null,
+        }))
+      );
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get single in-patient admission
   app.get("/api/inpatients/:id", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -1004,13 +1103,14 @@ export async function registerRoutes(
         sessionNumber,
         attachments: (sd as any).attachments ?? null,
       } as any);
+      await syncAutoFineForStaffDate(storage, session.treatingStaffId, session.sessionDate);
       return res.status(201).json(session);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
-  // Update in-patient session (Admin, MD, or the treating physiotherapist)
+  // Update in-patient session (Admin, MD, Physiotherapist, Staff, Receptionist)
   app.put("/api/inpatients/sessions/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
@@ -1019,16 +1119,26 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Session not found" });
       }
 
-      // Check permission: Admin/MD can edit any, Physiotherapist can edit own
-      if (user.role !== 'Admin' && user.role !== 'MD' && existingSession.treatingStaffId !== user.staffId) {
-        return res.status(403).json({ message: "You can only edit your own sessions" });
+      const canEdit = ["Admin", "MD", "Physiotherapist", "Staff", "Receptionist"].includes(user.role);
+      if (!canEdit) {
+        return res.status(403).json({ message: "Forbidden: insufficient permissions" });
       }
 
       const parsed = updateInPatientSessionSchema.safeParse(req.body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid data", errors: parsed.error.flatten() });
       }
-      const session = await storage.updateInPatientSession(param(req, "id"), parsed.data);
+      let patch: Record<string, unknown> = { ...parsed.data };
+      if (patch.treatingStaffId && typeof patch.treatingStaffId === "string") {
+        const st = await storage.getStaff(patch.treatingStaffId as string);
+        if (st) patch = { ...patch, treatingStaffName: st.name };
+      }
+      const session = await storage.updateInPatientSession(param(req, "id"), patch as any);
+      if (!session) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+      await syncAutoFineForStaffDate(storage, existingSession.treatingStaffId, existingSession.sessionDate);
+      await syncAutoFineForStaffDate(storage, session.treatingStaffId, session.sessionDate);
       return res.json(session);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1038,9 +1148,13 @@ export async function registerRoutes(
   // Delete in-patient session (Admin, MD only)
   app.delete("/api/inpatients/sessions/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
     try {
+      const existing = await storage.getInPatientSession(param(req, "id"));
       const success = await storage.deleteInPatientSession(param(req, "id"));
       if (!success) {
         return res.status(404).json({ message: "Session not found" });
+      }
+      if (existing) {
+        await syncAutoFineForStaffDate(storage, existing.treatingStaffId, existing.sessionDate);
       }
       return res.json({ message: "Session deleted successfully" });
     } catch (error: any) {
@@ -1450,7 +1564,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/appointments/:id", requireAuth, async (req: Request, res: Response) => {
+  app.put("/api/appointments/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
     try {
       const body = { ...req.body };
       if (body.notes === '') body.notes = null;
@@ -1468,7 +1582,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/appointments/:id", requireAuth, async (req: Request, res: Response) => {
+  app.delete("/api/appointments/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
     try {
       const deleted = await storage.deleteAppointment(param(req, "id"));
       if (!deleted) return res.status(404).json({ message: "Appointment not found" });
@@ -1477,6 +1591,92 @@ export async function registerRoutes(
       return res.status(500).json({ message: error.message });
     }
   });
+
+  // ========== Staff fines (manual + automatic) ==========
+
+  app.get("/api/staff-fines", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const startDate = req.query.startDate as string | undefined;
+      const endDate = req.query.endDate as string | undefined;
+      const queryStaffId = req.query.staffId as string | undefined;
+      if (!startDate || !endDate) {
+        return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
+      }
+      if (["Admin", "MD"].includes(user.role)) {
+        if (queryStaffId) {
+          const rows = await storage.getStaffFinesByStaffAndDateRange(queryStaffId, startDate, endDate);
+          return res.json(rows);
+        }
+        const rows = await storage.getStaffFinesByDateRange(startDate, endDate);
+        return res.json(rows);
+      }
+      const rows = await storage.getStaffFinesByStaffAndDateRange(user.staffId, startDate, endDate);
+      return res.json(rows);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/staff-fines", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const editor = await storage.getStaff(user.staffId);
+      const body = { ...req.body, source: "manual" };
+      const parsed = insertStaffFineSchema.safeParse(body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
+      }
+      const fine = await storage.createStaffFine({
+        ...(parsed.data as any),
+        createdByStaffId: user.staffId,
+        createdByName: editor?.name ?? "",
+      } as any);
+      return res.status(201).json(fine);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/staff-fines/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+    try {
+      const existingFine = await storage.getStaffFine(param(req, "id"));
+      if (!existingFine) return res.status(404).json({ message: "Fine not found" });
+      const body = { ...req.body } as Record<string, unknown>;
+      if (existingFine.source === "auto_no_session") {
+        delete body.source;
+      }
+      const parsed = updateStaffFineSchema.safeParse(body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
+      }
+      const fine = await storage.updateStaffFine(param(req, "id"), parsed.data);
+      if (!fine) return res.status(404).json({ message: "Fine not found" });
+      return res.json(fine);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/staff-fines/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+    try {
+      const deleted = await storage.deleteStaffFine(param(req, "id"));
+      if (!deleted) return res.status(404).json({ message: "Fine not found" });
+      return res.json({ message: "Fine deleted" });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  void runAutoFineSweepForRecentDays().catch((e) =>
+    console.error("[auto-fine] initial sweep failed:", e)
+  );
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  setInterval(() => {
+    void runAutoFineSweepForRecentDays().catch((e) =>
+      console.error("[auto-fine] scheduled sweep failed:", e)
+    );
+  }, DAY_MS);
 
   return httpServer;
 }

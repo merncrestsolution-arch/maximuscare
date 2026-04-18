@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '@/lib/types';
 import { useLocation } from 'wouter';
 import { authApi, staffApi } from '@/lib/api';
+import { waitMinElapsed } from '@/lib/login-splash';
 
 interface AuthContextType {
   user: User | null;
@@ -22,8 +23,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [_, setLocation] = useLocation();
 
   useEffect(() => {
-    // Check if user is already logged in
     const checkAuth = async () => {
+      const startedAt = Date.now();
       try {
         const currentUser = await authApi.me();
         setUser(currentUser);
@@ -31,6 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Not logged in or session expired
         console.error('Auth check failed:', error);
       } finally {
+        await waitMinElapsed(startedAt);
         setIsLoading(false);
       }
     };
@@ -56,8 +58,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login = async (email: string, password: string) => {
+    const startedAt = Date.now();
     try {
       const loggedInUser = await authApi.login(email, password);
+      await waitMinElapsed(startedAt);
       setUser(loggedInUser);
       setLocation('/dashboard');
     } catch (error: any) {

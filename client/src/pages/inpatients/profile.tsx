@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useStaff, useUpdateInPatientSession } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,20 @@ export default function InPatientProfilePage() {
   const createExtraExpense = useCreateInPatientExtraExpense();
   const updateExtraExpense = useUpdateInPatientExtraExpense();
   const deleteExtraExpense = useDeleteInPatientExtraExpense();
+  const { data: staffList = [] } = useStaff();
+  const updateInPatientSession = useUpdateInPatientSession();
+
+  const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
+  const [editingSession, setEditingSession] = useState<InPatientSession | null>(null);
+  const [sessionForm, setSessionForm] = useState({
+    patientName: "",
+    sessionDate: "",
+    treatingStaffId: "",
+    treatmentProvided: "",
+    improvements: "",
+    startTime: "",
+    endTime: "",
+  });
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
@@ -83,6 +97,9 @@ export default function InPatientProfilePage() {
   const isAdminMD = user?.role === "Admin" || user?.role === "MD";
   const isReceptionist = user?.role === "Receptionist";
   const canViewPayments = isAdminMD || isReceptionist;
+  /** Billing summary + billing PDF — Admin & MD only (hidden from physiotherapy staff). */
+  const canViewBillingSummary = isAdminMD;
+  const canEditInPatientSession = ["Admin", "MD", "Physiotherapist", "Staff", "Receptionist"].includes(user?.role || "");
   const canAddPayment = canViewPayments;
   const canAddSession = patient?.status === "Admitted";
   const canDischarge = isAdminMD && patient?.status === "Admitted";
@@ -245,6 +262,52 @@ export default function InPatientProfilePage() {
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to delete expense",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const openSessionEdit = (s: InPatientSession) => {
+    setEditingSession(s);
+    setSessionForm({
+      patientName: s.patientName,
+      sessionDate: s.sessionDate,
+      treatingStaffId: s.treatingStaffId,
+      treatmentProvided: s.treatmentProvided,
+      improvements: s.improvements || "",
+      startTime: s.startTime,
+      endTime: s.endTime,
+    });
+    setSessionDialogOpen(true);
+  };
+
+  const handleSaveSession = async () => {
+    if (!editingSession) return;
+    if (!sessionForm.patientName.trim() || !sessionForm.treatmentProvided.trim()) {
+      toast({ title: "Error", description: "Patient name and session details are required", variant: "destructive" });
+      return;
+    }
+    try {
+      await updateInPatientSession.mutateAsync({
+        admissionId: patientId,
+        sessionId: editingSession.id,
+        data: {
+          patientName: sessionForm.patientName.trim(),
+          sessionDate: sessionForm.sessionDate,
+          treatingStaffId: sessionForm.treatingStaffId,
+          treatmentProvided: sessionForm.treatmentProvided.trim(),
+          improvements: sessionForm.improvements.trim() || null,
+          startTime: sessionForm.startTime,
+          endTime: sessionForm.endTime,
+        },
+      });
+      toast({ title: "Session updated" });
+      setSessionDialogOpen(false);
+      setEditingSession(null);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update session",
         variant: "destructive",
       });
     }
@@ -442,6 +505,8 @@ export default function InPatientProfilePage() {
           </div>
         </div>
 
+        {canViewBillingSummary && (
+          <>
         <StructuredReportActions
           reportTitle={`In-Patient Billing Report - ${patient.patientName}`}
           fileBaseName={`inpatient-billing-${patientId}`}
@@ -561,6 +626,8 @@ export default function InPatientProfilePage() {
             </div>
           )}
         </div>
+          </>
+        )}
 
         <div className="mb-6" data-testid="extra-expenses-section">
           <div className="flex items-center justify-between mb-4">
@@ -661,30 +728,42 @@ export default function InPatientProfilePage() {
                     {format(new Date(date), "EEEE, dd MMM yyyy")} ({sessionsByDate[date].length} session{sessionsByDate[date].length > 1 ? "s" : ""})
                   </div>
                   <div className="divide-y">
+                    <div className="hidden md:grid md:grid-cols-[1fr_1fr_2fr_auto] gap-2 px-3 py-2 bg-muted/30 text-xs font-semibold text-muted-foreground">
+                      <span>Patient Name</span>
+                      <span>Physio</span>
+                      <span>Session</span>
+                      <span className="text-right pr-1">Edit</span>
+                    </div>
                     {sessionsByDate[date]
                       .sort((a: InPatientSession, b: InPatientSession) => a.sessionNumber - b.sessionNumber)
                       .map((session: InPatientSession) => (
-                      <div key={session.id} className="p-4" data-testid={`session-${session.id}`}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-medium">Session #{session.sessionNumber}</span>
-                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            {session.startTime} - {session.endTime}
+                      <div
+                        key={session.id}
+                        className="p-3 md:grid md:grid-cols-[1fr_1fr_2fr_auto] md:gap-2 md:items-start"
+                        data-testid={`session-${session.id}`}
+                      >
+                        <div className="font-medium text-sm md:font-normal">{session.patientName}</div>
+                        <div className="text-sm text-muted-foreground md:text-foreground">
+                          <span className="md:hidden font-medium text-foreground">Physio: </span>
+                          {session.treatingStaffName}
+                        </div>
+                        <div className="text-sm min-w-0">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-0.5">
+                            <Clock className="h-3 w-3 shrink-0" />
+                            #{session.sessionNumber} · {session.startTime}–{session.endTime}
                           </div>
+                          <div className="line-clamp-3">{session.treatmentProvided}</div>
+                          {session.improvements ? (
+                            <div className="text-xs text-green-700 mt-1 line-clamp-2">{session.improvements}</div>
+                          ) : null}
                         </div>
-                        <div className="text-sm text-muted-foreground mb-1">
-                          By: {session.treatingStaffName}
+                        <div className="flex justify-end pt-2 md:pt-0">
+                          {canEditInPatientSession ? (
+                            <Button type="button" variant="outline" size="sm" onClick={() => openSessionEdit(session)} data-testid={`button-edit-session-${session.id}`}>
+                              Edit
+                            </Button>
+                          ) : null}
                         </div>
-                        <div className="text-sm">
-                          <span className="font-medium">Treatment: </span>
-                          {session.treatmentProvided}
-                        </div>
-                        {session.improvements && (
-                          <div className="text-sm text-green-700 mt-1">
-                            <span className="font-medium">Improvements: </span>
-                            {session.improvements}
-                          </div>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -983,6 +1062,105 @@ export default function InPatientProfilePage() {
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
                 {editingExpense ? "Update" : "Add"} Expense
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={sessionDialogOpen} onOpenChange={setSessionDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit in-patient session</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="session-patient-name">Patient name</Label>
+              <Input
+                id="session-patient-name"
+                value={sessionForm.patientName}
+                onChange={(e) => setSessionForm((f) => ({ ...f, patientName: e.target.value }))}
+                data-testid="input-session-patient-name"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="session-date">Date</Label>
+              <Input
+                id="session-date"
+                type="date"
+                value={sessionForm.sessionDate}
+                onChange={(e) => setSessionForm((f) => ({ ...f, sessionDate: e.target.value }))}
+                data-testid="input-session-date"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Assigned physiotherapist</Label>
+              <Select
+                value={sessionForm.treatingStaffId}
+                onValueChange={(v) => setSessionForm((f) => ({ ...f, treatingStaffId: v }))}
+              >
+                <SelectTrigger data-testid="select-session-staff">
+                  <SelectValue placeholder="Select staff" />
+                </SelectTrigger>
+                <SelectContent>
+                  {staffList
+                    .filter((s: { role?: string }) =>
+                      ["Physiotherapist", "MD", "Staff", "Receptionist"].includes(s.role || "")
+                    )
+                    .map((s: { id: string; name: string }) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="session-start">Start</Label>
+                <Input
+                  id="session-start"
+                  type="time"
+                  value={sessionForm.startTime}
+                  onChange={(e) => setSessionForm((f) => ({ ...f, startTime: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="session-end">End</Label>
+                <Input
+                  id="session-end"
+                  type="time"
+                  value={sessionForm.endTime}
+                  onChange={(e) => setSessionForm((f) => ({ ...f, endTime: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="session-treatment">Session details</Label>
+              <Textarea
+                id="session-treatment"
+                rows={4}
+                value={sessionForm.treatmentProvided}
+                onChange={(e) => setSessionForm((f) => ({ ...f, treatmentProvided: e.target.value }))}
+                data-testid="textarea-session-treatment"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="session-improvements">Improvements (optional)</Label>
+              <Textarea
+                id="session-improvements"
+                rows={2}
+                value={sessionForm.improvements}
+                onChange={(e) => setSessionForm((f) => ({ ...f, improvements: e.target.value }))}
+              />
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button type="button" variant="outline" onClick={() => setSessionDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={() => void handleSaveSession()} disabled={updateInPatientSession.isPending} data-testid="button-save-session">
+                {updateInPatientSession.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Save
               </Button>
             </div>
           </div>

@@ -1,16 +1,37 @@
 import { useMemo, useState } from "react";
-import { format, isAfter, isBefore } from "date-fns";
+import { addDays, format, isAfter, isBefore, parseISO } from "date-fns";
 import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
-import { useVisits, useAttendance, useStaff, useIncentiveSettings, useUpdateIncentiveSettings } from "@/hooks/useData";
+import {
+  useVisits,
+  useAttendance,
+  useStaff,
+  useIncentiveSettings,
+  useUpdateIncentiveSettings,
+  useAllInPatientSessionsInRange,
+  useInPatientSessionsForStaffRange,
+  useStaffFines,
+  useCreateStaffFine,
+  useUpdateStaffFine,
+  useDeleteStaffFine,
+} from "@/hooks/useData";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
 import { isVisitForStaff } from "@/lib/visitAccess";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 function clampDate(dateStr: string, fromStr: string, toStr: string) {
   if (!dateStr) return false;
@@ -43,6 +64,37 @@ export default function PhysioSummaryPage() {
 
   const role = (user?.role || "").toLowerCase();
   const isManagement = role === "admin" || role === "md";
+
+  const endExclusive = useMemo(() => format(addDays(parseISO(rangeTo), 1), "yyyy-MM-dd"), [rangeTo]);
+
+  const { data: ipSessionsAll = [], isLoading: loadingIpAll } = useAllInPatientSessionsInRange(
+    { startDate: rangeFrom, endDate: endExclusive },
+    isManagement
+  );
+  const { data: ipSessionsMine = [], isLoading: loadingIpMine } = useInPatientSessionsForStaffRange(
+    { startDate: rangeFrom, endDate: endExclusive, staffId: user?.id || "" },
+    !isManagement
+  );
+  const ipSessions = isManagement ? ipSessionsAll : ipSessionsMine;
+  const loadingIp = isManagement ? loadingIpAll : loadingIpMine;
+
+  const { data: finesList = [], isLoading: loadingFines } = useStaffFines(
+    { startDate: rangeFrom, endDate: endExclusive },
+    !!rangeFrom && !!rangeTo
+  );
+
+  const createStaffFine = useCreateStaffFine();
+  const updateStaffFine = useUpdateStaffFine();
+  const deleteStaffFine = useDeleteStaffFine();
+
+  const [fineDialogOpen, setFineDialogOpen] = useState(false);
+  const [editingFineId, setEditingFineId] = useState<string | null>(null);
+  const [fineForm, setFineForm] = useState({
+    staffId: "",
+    fineDate: format(new Date(), "yyyy-MM-dd"),
+    amount: "500",
+    reason: "",
+  });
 
   const incEnabled = incentiveSettings?.incentiveEnabled === "true";
   const incMinPatients = incentiveSettings?.minPatientsForIncentive ?? 5;
@@ -84,7 +136,10 @@ export default function PhysioSummaryPage() {
 
   const physios = useMemo(() => {
     if (!user) return [];
-    const all = (staff || []).filter((s) => (s.role || "").toLowerCase() === "physiotherapist");
+    const all = (staff || []).filter((s) => {
+      const r = (s.role || "").toLowerCase();
+      return r === "physiotherapist" || r === "staff";
+    });
     if (isManagement) return all;
     return all.filter((s) => s.id === user.id);
   }, [isManagement, staff, user]);
@@ -93,6 +148,8 @@ export default function PhysioSummaryPage() {
     if (!physios.length) return [];
     const safeVisits = visits || [];
     const safeAttendance = attendance || [];
+    const safeIp = ipSessions || [];
+    const safeFines = finesList || [];
 
     return physios.map((p) => {
       try {
@@ -138,9 +195,16 @@ export default function PhysioSummaryPage() {
             })
           : [];
 
+        const ipForThisPhysio = safeIp.filter(
+          (s: any) => s.treatingStaffId === p.id && clampDate(s.sessionDate, rangeFrom, rangeTo)
+        );
+
         const clinicByDay: Record<string, number> = {};
         for (const v of matchingVisits) {
           clinicByDay[v.visitDate] = (clinicByDay[v.visitDate] || 0) + 1;
+        }
+        for (const s of ipForThisPhysio) {
+          clinicByDay[s.sessionDate] = (clinicByDay[s.sessionDate] || 0) + 1;
         }
 
         const incentiveDays = Object.entries(clinicByDay)
@@ -149,6 +213,10 @@ export default function PhysioSummaryPage() {
           .sort((a, b) => (a.date < b.date ? -1 : 1));
 
         const incentiveTotal = sum(incentiveDays.map((d) => d.incentive));
+
+        const finesTotal = sum(
+          safeFines.filter((f: any) => f.staffId === p.id).map((f: any) => Number(f.amount) || 0)
+        );
 
         return {
           id: p.id,
@@ -162,6 +230,8 @@ export default function PhysioSummaryPage() {
           bandaragamaClinic,
           presentDays,
           absentDays,
+          inPatientSessionsCount: ipForThisPhysio.length,
+          finesTotal,
           error: null,
         };
       } catch {
@@ -177,11 +247,13 @@ export default function PhysioSummaryPage() {
           bandaragamaClinic: 0,
           presentDays: 0,
           absentDays: 0,
+          inPatientSessionsCount: 0,
+          finesTotal: 0,
           error: "Failed to calculate summary for this physiotherapist.",
         };
       }
     });
-  }, [attendance, physios, rangeFrom, rangeTo, visits, incEnabled, incMinPatients, incPerPatient, incScope]);
+  }, [attendance, physios, rangeFrom, rangeTo, visits, incEnabled, incMinPatients, incPerPatient, incScope, ipSessions, finesList]);
 
   if (authLoading || !user || !user.role) {
     return (
@@ -192,7 +264,7 @@ export default function PhysioSummaryPage() {
     );
   }
 
-  if (loadingStaff || loadingVisits || loadingAttendance) {
+  if (loadingStaff || loadingVisits || loadingAttendance || loadingIp || loadingFines) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center bg-white" data-testid="loading-reports-data">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -212,6 +284,8 @@ export default function PhysioSummaryPage() {
     { key: "colomboHome", label: "Colombo Home" },
     { key: "bandaragamaClinic", label: "Bandaragama Clinic" },
     { key: "bandaragamaHome", label: "Bandaragama Home" },
+    { key: "inPatientSessions", label: "In-Patient Sessions" },
+    { key: "fines", label: "Fines LKR" },
     { key: "incentive", label: "Incentive LKR" },
   ];
   const summaryRows = summaries.map((s) => ({
@@ -223,8 +297,81 @@ export default function PhysioSummaryPage() {
     colomboHome: String(s.colomboHome),
     bandaragamaClinic: String(s.bandaragamaClinic),
     bandaragamaHome: String(s.bandaragamaHome),
+    inPatientSessions: String(s.inPatientSessionsCount),
+    fines: String(s.finesTotal),
     incentive: String(s.incentiveTotal),
   }));
+
+  const physioOptions = (staff || []).filter((s: any) => {
+    const r = (s.role || "").toLowerCase();
+    return r === "physiotherapist" || r === "staff";
+  });
+
+  const openAddFine = () => {
+    setEditingFineId(null);
+    setFineForm({
+      staffId: physioOptions[0]?.id || "",
+      fineDate: format(new Date(), "yyyy-MM-dd"),
+      amount: "500",
+      reason: "",
+    });
+    setFineDialogOpen(true);
+  };
+
+  const openEditFine = (f: any) => {
+    setEditingFineId(f.id);
+    setFineForm({
+      staffId: f.staffId,
+      fineDate: f.fineDate,
+      amount: String(f.amount),
+      reason: f.reason || "",
+    });
+    setFineDialogOpen(true);
+  };
+
+  const saveFine = async () => {
+    if (!fineForm.staffId || !fineForm.reason.trim()) {
+      toast({ title: "Missing fields", description: "Staff and reason are required.", variant: "destructive" });
+      return;
+    }
+    const st = physioOptions.find((x: any) => x.id === fineForm.staffId);
+    try {
+      if (editingFineId) {
+        await updateStaffFine.mutateAsync({
+          id: editingFineId,
+          data: {
+            staffId: fineForm.staffId,
+            staffName: st?.name || "",
+            fineDate: fineForm.fineDate,
+            amount: fineForm.amount,
+            reason: fineForm.reason.trim(),
+          },
+        });
+        toast({ title: "Fine updated" });
+      } else {
+        await createStaffFine.mutateAsync({
+          staffId: fineForm.staffId,
+          staffName: st?.name || "",
+          fineDate: fineForm.fineDate,
+          amount: fineForm.amount || "500",
+          reason: fineForm.reason.trim(),
+        });
+        toast({ title: "Fine added" });
+      }
+      setFineDialogOpen(false);
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "Failed to save fine", variant: "destructive" });
+    }
+  };
+
+  const removeFine = async (id: string) => {
+    try {
+      await deleteStaffFine.mutateAsync(id);
+      toast({ title: "Fine deleted" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "Failed to delete", variant: "destructive" });
+    }
+  };
 
   return (
     <div className="space-y-5 pb-24" data-testid="page-physio-summary">
@@ -313,7 +460,7 @@ export default function PhysioSummaryPage() {
 
             <div className="rounded-xl border border-border/60 bg-muted/10 p-3 text-xs text-muted-foreground" data-testid="hint-physio-summary">
               {incEnabled
-                ? `Incentive rule: ${incScope === "All" ? "All branches" : incScope} visits — if a physiotherapist treats ${incMinPatients}+ patients in a day, incentive = ${incPerPatient} LKR per patient for that day.`
+                ? `Incentive rule: ${incScope === "All" ? "All branches" : incScope} outpatient visits plus in-patient sessions — when combined daily total is ${incMinPatients}+, incentive = ${incPerPatient} LKR per session for that day.`
                 : "Incentives are currently disabled."}
             </div>
           </CardContent>
@@ -402,6 +549,118 @@ export default function PhysioSummaryPage() {
         </Card>
       )}
 
+        <Card className="bg-white border border-border/60 shadow-sm" data-testid="card-staff-fines">
+            <CardContent className="p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-bold text-foreground">Staff fines</div>
+                {isManagement ? (
+                  <Button size="sm" onClick={openAddFine} data-testid="button-add-fine">
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add fine
+                  </Button>
+                ) : null}
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-border/60">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 text-left text-xs font-semibold text-muted-foreground">
+                      <th className="p-2">Date</th>
+                      <th className="p-2">Staff</th>
+                      <th className="p-2 text-right">LKR</th>
+                      <th className="p-2">Reason</th>
+                      <th className="p-2">Source</th>
+                      {isManagement ? <th className="p-2">Created by</th> : null}
+                      {isManagement ? <th className="p-2 w-24"> </th> : null}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(finesList || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={isManagement ? 7 : 5} className="p-4 text-center text-muted-foreground">
+                          No fines in this date range.
+                        </td>
+                      </tr>
+                    ) : (
+                      (finesList || []).map((f: any) => (
+                        <tr key={f.id} className="border-t border-border/50">
+                          <td className="p-2 whitespace-nowrap">{f.fineDate}</td>
+                          <td className="p-2">{f.staffName}</td>
+                          <td className="p-2 text-right tabular-nums">{Number(f.amount).toLocaleString()}</td>
+                          <td className="p-2 max-w-[200px] truncate" title={f.reason}>
+                            {f.reason}
+                          </td>
+                          <td className="p-2 text-xs text-muted-foreground">{f.source === "auto_no_session" ? "Auto" : "Manual"}</td>
+                          {isManagement ? (
+                            <td className="p-2 text-xs text-muted-foreground max-w-[120px] truncate" title={f.createdByName || ""}>
+                              {f.createdByName || "—"}
+                            </td>
+                          ) : null}
+                          {isManagement ? (
+                            <td className="p-2">
+                              <div className="flex gap-1">
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditFine(f)} data-testid={`button-edit-fine-${f.id}`}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => removeFine(f.id)} data-testid={`button-delete-fine-${f.id}`}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </td>
+                          ) : null}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+
+        <Dialog open={fineDialogOpen} onOpenChange={setFineDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{editingFineId ? "Edit fine" : "Add fine"}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="space-y-1">
+                <Label>Staff</Label>
+                <Select value={fineForm.staffId} onValueChange={(v) => setFineForm((f) => ({ ...f, staffId: v }))}>
+                  <SelectTrigger data-testid="select-fine-staff">
+                    <SelectValue placeholder="Select staff" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {physioOptions.map((s: any) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Date</Label>
+                <Input type="date" value={fineForm.fineDate} onChange={(e) => setFineForm((f) => ({ ...f, fineDate: e.target.value }))} data-testid="input-fine-date" />
+              </div>
+              <div className="space-y-1">
+                <Label>Amount (LKR)</Label>
+                <Input type="number" min="1" value={fineForm.amount} onChange={(e) => setFineForm((f) => ({ ...f, amount: e.target.value }))} data-testid="input-fine-amount" />
+              </div>
+              <div className="space-y-1">
+                <Label>Reason</Label>
+                <Textarea value={fineForm.reason} onChange={(e) => setFineForm((f) => ({ ...f, reason: e.target.value }))} rows={3} data-testid="input-fine-reason" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setFineDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => void saveFine()} disabled={createStaffFine.isPending || updateStaffFine.isPending} data-testid="button-save-fine">
+                Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <div className="space-y-3" data-testid="list-physio-summaries">
         {summaries.length === 0 ? (
           <Card className="bg-white border border-border/60 shadow-sm">
@@ -429,6 +688,12 @@ export default function PhysioSummaryPage() {
                     <div className="mt-1 flex flex-wrap gap-2">
                       <div className="px-3 py-1 rounded-full bg-black text-white text-xs font-semibold" data-testid={`badge-ot-${s.id}`}>
                         OT: {s.totalOt.toFixed(1)} hrs
+                      </div>
+                      <div className="px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-semibold border border-slate-200" data-testid={`badge-ip-${s.id}`}>
+                        In-patient sessions: {s.inPatientSessionsCount}
+                      </div>
+                      <div className="px-3 py-1 rounded-full bg-amber-50 text-amber-900 text-xs font-semibold border border-amber-200" data-testid={`badge-fines-${s.id}`}>
+                        Fines: {s.finesTotal.toLocaleString()} LKR
                       </div>
                       {incEnabled && (
                         <div className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200" data-testid={`badge-incentive-${s.id}`}>
@@ -488,7 +753,7 @@ export default function PhysioSummaryPage() {
                       <div className="mt-3 space-y-2">
                         <div className="grid grid-cols-1 gap-2 text-[11px] font-semibold text-muted-foreground sm:grid-cols-3 sm:gap-2">
                           <div className="hidden sm:block">Date</div>
-                          <div className="hidden sm:block sm:text-right">Clinic Patients</div>
+                          <div className="hidden sm:block sm:text-right">Sessions (outpatient + in-patient)</div>
                           <div className="hidden sm:block sm:text-right">Incentive (LKR)</div>
                         </div>
                         {s.incentiveDays.map((d) => (
@@ -502,7 +767,7 @@ export default function PhysioSummaryPage() {
                               <span className="font-medium">{d.date}</span>
                             </div>
                             <div className="flex justify-between sm:block sm:text-right">
-                              <span className="text-muted-foreground sm:hidden">Clinic Patients:</span>
+                              <span className="text-muted-foreground sm:hidden">Sessions:</span>
                               <span data-testid={`text-incentive-count-${s.id}-${d.date}`}>{d.count}</span>
                             </div>
                             <div className="flex justify-between sm:block sm:text-right">

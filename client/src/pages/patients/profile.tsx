@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { usePatient, useVisits, useDeleteVisit, useDeletePatient } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
 import { useToast } from "@/hooks/use-toast";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
+import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
 
 export default function PatientProfile() {
   const [match, params] = useRoute("/patients/:id");
@@ -34,6 +36,7 @@ export default function PatientProfile() {
   const deleteVisitMutation = useDeleteVisit();
   const deletePatientMutation = useDeletePatient();
   const { toast } = useToast();
+  const [visitToDeleteId, setVisitToDeleteId] = useState<string | null>(null);
   
   if (!match || !params) return null;
 
@@ -82,10 +85,19 @@ export default function PatientProfile() {
     paymentAmount: String(v.paymentAmount ?? ""),
   }));
 
-  const handleDeleteVisit = (visitId: string) => {
-    if (confirm("Are you sure you want to delete this visit record?")) {
-      deleteVisitMutation.mutate(visitId);
+  const handleConfirmDeleteVisit = async () => {
+    if (!visitToDeleteId) return;
+    try {
+      await deleteVisitMutation.mutateAsync(visitToDeleteId);
+      toast({ title: "Visit deleted", description: "The visit record was removed." });
+    } catch (e) {
+      toast({
+        title: "Could not delete visit",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
     }
+    setVisitToDeleteId(null);
   };
 
   const isAdminMD = ["Admin", "MD"].includes(user?.role || "");
@@ -253,7 +265,12 @@ export default function PatientProfile() {
         <div className="relative pl-4 border-l-2 border-muted/30 space-y-6 ml-2">
           {patientVisits.map((visit) => {
             const isManagement = ['Admin', 'MD'].includes(user?.role || '');
-            const canEditVisit = isManagement || visit.treatingStaffId === user?.id || visit.createdByStaffId === user?.id;
+            const isPhysioRole = ['Physiotherapist', 'Staff'].includes(user?.role || '');
+            const canEditVisit =
+              isManagement ||
+              isPhysioRole ||
+              visit.treatingStaffId === user?.id ||
+              visit.createdByStaffId === user?.id;
             const paidAmount = Number(visit.paymentAmount);
             const paidLabel = Number.isFinite(paidAmount)
               ? paidAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
@@ -278,6 +295,19 @@ export default function PatientProfile() {
                         </button>
                       </Link>
                     )}
+                    {isAdminMD && (
+                      <button
+                        type="button"
+                        className="p-1.5 rounded-md hover:bg-red-50 text-destructive"
+                        data-testid={`button-delete-visit-${visit.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setVisitToDeleteId(visit.id);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                     <span className="text-xs font-medium text-muted-foreground bg-muted/10 px-2 py-1 rounded-md whitespace-nowrap">
                       {format(new Date(visit.visitDate), 'dd MMM yyyy')}
                     </span>
@@ -300,6 +330,14 @@ export default function PatientProfile() {
                 ) : null}
 
                 <div className="flex flex-col gap-2 pt-2 border-t border-border/50">
+                  {(visit as any).lastUpdatedByName ? (
+                    <div className="text-[11px] text-muted-foreground">
+                      Last updated by {(visit as any).lastUpdatedByName}
+                      {(visit as any).updatedAt
+                        ? ` · ${format(new Date((visit as any).updatedAt), "dd MMM yyyy HH:mm")}`
+                        : null}
+                    </div>
+                  ) : null}
                   <div className="flex items-center gap-2 text-xs text-foreground/80">
                     <UserIcon className="h-3.5 w-3.5 text-secondary shrink-0" />
                     <span className="font-medium">Treating: {visit.treatingStaffName || visit.createdByName}</span>
@@ -307,7 +345,13 @@ export default function PatientProfile() {
 
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="px-2 py-0.5 rounded-full font-medium bg-muted/20 text-muted-foreground">{visit.status}</span>
-                    <span className={`px-2 py-0.5 rounded-full font-bold ${visit.paymentStatus === 'Paid' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning-dark'}`}>
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full font-bold ${paymentStatusBadgeClass(visit.paymentStatus)}`}
+                    >
+                      <span
+                        className={`h-2 w-2 shrink-0 rounded-full ${isPaidStatus(visit.paymentStatus) ? "bg-emerald-600" : "bg-red-600"}`}
+                        aria-hidden
+                      />
                       {visit.paymentStatus}
                     </span>
                     <span className="font-semibold text-foreground tabular-nums" data-testid={`text-visit-paid-${visit.id}`}>
@@ -336,6 +380,27 @@ export default function PatientProfile() {
           )}
         </div>
       </div>
+
+      <AlertDialog open={!!visitToDeleteId} onOpenChange={(open) => !open && setVisitToDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this visit?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the visit record. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleConfirmDeleteVisit}
+              disabled={deleteVisitMutation.isPending}
+            >
+              {deleteVisitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

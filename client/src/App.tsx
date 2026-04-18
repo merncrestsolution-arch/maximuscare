@@ -32,11 +32,10 @@ import AppointmentsListPage from "@/pages/appointments/list";
 import BookAppointmentPage from "@/pages/appointments/book";
 import EditAppointmentPage from "@/pages/appointments/edit";
 import NotFound from "@/pages/not-found";
+import { LoginStyleSplash } from "@/components/auth/login-style-splash";
 
 function ProtectedRoute({ component: Component, ...rest }: any) {
-  const { user, isLoading } = useAuth();
-
-  if (isLoading) return null; // Or a loading spinner
+  const { user } = useAuth();
 
   if (!user) {
     return <Redirect to="/auth/login" />;
@@ -46,6 +45,17 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
     <AppLayout>
       <Component {...rest} />
     </AppLayout>
+  );
+}
+
+function AppRoutes() {
+  const { isLoading } = useAuth();
+
+  return (
+    <>
+      {isLoading ? <LoginStyleSplash message="Loading…" /> : <Router />}
+      <Toaster />
+    </>
   );
 }
 
@@ -155,8 +165,7 @@ function App() {
       <BrandingProvider>
         <AuthProvider>
           <DataProvider>
-            <Router />
-            <Toaster />
+            <AppRoutes />
           </DataProvider>
         </AuthProvider>
       </BrandingProvider>

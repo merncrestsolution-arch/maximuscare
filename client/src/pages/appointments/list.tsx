@@ -7,6 +7,7 @@ import { Plus, Edit, Trash2, ChevronLeft, ChevronRight, Clock, User, Loader2 } f
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isSameDay, isToday } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { Appointment } from "@/lib/types";
+import { isManagementRole } from "@/lib/permissions";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -21,6 +22,8 @@ export default function AppointmentsList() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  const canManage = isManagementRole(user?.role);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -161,26 +164,28 @@ export default function AppointmentsList() {
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 ml-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => setLocation(`/appointments/edit/${appointment.id}`)}
-                      data-testid={`button-edit-${appointment.id}`}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 text-destructive hover:text-destructive"
-                      onClick={() => setDeleteId(appointment.id)}
-                      data-testid={`button-delete-${appointment.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                  {canManage && (
+                    <div className="flex items-center gap-1 ml-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => setLocation(`/appointments/edit/${appointment.id}`)}
+                        data-testid={`button-edit-${appointment.id}`}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-destructive hover:text-destructive"
+                        onClick={() => setDeleteId(appointment.id)}
+                        data-testid={`button-delete-${appointment.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

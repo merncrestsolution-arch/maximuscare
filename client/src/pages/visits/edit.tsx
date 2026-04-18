@@ -1,13 +1,23 @@
 import { useState, useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useAuth } from "@/context/auth-context";
-import { useVisit, useUpdateVisit, usePatient, useStaff } from "@/hooks/useData";
+import { useVisit, useUpdateVisit, useDeleteVisit, usePatient, useStaff } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -22,9 +32,11 @@ export default function EditVisit() {
   const { data: patient } = usePatient(visit?.patientId || "");
   const { data: staff = [] } = useStaff();
   const updateVisitMutation = useUpdateVisit();
+  const deleteVisitMutation = useDeleteVisit();
   const { toast } = useToast();
 
   const [formData, setFormData] = useState<any>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(() => {
     if (visit && !formData) {
@@ -57,9 +69,11 @@ export default function EditVisit() {
     );
   }
 
+  const isPhysioRole = user && ["Physiotherapist", "Staff"].includes(user.role);
   const canEditVisit =
     !!user &&
     (isManagement ||
+      isPhysioRole ||
       visit.treatingStaffId === user.id ||
       visit.createdByStaffId === user.id);
 
@@ -74,6 +88,21 @@ export default function EditVisit() {
   }
 
   if (!formData) return null;
+
+  const handleDeleteVisit = async () => {
+    try {
+      await deleteVisitMutation.mutateAsync(visit.id);
+      toast({ title: "Visit deleted", description: "The visit record was removed." });
+      setDeleteOpen(false);
+      setLocation(patient ? `/patients/${patient.id}` : "/patients");
+    } catch (e) {
+      toast({
+        title: "Could not delete visit",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -337,13 +366,34 @@ export default function EditVisit() {
                 data-testid="input-edit-visit-notes"
               />
             </div>
+
+            {(visit as any)?.lastUpdatedByName ? (
+              <p className="text-xs text-muted-foreground border-t border-border/60 pt-3" data-testid="text-visit-last-updated">
+                Last updated by {(visit as any).lastUpdatedByName}
+                {visit.updatedAt
+                  ? ` · ${format(new Date(visit.updatedAt), "dd MMM yyyy HH:mm")}`
+                  : null}
+              </p>
+            ) : null}
           </div>
         </form>
 
         <div
           className="fixed bottom-0 left-0 right-0 z-20 border-t border-gray-200 bg-white safe-area-bottom shadow-[0_-2px_10px_rgba(0,0,0,0.05)] md:static md:z-auto md:mt-4 md:rounded-xl md:border md:shadow-sm"
         >
-          <div className="mx-auto flex max-w-[720px] gap-3 p-4 md:justify-end md:px-5 md:pt-4 md:pb-0">
+          <div className="mx-auto flex max-w-[720px] flex-wrap gap-3 p-4 md:justify-end md:px-5 md:pt-4 md:pb-0">
+            {isManagement && (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-12 flex-1 border-destructive/40 text-destructive md:h-10 md:flex-none md:min-w-[7rem] md:text-sm"
+                onClick={() => setDeleteOpen(true)}
+                data-testid="button-delete-edit-visit"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"
@@ -366,6 +416,27 @@ export default function EditVisit() {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this visit?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the visit record. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteVisit}
+              disabled={deleteVisitMutation.isPending}
+            >
+              {deleteVisitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

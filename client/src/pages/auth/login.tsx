@@ -6,6 +6,7 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useBranding } from "@/context/branding-context";
 import { SiteCreditFooter } from "@/components/site-credit-footer";
+import { LoginStyleSplash } from "@/components/auth/login-style-splash";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -27,17 +28,20 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-dvh flex flex-col bg-gradient-to-br from-background via-accent/20 to-background px-safe safe-top touch-manipulation">
+    <div className="relative flex min-h-dvh touch-manipulation flex-col bg-white px-safe safe-top">
+      {loading && (
+        <LoginStyleSplash message="Signing you in…" data-testid="login-loading-overlay" />
+      )}
       <div className="flex flex-1 items-center justify-center p-4">
-      <Card className="w-full max-w-md shadow-xl border-border/80 overflow-hidden">
-        <CardHeader className="space-y-1 text-center pb-2">
-          <div className="flex justify-center mb-4">
-            <div className="h-24 w-24 rounded-2xl overflow-hidden shadow-lg border-2 border-primary/20 bg-card flex items-center justify-center ring-4 ring-primary/5">
-              <img src={logoUri} alt="Maximus Care logo" className="w-full h-full object-contain p-1" data-testid="img-logo" />
+      <Card className="w-full max-w-md overflow-hidden border-2 border-black bg-white shadow-lg">
+        <CardHeader className="space-y-1 pb-2 text-center">
+          <div className="mb-4 flex justify-center">
+            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border-2 border-black bg-white shadow-md">
+              <img src={logoUri} alt="Maximus Care logo" className="h-full w-full object-contain p-1" data-testid="img-logo" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold text-primary">Maximus Care</CardTitle>
-          <CardDescription className="text-base">Physio & Rehab Unit Management</CardDescription>
+          <CardTitle className="text-2xl font-bold text-black">Maximus Care</CardTitle>
+          <CardDescription className="text-base text-black/80">Physio &amp; Rehab Unit Management</CardDescription>
         </CardHeader>
         <CardContent className="pt-2">
           <form onSubmit={handleLogin} className="space-y-4">
@@ -48,7 +52,7 @@ export default function LoginPage() {
                 value={email} 
                 onChange={(e) => setEmail(e.target.value)}
                 required 
-                className="h-12"
+                className="h-12 rounded-xl border-black/80 bg-white text-black placeholder:text-neutral-400"
                 data-testid="input-email"
               />
             </div>
@@ -58,11 +62,17 @@ export default function LoginPage() {
                 value={password} 
                 onChange={(e) => setPassword(e.target.value)}
                 required 
-                className="h-12"
+                className="h-12 rounded-xl border-black/80 bg-white text-black placeholder:text-neutral-400"
                 data-testid="input-password"
               />
             </div>
-            <Button type="submit" className="w-full h-12 text-base font-semibold" disabled={loading} data-testid="button-login">
+            <Button
+              type="submit"
+              variant="outline"
+              className="h-12 w-full border-2 border-black bg-white text-base font-semibold text-black hover:bg-neutral-50"
+              disabled={loading}
+              data-testid="button-login"
+            >
               {loading ? "Signing in..." : "Sign In"}
             </Button>
           </form>

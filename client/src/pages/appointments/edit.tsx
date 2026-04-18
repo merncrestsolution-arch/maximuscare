@@ -12,11 +12,14 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
+import { useAuth } from "@/context/auth-context";
+import { isManagementRole } from "@/lib/permissions";
 
 export default function EditAppointment() {
   const [, params] = useRoute("/appointments/edit/:id");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user, isLoading: authLoading } = useAuth();
 
   const appointmentId = params?.id || "";
   const { data: appointment, isLoading: loadingAppointment } = useAppointment(appointmentId);
@@ -93,10 +96,21 @@ export default function EditAppointment() {
     }
   };
 
-  if (loadingAppointment || loadingPatients || loadingStaff) {
+  if (authLoading || loadingAppointment || loadingPatients || loadingStaff) {
     return (
       <div className={`${EDIT_PAGE_ROOT} flex items-center justify-center`}>
         <Loader2 className="h-8 w-8 animate-spin text-black/40" data-testid="loader-edit" />
+      </div>
+    );
+  }
+
+  if (user && !isManagementRole(user.role)) {
+    return (
+      <div className={`${EDIT_PAGE_ROOT} p-6 text-center space-y-4`}>
+        <p className="text-black/80 font-medium">Only Admin or MD can edit appointments.</p>
+        <Button onClick={() => setLocation("/appointments")} data-testid="button-back-from-denied">
+          Back to Appointments
+        </Button>
       </div>
     );
   }

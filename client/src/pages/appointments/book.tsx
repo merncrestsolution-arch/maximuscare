@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
-import { usePatients, useCreateAppointment } from "@/hooks/useData";
+import { usePatients, useCreateAppointment, useCreatePatient } from "@/hooks/useData";
 import { staffApi } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -8,10 +8,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { ArrowLeft, Loader2, ChevronsUpDown } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/auth-context";
+import { cn } from "@/lib/utils";
+
+type PatientPick =
+  | { kind: "existing"; id: string; name: string }
+  | { kind: "new"; name: string }
+  | null;
 
 export default function BookAppointment() {
   const [, setLocation] = useLocation();
@@ -19,6 +34,7 @@ export default function BookAppointment() {
   const { toast } = useToast();
   const { data: patients = [], isLoading: loadingPatients } = usePatients();
   const createAppointment = useCreateAppointment();
+  const createPatient = useCreatePatient();
 
   const { data: allStaff = [], isLoading: loadingStaff } = useQuery({
     queryKey: ["staff-for-appointments"],
@@ -32,19 +48,34 @@ export default function BookAppointment() {
   const searchParams = new URLSearchParams(window.location.search);
   const dateParam = searchParams.get("date");
 
+  const [patientOpen, setPatientOpen] = useState(false);
+  const [patientSearch, setPatientSearch] = useState("");
+  const [patientPick, setPatientPick] = useState<PatientPick>(null);
+
   const [formData, setFormData] = useState({
     appointmentDate: dateParam || format(new Date(), "yyyy-MM-dd"),
     appointmentTime: "",
-    patientId: "",
     treatingStaffId: "",
     notes: "",
   });
 
+  const filteredPatients = useMemo(() => {
+    const q = patientSearch.trim().toLowerCase();
+    if (!q) return patients as any[];
+    return (patients as any[]).filter((p) => p.name.toLowerCase().includes(q));
+  }, [patients, patientSearch]);
+
+  const exactMatch = useMemo(() => {
+    const q = patientSearch.trim().toLowerCase();
+    if (!q) return undefined;
+    return (patients as any[]).find((p) => p.name.toLowerCase() === q);
+  }, [patients, patientSearch]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.patientId) {
-      toast({ title: "Error", description: "Please select a patient", variant: "destructive" });
+    if (!patientPick) {
+      toast({ title: "Error", description: "Select a patient or create a quick entry", variant: "destructive" });
       return;
     }
     if (!formData.treatingStaffId) {
@@ -56,15 +87,40 @@ export default function BookAppointment() {
       return;
     }
 
-    const selectedPatient = patients.find((p: any) => p.id === formData.patientId);
     const selectedStaff = treatingStaff.find((s: any) => s.id === formData.treatingStaffId);
 
     try {
+      let patientId: string;
+      let patientName: string;
+
+      if (patientPick.kind === "new") {
+        const branch =
+          user?.branch === "Colombo" || user?.branch === "Bandaragama"
+            ? user.branch
+            : "Colombo";
+        const created = await createPatient.mutateAsync({
+          name: patientPick.name.trim(),
+          phone: "0000000000",
+          age: 25,
+          gender: "Male" as const,
+          address: "Pending — update in Patients",
+          registeredDate: format(new Date(), "yyyy-MM-dd"),
+          branch,
+          status: "Active" as const,
+          defaultVisitType: "Clinic" as const,
+        });
+        patientId = created.id;
+        patientName = created.name;
+      } else {
+        patientId = patientPick.id;
+        patientName = patientPick.name;
+      }
+
       await createAppointment.mutateAsync({
         appointmentDate: formData.appointmentDate,
         appointmentTime: formData.appointmentTime,
-        patientId: formData.patientId,
-        patientName: selectedPatient?.name || "",
+        patientId,
+        patientName,
         treatingStaffId: formData.treatingStaffId,
         treatingStaffName: selectedStaff?.name || "",
         notes: formData.notes.trim() || null,
@@ -85,6 +141,9 @@ export default function BookAppointment() {
       </div>
     );
   }
+
+  const showQuickCreate =
+    patientSearch.trim().length >= 2 && !exactMatch;
 
   return (
     <div className="min-h-screen bg-white">
@@ -128,21 +187,75 @@ export default function BookAppointment() {
 
           <div className="space-y-2">
             <Label>Patient</Label>
-            <Select
-              value={formData.patientId}
-              onValueChange={(value) => setFormData({ ...formData, patientId: value })}
-            >
-              <SelectTrigger className="h-12" data-testid="select-patient">
-                <SelectValue placeholder="Select patient" />
-              </SelectTrigger>
-              <SelectContent>
-                {patients.map((patient: any) => (
-                  <SelectItem key={patient.id} value={patient.id} data-testid={`option-patient-${patient.id}`}>
-                    {patient.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <p className="text-xs text-muted-foreground">
+              Search existing patients or type a new name — if not found, use quick create.
+            </p>
+            <Popover open={patientOpen} onOpenChange={setPatientOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={patientOpen}
+                  className="h-12 w-full justify-between font-normal"
+                  data-testid="button-patient-combobox"
+                >
+                  <span className={cn("truncate", !patientPick && "text-muted-foreground")}>
+                    {patientPick
+                      ? patientPick.kind === "new"
+                        ? `New: ${patientPick.name}`
+                        : patientPick.name
+                      : "Select or type patient name…"}
+                  </span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                <Command shouldFilter={false}>
+                  <CommandInput
+                    placeholder="Search name…"
+                    value={patientSearch}
+                    onValueChange={setPatientSearch}
+                    data-testid="input-patient-search"
+                  />
+                  <CommandList>
+                    <CommandEmpty className="py-2 text-sm text-muted-foreground px-2">
+                      No matching patient.
+                    </CommandEmpty>
+                    <CommandGroup heading="Existing patients">
+                      {filteredPatients.map((patient: any) => (
+                        <CommandItem
+                          key={patient.id}
+                          value={patient.name}
+                          onSelect={() => {
+                            setPatientPick({ kind: "existing", id: patient.id, name: patient.name });
+                            setPatientSearch(patient.name);
+                            setPatientOpen(false);
+                          }}
+                          data-testid={`option-patient-${patient.id}`}
+                        >
+                          {patient.name}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                    {showQuickCreate ? (
+                      <CommandGroup heading="Quick entry">
+                        <CommandItem
+                          value={`__new__${patientSearch}`}
+                          onSelect={() => {
+                            setPatientPick({ kind: "new", name: patientSearch.trim() });
+                            setPatientOpen(false);
+                          }}
+                          data-testid="option-patient-quick-create"
+                        >
+                          Create quick patient: {patientSearch.trim()}
+                        </CommandItem>
+                      </CommandGroup>
+                    ) : null}
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="space-y-2">

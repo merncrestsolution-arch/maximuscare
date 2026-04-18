@@ -1,24 +1,40 @@
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
-import { useInPatients } from "@/hooks/useData";
+import { useInPatients, useDeleteInPatient } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Search, Plus, ChevronRight, User, Phone, Calendar, Home } from "lucide-react";
+import { Loader2, Search, Plus, ChevronRight, User, Phone, Calendar, Home, Pencil, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import type { InPatientAdmission } from "@/lib/types";
+import { isManagementRole } from "@/lib/permissions";
+import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function InPatientsListPage() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
+  const { toast } = useToast();
+  const deleteInPatient = useDeleteInPatient();
   const [statusFilter, setStatusFilter] = useState<"Admitted" | "Discharged" | "all">("Admitted");
   const [searchQuery, setSearchQuery] = useState("");
+  const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const { data: inPatients, isLoading, error } = useInPatients(
     statusFilter === "all" ? undefined : statusFilter
   );
 
   const canAdd = user?.role === "Admin" || user?.role === "MD" || user?.role === "Receptionist";
+  const canManage = isManagementRole(user?.role);
 
   const filteredPatients = useMemo(() => {
     if (!inPatients) return [];
@@ -30,6 +46,21 @@ export default function InPatientsListPage() {
       p.phone.includes(query)
     );
   }, [inPatients, searchQuery]);
+
+  const handleDeleteAdmission = async () => {
+    if (!deleteId) return;
+    try {
+      await deleteInPatient.mutateAsync(deleteId);
+      toast({ title: "Admission deleted", description: "The in-patient record was removed." });
+    } catch (e) {
+      toast({
+        title: "Could not delete",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+    setDeleteId(null);
+  };
 
   if (isLoading) {
     return (
@@ -100,14 +131,17 @@ export default function InPatientsListPage() {
             {filteredPatients.map((patient: InPatientAdmission) => (
               <div
                 key={patient.id}
-                onClick={() => setLocation(`/inpatients/${patient.id}`)}
-                className="bg-white border rounded-lg p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                className="bg-white border rounded-lg p-4 hover:bg-gray-50 transition-colors"
                 data-testid={`card-inpatient-${patient.id}`}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    type="button"
+                    className="flex-1 text-left min-w-0"
+                    onClick={() => setLocation(`/inpatients/${patient.id}`)}
+                  >
                     <div className="flex items-center gap-2 mb-1">
-                      <User className="h-4 w-4 text-muted-foreground" />
+                      <User className="h-4 w-4 text-muted-foreground shrink-0" />
                       <span className="font-medium text-foreground" data-testid={`text-name-${patient.id}`}>
                         {patient.patientName}
                       </span>
@@ -138,14 +172,71 @@ export default function InPatientsListPage() {
                     <div className="text-sm text-muted-foreground mt-1" data-testid={`text-condition-${patient.id}`}>
                       {patient.condition}
                     </div>
+                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {canManage && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9"
+                          aria-label="Edit admission"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLocation(`/inpatients/${patient.id}/edit`);
+                          }}
+                          data-testid={`button-edit-inpatient-${patient.id}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 text-destructive hover:text-destructive"
+                          aria-label="Delete admission"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteId(patient.id);
+                          }}
+                          data-testid={`button-delete-inpatient-${patient.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                    <div className="flex items-center pl-1">
+                      <ChevronRight className="h-5 w-5 text-muted-foreground/40 pointer-events-none" />
+                    </div>
                   </div>
-                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this admission?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the in-patient record. Only use if the entry was created by mistake.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteAdmission}
+              disabled={deleteInPatient.isPending}
+            >
+              {deleteInPatient.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
