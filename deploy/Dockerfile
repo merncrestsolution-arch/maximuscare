@@ -15,10 +15,14 @@ ENV NODE_ENV=production
 ENV PORT=5000
 ENV HOST=0.0.0.0
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# Full install (incl. drizzle-kit) so start:prod can create/upgrade the schema
+RUN npm ci
 COPY --from=build /app/dist ./dist
+COPY drizzle.config.ts ./
+COPY shared ./shared
+COPY drizzle ./drizzle
 RUN mkdir -p /app/data/uploads
 EXPOSE 5000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||5000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "dist/index.cjs"]
+CMD ["npm", "run", "start:prod"]
