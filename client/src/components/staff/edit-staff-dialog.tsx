@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2 } from "lucide-react";
+import { useBranchOptions } from "@/hooks/use-branch-options";
 
 interface EditStaffDialogProps {
   staff: User;
@@ -20,6 +21,7 @@ interface EditStaffDialogProps {
 export function EditStaffDialog({ staff, isOpen, onClose, onSave, onDelete }: EditStaffDialogProps) {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { options: branchOptions } = useBranchOptions();
 
   const [formData, setFormData] = useState<User>({ ...staff });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -130,9 +132,10 @@ export function EditStaffDialog({ staff, isOpen, onClose, onSave, onDelete }: Ed
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Colombo">Colombo</SelectItem>
-                    <SelectItem value="Bandaragama">Bandaragama</SelectItem>
-                    <SelectItem value="Both">Both</SelectItem>
+                    {branchOptions.map((b) => (
+                      <SelectItem key={b.id} value={b.value}>{b.label}</SelectItem>
+                    ))}
+                    <SelectItem value="Both">All Branches</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -1,0 +1,272 @@
+import type { IStorage } from "../storage";
+import type { Staff, Visit } from "@shared/schema";
+import { normalizeBranchName } from "@shared/branches";
+import { clinicDateString } from "../clinicTime";
+import { loadPayrollSettings, computePayrollForStaff } from "./payrollService";
+import {
+  computeExpenseBreakdown,
+  summarizeAttendance,
+  isPaidPaymentStatus,
+  visitMatchesStaff,
+} from "./calculationEngine";
+import { computeExtendedDashboardKpis, computeDashboardCharts, type DashboardCharts } from "./reportService";
+
+export interface DashboardKpis {
+  date: string;
+  rangeFrom: string;
+  rangeTo: string;
+  todayVisits: number;
+  todayClinicVisits: number;
+  todayHomeVisits: number;
+  todaySessions: number;
+  todayRevenue: number;
+  attendance: { present: number; absent: number; leave: number; holiday: number };
+  todayAttendance: { present: number; absent: number; leave: number; holiday: number };
+  incentiveCountToday: number;
+  incentiveAmountToday: number;
+  homeVisitIncomeToday: number;
+  salaryLiability: number;
+  outstandingAmount: number;
+  outstandingPatients: number;
+  revenue: { total: number };
+  expenses: { total: number; byCategory: Record<string, number> };
+  charts: DashboardCharts;
+}
+
+export interface BranchDashboardStat {
+  branch: string;
+  clinicVisits: number;
+  homeVisits: number;
+  sessions: number;
+  revenue: number;
+  attendance: { present: number; absent: number; leave: number; holiday: number };
+  incentiveAmount: number;
+}
+
+function filterVisitsByBranch(visits: Visit[], branch: string) {
+  const target = normalizeBranchName(branch).toLowerCase();
+  return visits.filter((v) => normalizeBranchName(v.branch).toLowerCase() === target);
+}
+
+function filterByBranchName<T extends { branch?: string | null }>(items: T[], branchName?: string | null): T[] {
+  if (!branchName) return items;
+  const target = normalizeBranchName(branchName).toLowerCase();
+  return items.filter((item) => normalizeBranchName(item.branch).toLowerCase() === target);
+}
+
+export async function computeDashboardKpis(
+  storage: IStorage,
+  rangeFrom: string,
+  rangeTo: string,
+  staffFilter?: string[],
+  branchFilter?: string | null
+): Promise<DashboardKpis> {
+  const today = clinicDateString();
+  let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
+  if (branchFilter) visits = filterVisitsByBranch(visits, branchFilter);
+  const todayVisits = visits.filter((v) => v.visitDate === today);
+  const ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
+  const todaySessions = ipSessions.filter((s) => s.sessionDate === today).length;
+
+  const totalRevenue = branchFilter
+    ? visits.reduce((sum, v) => sum + (Number(v.paymentAmount) || 0), 0)
+    : await storage.getTotalIncome(rangeFrom, rangeTo);
+  let attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
+  if (branchFilter) attendance = filterByBranchName(attendance, branchFilter);
+  const attendanceSummary = summarizeAttendance(attendance);
+
+  const settings = await loadPayrollSettings(storage);
+  const allStaff = await storage.getAllStaff();
+  const targets = allStaff.filter((s) => {
+    const r = s.role;
+    if (r !== "Physiotherapist" && r !== "Staff") return false;
+    if (staffFilter?.length && !staffFilter.includes(s.id)) return false;
+    return true;
+  });
+
+  const fines = await storage.getStaffFinesByDateRange(rangeFrom, rangeTo);
+  let incentiveCountToday = 0;
+  let incentiveAmountToday = 0;
+  let homeVisitIncomeToday = 0;
+  let salaryLiability = 0;
+
+  for (const staff of targets) {
+    const summary = computePayrollForStaff(
+      staff,
+      visits,
+      attendance,
+      ipSessions,
+      fines,
+      rangeFrom,
+      rangeTo,
+      settings
+    );
+    salaryLiability += summary.finalSalary;
+    const todayIncentive = summary.incentiveDays.find((d) => d.date === today);
+    if (todayIncentive) {
+      incentiveCountToday += todayIncentive.count;
+      incentiveAmountToday += todayIncentive.incentive;
+    }
+    const todaySummary = computePayrollForStaff(
+      staff,
+      visits.filter((v) => v.visitDate === today),
+      attendance,
+      ipSessions.filter((s) => s.sessionDate === today),
+      [],
+      today,
+      today,
+      settings
+    );
+    homeVisitIncomeToday += todaySummary.homeIncome;
+  }
+
+  let expensesList = await storage.getExpensesByDateRange(rangeFrom, rangeTo);
+  if (branchFilter) {
+    const branchStaff = allStaff
+      .filter((s) => normalizeBranchName(s.branch).toLowerCase() === normalizeBranchName(branchFilter).toLowerCase())
+      .map((s) => s.id);
+    expensesList = expensesList.filter((e) => e.createdByStaffId && branchStaff.includes(e.createdByStaffId));
+  }
+  const expenses = computeExpenseBreakdown(expensesList);
+
+  const extended = await computeExtendedDashboardKpis(storage, rangeFrom, rangeTo, staffFilter, branchFilter);
+  const charts = await computeDashboardCharts(storage, rangeFrom, rangeTo, branchFilter);
+
+  return {
+    date: today,
+    rangeFrom,
+    rangeTo,
+    todayVisits: todayVisits.length,
+    todayClinicVisits: extended.todayClinicVisits,
+    todayHomeVisits: extended.todayHomeVisits,
+    todaySessions: extended.todaySessions,
+    todayRevenue: extended.todayRevenue,
+    attendance: attendanceSummary,
+    todayAttendance: extended.todayAttendance,
+    incentiveCountToday,
+    incentiveAmountToday,
+    homeVisitIncomeToday,
+    salaryLiability,
+    outstandingAmount: extended.outstandingAmount,
+    outstandingPatients: extended.outstandingPatients,
+    revenue: { total: totalRevenue },
+    expenses,
+    charts,
+  };
+}
+
+export async function computeBranchDashboardStats(
+  storage: IStorage,
+  rangeFrom: string,
+  rangeTo: string
+): Promise<BranchDashboardStat[]> {
+  const visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
+  const ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
+  const attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
+  const settings = await loadPayrollSettings(storage);
+  const staffDirectory = await storage.getAllStaff();
+  const allStaff = staffDirectory.filter((st) => st.role === "Physiotherapist" || st.role === "Staff");
+  const fines = await storage.getStaffFinesByDateRange(rangeFrom, rangeTo);
+  const branchNames = ["Colombo", "Bandaragama"];
+
+  return branchNames.map((branch) => {
+    const branchVisits = filterVisitsByBranch(visits, branch);
+    const clinicVisits = branchVisits.filter((v) => v.visitType === "Clinic").length;
+    const homeVisits = branchVisits.filter((v) => v.visitType === "Home").length;
+    const branchStaffIds = new Set(
+      staffDirectory
+        .filter((s) => String(s.branch ?? "").trim().toLowerCase() === branch.toLowerCase())
+        .map((s) => s.id)
+    );
+    const sessions = ipSessions.filter((s) => branchStaffIds.has(s.treatingStaffId)).length;
+
+    const revenue = branchVisits
+      .filter((v) => isPaidPaymentStatus(v.paymentStatus))
+      .reduce((acc, v) => acc + (Number(v.paymentAmount) || 0), 0);
+    const attendanceSummary = summarizeAttendance(
+      attendance.filter((a) => branchStaffIds.has(a.staffId))
+    );
+
+    let incentiveAmount = 0;
+    for (const staff of allStaff) {
+      const staffVisits = branchVisits.filter((v) => visitMatchesStaff(v, staff.id, staff.name));
+      if (staffVisits.length === 0) continue;
+      const summary = computePayrollForStaff(
+        staff,
+        staffVisits,
+        attendance.filter((a) => a.staffId === staff.id),
+        ipSessions.filter((s) => s.treatingStaffId === staff.id),
+        fines.filter((f) => f.staffId === staff.id),
+        rangeFrom,
+        rangeTo,
+        settings
+      );
+      incentiveAmount += summary.incentiveTotal;
+    }
+
+    return {
+      branch,
+      clinicVisits,
+      homeVisits,
+      sessions,
+      revenue,
+      attendance: attendanceSummary,
+      incentiveAmount,
+    };
+  });
+}
+
+export function assignPatientsToFirstVisitTherapist(
+  visits: Visit[],
+  patients: { id: string; name: string; fullName?: string | null; therapistFirstVisitId?: string | null }[],
+  staff: Staff[]
+): { therapistId: string; therapistName: string; patients: { id: string; name: string; visitCount: number }[] }[] {
+  const patientMap = new Map(patients.map((p) => [p.id, p]));
+  const staffMap = new Map(staff.map((s) => [s.id, s]));
+  const visitsByPatient = new Map<string, Visit[]>();
+
+  for (const v of visits) {
+    if (!visitsByPatient.has(v.patientId)) visitsByPatient.set(v.patientId, []);
+    visitsByPatient.get(v.patientId)!.push(v);
+  }
+
+  const byTherapist = new Map<
+    string,
+    { therapistId: string; therapistName: string; patients: { id: string; name: string; visitCount: number }[] }
+  >();
+
+  for (const [patientId, pVisits] of Array.from(visitsByPatient.entries())) {
+    const patient = patientMap.get(patientId);
+    if (!patient) continue;
+
+    const sorted = [...pVisits].sort((a, b) => {
+      const d = a.visitDate.localeCompare(b.visitDate);
+      if (d !== 0) return d;
+      return String(a.createdAt).localeCompare(String(b.createdAt));
+    });
+    const first = sorted[0];
+    const therapistId = patient.therapistFirstVisitId ?? first?.treatingStaffId;
+    if (!therapistId) continue;
+
+    const therapist = staffMap.get(therapistId);
+    if (!byTherapist.has(therapistId)) {
+      byTherapist.set(therapistId, {
+        therapistId,
+        therapistName: therapist?.name ?? first?.treatingStaffName ?? "Unknown",
+        patients: [],
+      });
+    }
+    byTherapist.get(therapistId)!.patients.push({
+      id: patient.id,
+      name: patient.fullName ?? patient.name,
+      visitCount: pVisits.length,
+    });
+  }
+
+  return Array.from(byTherapist.values())
+    .map((t) => ({
+      ...t,
+      patients: t.patients.sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => a.therapistName.localeCompare(b.therapistName));
+}

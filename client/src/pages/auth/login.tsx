@@ -7,21 +7,27 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useBranding } from "@/context/branding-context";
 import { SiteCreditFooter } from "@/components/site-credit-footer";
 import { LoginStyleSplash } from "@/components/auth/login-style-splash";
+import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
   const { login } = useAuth();
   const { logoUri } = useBranding();
+  const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
     try {
-      await login(email, password);
-    } catch (error) {
-      alert("Invalid credentials");
+      await login(email.trim().toLowerCase(), password);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Login failed";
+      setError(message);
+      toast({ title: "Sign in failed", description: message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -66,6 +72,11 @@ export default function LoginPage() {
                 data-testid="input-password"
               />
             </div>
+            {error && (
+              <p className="text-sm text-destructive text-center" role="alert" data-testid="text-login-error">
+                {error}
+              </p>
+            )}
             <Button
               type="submit"
               variant="outline"
@@ -76,6 +87,9 @@ export default function LoginPage() {
               {loading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            Default: admin@maximuscare.com / admin123
+          </p>
         </CardContent>
       </Card>
       </div>

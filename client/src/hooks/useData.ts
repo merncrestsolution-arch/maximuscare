@@ -1,12 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { patientApi, visitApi, attendanceApi, staffApi, reportsApi, inPatientApi, expenseApi, revenueApi, incentiveSettingsApi, appointmentApi, staffFinesApi } from '@/lib/api';
+import { patientApi, visitApi, attendanceApi, attendanceApiExtended, staffApi, reportsApi, inPatientApi, expenseApi, revenueApi, incentiveSettingsApi, appointmentApi, staffFinesApi, payrollApi, salaryApi, patientsApiExtended, visitPaymentsApi, homeVisitsApi, clinicSettingsApi, branchesApi, notificationsApi, tasksApi, reportsApiExtended, unwrapPaginatedList } from '@/lib/api';
 import { useAuth } from '@/context/auth-context';
 
 // Patient hooks
-export function usePatients(branch?: string) {
+export function usePatients(params?: {
+  branch?: string;
+  search?: string;
+  status?: string;
+  page?: number;
+  limit?: number;
+}) {
   return useQuery({
-    queryKey: ['patients', branch],
-    queryFn: () => patientApi.getAll(branch),
+    queryKey: ['patients', params],
+    queryFn: () => patientApi.getAll(params).then(unwrapPaginatedList),
   });
 }
 
@@ -55,6 +61,14 @@ export function useVisits(params?: { patientId?: string; startDate?: string; end
   return useQuery({
     queryKey: ['visits', params],
     queryFn: () => visitApi.getAll(params),
+  });
+}
+
+export function useUnpaidVisits(enabled = true) {
+  return useQuery({
+    queryKey: ['visits', 'unpaid'],
+    queryFn: () => visitApi.getUnpaid(),
+    enabled,
   });
 }
 
@@ -117,6 +131,7 @@ export function useCreateAttendance() {
     mutationFn: attendanceApi.create,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
       await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
     },
   });
@@ -128,6 +143,7 @@ export function useUpdateAttendance() {
     mutationFn: ({ id, data }: { id: string; data: any }) => attendanceApi.update(id, data),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
       await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
     },
   });
@@ -139,17 +155,18 @@ export function useDeleteAttendance() {
     mutationFn: (id: string) => attendanceApi.delete(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
       await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
     },
   });
 }
 
 // Staff hooks
-export function useStaff() {
+export function useStaff(params?: { includeInactive?: boolean }) {
   const { user } = useAuth();
   return useQuery({
-    queryKey: ['staff'],
-    queryFn: staffApi.getAll,
+    queryKey: ['staff', params],
+    queryFn: () => staffApi.getAll(params),
     // API returns full list for Admin/MD, or [self] for others — needed for visit staff dropdowns
     enabled: !!user,
   });
@@ -614,5 +631,405 @@ export function useRevenueSummary(params?: { startDate?: string; endDate?: strin
     queryKey: ['revenue-summary', params],
     queryFn: () => revenueApi.getSummary(params),
     enabled,
+  });
+}
+
+export function usePayrollReport(params: { startDate: string; endDate: string; staffId?: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['payroll-report', params],
+    queryFn: () => payrollApi.getReport(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useClinicSettings(enabled = true) {
+  return useQuery({
+    queryKey: ['clinic-settings'],
+    queryFn: () => clinicSettingsApi.get(),
+    enabled,
+  });
+}
+
+export function useUpdateClinicSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: clinicSettingsApi.update,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['clinic-settings'] });
+      queryClient.invalidateQueries({ queryKey: ['payroll-report'] });
+    },
+  });
+}
+
+export function useBranches() {
+  return useQuery({
+    queryKey: ['branches'],
+    queryFn: () => branchesApi.getAll(),
+  });
+}
+
+export function useNotifications(opts?: { unreadOnly?: boolean; archived?: boolean }) {
+  return useQuery({
+    queryKey: ['notifications', opts],
+    queryFn: () => notificationsApi.getAll(opts),
+    refetchInterval: 60000,
+  });
+}
+
+export function useStaffDirectory(params?: Record<string, string | boolean>, enabled = true) {
+  return useQuery({
+    queryKey: ['staff-directory', params],
+    queryFn: () => staffApi.directory(params),
+    enabled,
+  });
+}
+
+export function useStaffStats(staffId: string, params?: { startDate?: string; endDate?: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['staff-stats', staffId, params],
+    queryFn: () => staffApi.stats(staffId, params),
+    enabled: enabled && !!staffId,
+  });
+}
+
+export function useAttendanceDashboard(date?: string) {
+  return useQuery({
+    queryKey: ['attendance-dashboard', date],
+    queryFn: () => attendanceApiExtended.dashboard(date),
+  });
+}
+
+export function useTaskDashboard(all?: boolean) {
+  return useQuery({
+    queryKey: ['task-dashboard', all],
+    queryFn: () => tasksApi.dashboard(all),
+  });
+}
+
+export function useArchiveNotification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => notificationsApi.archive(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+}
+
+export function useDeleteNotification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => notificationsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
+    },
+  });
+}
+
+export function useUnreadNotificationCount() {
+  return useQuery({
+    queryKey: ['notifications-unread-count'],
+    queryFn: () => notificationsApi.getUnreadCount(),
+    refetchInterval: 30000,
+  });
+}
+
+export function useMarkNotificationRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => notificationsApi.markRead(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
+    },
+  });
+}
+
+export function useMarkAllNotificationsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => notificationsApi.markAllRead(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
+    },
+  });
+}
+
+export function useTasks(params?: { status?: string; all?: boolean }, enabled = true) {
+  return useQuery({
+    queryKey: ['tasks', params],
+    queryFn: () => tasksApi.getAll(params),
+    enabled,
+  });
+}
+
+export function useCreateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: tasksApi.create,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['task-dashboard'] });
+    },
+  });
+}
+
+export function useUpdateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => tasksApi.update(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  });
+}
+
+export function useDeleteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: tasksApi.delete,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  });
+}
+
+export function useDashboardKpis(params: { startDate: string; endDate: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['dashboard-kpis', params],
+    queryFn: () => reportsApiExtended.dashboardKpis(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useBranchStats(params: { startDate: string; endDate: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['branch-stats', params],
+    queryFn: () => reportsApiExtended.branchStats(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useTherapistPatientReport(enabled = true) {
+  return useQuery({
+    queryKey: ['therapist-patient-report'],
+    queryFn: () => reportsApiExtended.therapistPatients(),
+    enabled,
+  });
+}
+
+export function useRevenueReport(params: { startDate: string; endDate: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['revenue-report', params],
+    queryFn: () => reportsApiExtended.revenue(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useIncentiveReport(params: { startDate: string; endDate: string; staffId?: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['incentive-report', params],
+    queryFn: () => reportsApiExtended.incentive(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useAttendanceReport(params: { startDate: string; endDate: string; staffId?: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['attendance-report', params],
+    queryFn: () => reportsApiExtended.attendance(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useExpenseReport(params: { startDate: string; endDate: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['expense-report', params],
+    queryFn: () => reportsApiExtended.expenses(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useUnpaidReport(enabled = true) {
+  return useQuery({
+    queryKey: ['unpaid-report'],
+    queryFn: () => reportsApiExtended.unpaid(),
+    enabled,
+  });
+}
+
+export function useStaffReport(
+  params: { staffId: string; startDate: string; endDate: string },
+  enabled = true
+) {
+  return useQuery({
+    queryKey: ['staff-report', params],
+    queryFn: () => reportsApiExtended.staffReport(params.staffId, { startDate: params.startDate, endDate: params.endDate }),
+    enabled: enabled && !!params.staffId && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useSalaryDashboard(enabled = true) {
+  return useQuery({
+    queryKey: ['salary-dashboard'],
+    queryFn: () => salaryApi.dashboard(),
+    enabled,
+  });
+}
+
+export function useSalaryHistory(params?: { month?: string; year?: string; branch?: string; staffId?: string; status?: string }) {
+  return useQuery({
+    queryKey: ['salary-history', params],
+    queryFn: () => salaryApi.history(params),
+  });
+}
+
+export function useSalaryPreview(params: { staffId: string; periodStart: string; periodEnd: string }, enabled = false) {
+  return useQuery({
+    queryKey: ['salary-preview', params],
+    queryFn: () => salaryApi.preview(params),
+    enabled: enabled && !!params.staffId && !!params.periodStart && !!params.periodEnd,
+  });
+}
+
+export function useGenerateSalary() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: salaryApi.generate,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['salary-history'] });
+      queryClient.invalidateQueries({ queryKey: ['salary-dashboard'] });
+    },
+  });
+}
+
+export function useSalaryApprovalActions() {
+  const queryClient = useQueryClient();
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['salary-history'] });
+    queryClient.invalidateQueries({ queryKey: ['salary-dashboard'] });
+  };
+  return {
+    approve: useMutation({ mutationFn: salaryApi.approve, onSuccess: invalidate }),
+    reject: useMutation({ mutationFn: ({ id, reason }: { id: string; reason: string }) => salaryApi.reject(id, reason), onSuccess: invalidate }),
+    returnForReview: useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => salaryApi.returnForReview(id, reason), onSuccess: invalidate }),
+    markPaid: useMutation({
+      mutationFn: ({ id, ...data }: { id: string; paymentMethod: string; paymentReference?: string; paymentRemarks?: string }) =>
+        salaryApi.markPaid(id, data),
+      onSuccess: invalidate,
+    }),
+  };
+}
+
+export function useStaffDeductions(params?: { staffId?: string; startDate?: string; endDate?: string }) {
+  return useQuery({
+    queryKey: ['staff-deductions', params],
+    queryFn: () => salaryApi.deductions.list(params),
+  });
+}
+
+export function useStaffOtEntries(params?: { staffId?: string; startDate?: string; endDate?: string }) {
+  return useQuery({
+    queryKey: ['staff-ot', params],
+    queryFn: () => salaryApi.ot.list(params),
+  });
+}
+
+export function useCreateStaffDeduction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: salaryApi.deductions.create,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['staff-deductions'] }),
+  });
+}
+
+export function useCreateStaffOt() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: salaryApi.ot.create,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['staff-ot'] }),
+  });
+}
+
+export function usePatientDashboard(enabled = true) {
+  return useQuery({
+    queryKey: ['patient-dashboard'],
+    queryFn: () => patientsApiExtended.dashboard(),
+    enabled,
+  });
+}
+
+export function usePatientStats(patientId: string) {
+  return useQuery({
+    queryKey: ['patient-stats', patientId],
+    queryFn: () => patientsApiExtended.stats(patientId),
+    enabled: !!patientId,
+  });
+}
+
+export function usePatientDocuments(patientId: string) {
+  return useQuery({
+    queryKey: ['patient-documents', patientId],
+    queryFn: () => patientsApiExtended.documents.list(patientId),
+    enabled: !!patientId,
+  });
+}
+
+export function usePatientNotes(patientId: string) {
+  return useQuery({
+    queryKey: ['patient-notes', patientId],
+    queryFn: () => patientsApiExtended.notes.list(patientId),
+    enabled: !!patientId,
+  });
+}
+
+export function useCollectVisitPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ visitId, ...data }: { visitId: string; amount: number; paymentMethod: string; paymentDate: string; paymentReference?: string; remarks?: string }) =>
+      visitPaymentsApi.collect(visitId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['visits'] });
+      queryClient.invalidateQueries({ queryKey: ['unpaid-report'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-export'] });
+    },
+  });
+}
+
+export function useHomeVisits(params?: { startDate?: string; endDate?: string; branch?: string; staffId?: string; visitType?: string }) {
+  return useQuery({
+    queryKey: ['home-visits', params],
+    queryFn: () => homeVisitsApi.list(params),
+  });
+}
+
+export function useCreatePatientNote() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ patientId, ...data }: { patientId: string; title: string; description: string }) =>
+      patientsApiExtended.notes.create(patientId, data),
+    onSuccess: (_d, v) => queryClient.invalidateQueries({ queryKey: ['patient-notes', v.patientId] }),
+  });
+}
+
+export function useCreatePatientDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ patientId, ...data }: { patientId: string; fileName: string; documentType: string; contentBase64: string }) =>
+      patientsApiExtended.documents.upload(patientId, data),
+    onSuccess: (_d, v) => queryClient.invalidateQueries({ queryKey: ['patient-documents', v.patientId] }),
+  });
+}
+
+export function usePatientExport(enabled = true) {
+  return useQuery({
+    queryKey: ['patient-export'],
+    queryFn: () => patientsApiExtended.export(),
+    enabled,
+  });
+}
+
+export function useSessionReport(params: { startDate: string; endDate: string; staffId?: string }, enabled = true) {
+  return useQuery({
+    queryKey: ['session-report', params],
+    queryFn: () => reportsApiExtended.sessions(params),
+    enabled: enabled && !!params.startDate && !!params.endDate,
   });
 }

@@ -4,7 +4,54 @@ import { storage } from "./storage";
 import { db, schema } from "./db";
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
-import { syncAutoFineForStaffDate } from "./autoFineSync";
+import { isAutoFineSessionRole, syncAutoFineForStaffDate } from "./autoFineSync";
+import { createSession, destroySession, requireAuth } from "./auth";
+import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest } from "./helpers/authCookies";
+import { attachBranchContext, requireBranchContext, resolveBranchFilter, getBranchFilter } from "./middleware/branchContext";
+import {
+  requireCriticalDelete,
+  requirePatientsManage,
+  requireAppointmentsManage,
+  requireStaffManage,
+  requireVisitsManage,
+  requireAttendanceManage,
+  requireSettingsManage,
+  requireInpatientsManage,
+  requireExpensesManage,
+  requireReportsView,
+  requireSalaryManage,
+} from "./middleware/secureApi";
+import { filterByBranchName } from "./services/branchService";
+import { registerAutoFineJobs, startScheduledJobs } from "./jobs/scheduler";
+import { clinicDateString, clinicYesterdayString, clinicDateOffset } from "./clinicTime";
+import { registerHrmRoutes } from "./routes/hrm";
+import { ensureEmployeeCode } from "./services/staffService";
+import {
+  validateBranch,
+  validatePaymentStatus,
+  validateAttendanceStatus,
+  computeNextSessionNumber,
+} from "./services/calculationEngine";
+import {
+  canViewAllPatients,
+  canViewAllVisits,
+  canEditVisit,
+} from "./permissions";
+import { registerExtendedRoutes } from "./routes/extended";
+import { registerSalaryRoutes } from "./routes/salary";
+import { registerPatientRoutes } from "./routes/patients";
+import { generatePatientCode, assertNoDuplicatePatient } from "./services/patientService";
+import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
+import { logAudit } from "./services/auditService";
+
+async function auditActor(req: Request) {
+  const user = (req as any).user;
+  const editor = user?.staffId ? await storage.getStaff(user.staffId) : undefined;
+  const fwd = req.headers["x-forwarded-for"];
+  const ipAddress =
+    typeof fwd === "string" ? fwd.split(",")[0]?.trim() : req.socket.remoteAddress ?? "";
+  return { userId: user?.staffId ?? "", userName: editor?.name ?? "", ipAddress };
+}
 
 const {
   staff: staffTable,
@@ -33,9 +80,6 @@ const {
   updateStaffFineSchema,
 } = schema;
 import { z } from "zod";
-
-// Session store (in-memory for now)
-const sessions = new Map<string, { staffId: string; email: string; role: string }>();
 
 function param(req: Request, name: string): string {
   const v = req.params[name];
@@ -83,33 +127,62 @@ function normalizeInPatientAdmissionBody(body: Record<string, unknown>) {
   return normalized;
 }
 
-// Middleware to check authentication
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const sessionId = req.headers.authorization?.replace("Bearer ", "");
-  if (!sessionId || !sessions.has(sessionId)) {
-    return res.status(401).json({ message: "Login expired. Please re-login." });
-  }
-  const session = sessions.get(sessionId)!;
-  (req as any).user = session;
-  next();
+function parseJoinDateInput(value: unknown): Date | null {
+  if (!value || typeof value !== "string") return null;
+  const normalized = value.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+  const parsed = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
 }
 
-// Middleware to check roles
-function requireRole(...roles: string[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const user = (req as any).user;
-    if (!user || !roles.includes(user.role)) {
-      return res.status(403).json({ message: "Forbidden: insufficient permissions" });
-    }
-    next();
-  };
+function joinDateString(value: unknown): string | null {
+  const parsed = parseJoinDateInput(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : null;
+}
+
+function coerceBooleanField(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "boolean") return value;
+  if (value === 1 || value === "1" || value === "true") return true;
+  if (value === 0 || value === "0" || value === "false") return false;
+  return Boolean(value);
+}
+
+/** Strip UI-only fields and coerce types before staff schema validation. */
+function normalizeStaffBody(body: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...body };
+  delete normalized.avatar;
+  delete normalized.confirmPassword;
+  delete normalized.id;
+  delete normalized.joinDate;
+  delete normalized.branchIds;
+  if (normalized.isActive !== undefined) {
+    normalized.isActive = coerceBooleanField(normalized.isActive);
+  }
+  return normalized;
+}
+
+function extractBranchIds(body: Record<string, unknown>): string[] | undefined {
+  const raw = body.branchIds;
+  if (!Array.isArray(raw)) return undefined;
+  return raw.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+}
+
+async function resolvePrimaryBranchLabel(branchIds: string[]): Promise<string | undefined> {
+  if (branchIds.length === 0) return undefined;
+  const all = await storage.getAllBranches();
+  const selected = all.filter((b) => branchIds.includes(b.id));
+  if (selected.length === 0) return undefined;
+  if (selected.length === 1) {
+    return selected[0].branchName ?? selected[0].name;
+  }
+  return "Both";
 }
 
 async function autoMarkMissingAttendanceForPreviousDay() {
-  const previousDay = new Date();
-  previousDay.setDate(previousDay.getDate() - 1);
-  const date = previousDay.toISOString().split("T")[0];
-  const allStaff = await storage.getAllStaff();
+  const date = clinicYesterdayString();
+  const allStaff = await storage.getActiveStaff();
   const targetStaff = allStaff.filter((s) => !["Admin", "MD"].includes(s.role));
 
   for (const staff of targetStaff) {
@@ -128,17 +201,25 @@ async function autoMarkMissingAttendanceForPreviousDay() {
 /** Reconcile auto fines for recent days (present + no session before noon). Runs on boot and daily. */
 async function runAutoFineSweepForRecentDays() {
   const allStaff = await storage.getAllStaff();
-  const physios = allStaff.filter((s) => !["Admin", "MD"].includes(s.role));
+  const sessionStaff = allStaff.filter((s) => isAutoFineSessionRole(s.role));
   const dates: string[] = [];
   for (let i = 0; i < 14; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().split("T")[0]);
+    dates.push(clinicDateOffset(-i));
   }
-  for (const s of physios) {
+  for (const s of sessionStaff) {
     for (const fineDate of dates) {
       await syncAutoFineForStaffDate(storage, s.id, fineDate);
     }
+  }
+}
+
+/** Run auto-fine sweep for today only — scheduled at 12:00 PM clinic time. */
+async function runAutoFineSweepForToday() {
+  const today = clinicDateString();
+  const allStaff = await storage.getAllStaff();
+  const sessionStaff = allStaff.filter((s) => isAutoFineSessionRole(s.role));
+  for (const s of sessionStaff) {
+    await syncAutoFineForStaffDate(storage, s.id, today);
   }
 }
 
@@ -146,6 +227,9 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  const { initWebSocketServer } = await import("./realtime/wsHub");
+  initWebSocketServer(httpServer);
+
   // Health check (for Render, Railway, etc.)
   app.get("/api/health", (_req, res) =>
     res.json({
@@ -162,7 +246,8 @@ export async function registerRoutes(
   // Login
   app.post("/api/auth/login", async (req: Request, res: Response) => {
     try {
-      const { email, password } = req.body;
+      const email = String(req.body.email || "").trim().toLowerCase();
+      const password = String(req.body.password || "");
       
       if (!email || !password) {
         return res.status(400).json({ message: "Email and password required" });
@@ -173,6 +258,9 @@ export async function registerRoutes(
       if (!staff || !staff.password) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
+      if ((staff as any).isActive === 0 || (staff as any).isActive === false) {
+        return res.status(403).json({ message: "Staff account is deactivated. Contact Admin/MD." });
+      }
 
       const isValidPassword = await bcrypt.compare(password, staff.password);
       
@@ -180,28 +268,184 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      // Generate session ID (cryptographically secure)
-      const sessionId = crypto.randomUUID();
-      sessions.set(sessionId, { staffId: staff.id, email: staff.email, role: staff.role });
+      const { issueAuthTokens } = await import("./auth");
+      const tokens = await issueAuthTokens(staff.id, staff.email, staff.role);
+      const { getAllowedBranchesForStaff } = await import("./services/branchService");
+      const allowedBranches = await getAllowedBranchesForStaff(storage, staff.id, staff.role);
 
-      // Return user without password
       const { password: _, ...userWithoutPassword } = staff;
-      return res.json({ user: userWithoutPassword, sessionId });
+      setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+      return res.json({
+        user: userWithoutPassword,
+        sessionId: tokens.sessionId,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        allowedBranches: allowedBranches.map((b) => ({
+          id: b.id,
+          name: b.name,
+          branchName: b.branchName,
+          code: (b as { code?: string }).code,
+        })),
+        requiresBranchSelection: true,
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
-  // Get current user
+  // Get current user + branch context
   app.get("/api/auth/me", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
+      const sessionId = (req as any).sessionId;
       const staff = await storage.getStaff(user.staffId);
       if (!staff) {
         return res.status(404).json({ message: "User not found" });
       }
       const { password: _, ...userWithoutPassword } = staff;
-      return res.json(userWithoutPassword);
+      const { resolveBranchAccessContext, hasCompletedBranchSelection } = await import("./services/branchService");
+      const session = sessionId ? await storage.getAuthSession(sessionId) : undefined;
+      const branchContext = await resolveBranchAccessContext(
+        storage,
+        user.staffId,
+        user.role,
+        session
+      );
+      return res.json({
+        ...userWithoutPassword,
+        selectedBranchId: branchContext.selectedBranchId,
+        selectedBranchName: branchContext.selectedBranchName,
+        selectedContext: branchContext.selectedContext,
+        allowedBranchIds: branchContext.allowedBranchIds,
+        allowedBranches: branchContext.allowedBranches.map((b) => ({
+          id: b.id,
+          name: b.name,
+          branchName: b.branchName,
+          code: (b as { code?: string }).code,
+        })),
+        canAccessMaximusOverview: branchContext.canAccessMaximusOverview,
+        canAccessNexusOverview: branchContext.canAccessNexusOverview,
+        requiresBranchSelection: !hasCompletedBranchSelection(branchContext),
+      });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // List allowed branches for current user
+  app.get("/api/auth/branches", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const { getAllowedBranchesForStaff } = await import("./services/branchService");
+      const branches = await getAllowedBranchesForStaff(storage, user.staffId, user.role);
+      return res.json(branches);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Select active branch after login
+  app.post("/api/auth/select-branch", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const sessionId = (req as any).sessionId;
+      const { branchId } = req.body;
+      if (!branchId) {
+        return res.status(400).json({ message: "branchId is required" });
+      }
+      const { getAllowedBranchesForStaff, assertBranchAccess } = await import("./services/branchService");
+      const allowed = await getAllowedBranchesForStaff(storage, user.staffId, user.role);
+      assertBranchAccess(branchId, allowed.map((b) => b.id));
+      if (sessionId) {
+        await storage.updateAuthSessionBranch(sessionId, branchId);
+      }
+      await storage.setUserDefaultBranch(user.staffId, branchId);
+      const selected = allowed.find((b) => b.id === branchId);
+      const { cacheDeletePrefix } = await import("./services/cacheService");
+      await cacheDeletePrefix("dashboard:");
+      return res.json({
+        selectedBranchId: branchId,
+        selectedBranchName: selected?.branchName ?? selected?.name ?? null,
+        selectedContext: null,
+        allowedBranches: allowed.map((b) => ({
+          id: b.id,
+          name: b.name,
+          branchName: b.branchName,
+          code: (b as { code?: string }).code,
+        })),
+        userRole: user.role,
+      });
+    } catch (error: any) {
+      return res.status(403).json({ message: error.message || "Unauthorized Branch Access" });
+    }
+  });
+
+  // Clear branch/overview selection (return to workspace picker)
+  app.post("/api/auth/clear-workspace", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const sessionId = (req as any).sessionId;
+      if (sessionId) {
+        await storage.clearAuthSessionSelection(sessionId);
+      }
+      return res.json({ requiresBranchSelection: true });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Select overview context (Maximus / Nexus) after login
+  app.post("/api/auth/select-context", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const sessionId = (req as any).sessionId;
+      const { context } = req.body;
+      if (context !== "maximus-overview" && context !== "nexus-overview") {
+        return res.status(400).json({ message: "Invalid overview context" });
+      }
+      const { assertOverviewAccess, getAllowedBranchesForStaff } = await import("./services/branchService");
+      assertOverviewAccess(context, user.role);
+      if (sessionId) {
+        await storage.updateAuthSessionContext(sessionId, context);
+      }
+      const allowed = await getAllowedBranchesForStaff(storage, user.staffId, user.role);
+      const { cacheDeletePrefix } = await import("./services/cacheService");
+      await cacheDeletePrefix("dashboard:");
+      return res.json({
+        selectedBranchId: null,
+        selectedBranchName: null,
+        selectedContext: context,
+        allowedBranches: allowed.map((b) => ({
+          id: b.id,
+          name: b.name,
+          branchName: b.branchName,
+          code: (b as { code?: string }).code,
+        })),
+        userRole: user.role,
+      });
+    } catch (error: any) {
+      return res.status(403).json({ message: error.message });
+    }
+  });
+
+  // Refresh JWT access token
+  app.post("/api/auth/refresh", async (req: Request, res: Response) => {
+    try {
+      const refreshToken = getRefreshTokenFromRequest(req);
+      if (!refreshToken) {
+        return res.status(400).json({ message: "refreshToken is required" });
+      }
+      const { refreshAuthTokens } = await import("./auth");
+      const tokens = await refreshAuthTokens(refreshToken);
+      if (!tokens) {
+        clearAuthCookies(res);
+        return res.status(401).json({ message: "Invalid or expired refresh token" });
+      }
+      setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+      return res.json({
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        sessionId: tokens.sessionId,
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -209,24 +453,37 @@ export async function registerRoutes(
 
   // Logout
   app.post("/api/auth/logout", requireAuth, async (req: Request, res: Response) => {
-    const sessionId = req.headers.authorization?.replace("Bearer ", "");
+    const sessionId = (req as any).sessionId;
     if (sessionId) {
-      sessions.delete(sessionId);
+      await destroySession(sessionId);
     }
+    clearAuthCookies(res);
     return res.json({ message: "Logged out successfully" });
   });
 
   // ========== Staff Routes ==========
-  
-  // Get all staff (Admin/MD get full list, others get only themselves)
+  registerHrmRoutes(app);
+
+  // Get all staff (Admin/MD get branch-scoped list, others get only themselves)
   app.get("/api/staff", requireAuth, async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
       const isAdmin = ["Admin", "MD"].includes(currentUser.role);
+      const { loadBranchContext, getSelectedBranchName } = await import("./middleware/branchContext");
+      await loadBranchContext(req as any);
+      const branchFilter = getSelectedBranchName(req as any);
 
       if (isAdmin) {
+        const includeInactive = String(req.query.includeInactive || "").toLowerCase() === "true";
         const allStaff = await storage.getAllStaff();
-        const staffWithoutPasswords = allStaff.map(({ password, ...staff }) => staff);
+        let filtered = includeInactive
+          ? allStaff
+          : allStaff.filter((s: any) => !(s.isActive === 0 || s.isActive === false));
+        if (branchFilter) {
+          const { staffMatchesBranch } = await import("./services/staffService");
+          filtered = filtered.filter((s) => staffMatchesBranch(s, branchFilter));
+        }
+        const staffWithoutPasswords = filtered.map(({ password, ...staff }) => staff);
         return res.json(staffWithoutPasswords);
       } else {
         const selfStaff = await storage.getStaff(currentUser.staffId);
@@ -256,17 +513,24 @@ export async function registerRoutes(
       if (!staff) {
         return res.status(404).json({ message: "Staff not found" });
       }
+      const branchPermissions = await storage.getUserBranchPermissions(id);
       const { password: _, ...staffWithoutPassword } = staff;
-      return res.json(staffWithoutPassword);
+      return res.json({
+        ...staffWithoutPassword,
+        branchIds: branchPermissions.map((p) => p.branchId),
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
   // Create staff (Admin and MD)
-  app.post("/api/staff", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.post("/api/staff", requireAuth, requireStaffManage, async (req: Request, res: Response) => {
     try {
-      const validatedData = insertStaffSchema.parse(req.body);
+      const body = req.body as Record<string, unknown>;
+      const branchIds = extractBranchIds(body);
+      const joiningDate = joinDateString((body as any)?.joinDate);
+      const validatedData = insertStaffSchema.parse(normalizeStaffBody(body));
       
       // Check if email already exists
       const existingStaff = await storage.getStaffByEmail(validatedData.email);
@@ -274,15 +538,42 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Email already exists" });
       }
 
+      const primaryBranch = branchIds?.length
+        ? await resolvePrimaryBranchLabel(branchIds)
+        : validatedData.branch;
+
       // Hash password
       const hashedPassword = await bcrypt.hash(validatedData.password, 10);
       const staff = await storage.createStaff({
         ...validatedData,
         password: hashedPassword,
+        ...(primaryBranch ? { branch: primaryBranch } : {}),
+        ...(joiningDate ? { joiningDate } : {}),
+      } as any);
+
+      const latest = await storage.getStaff(staff.id);
+      const staffForResponse = latest || staff;
+      await ensureEmployeeCode(storage, staffForResponse);
+
+      if (branchIds && branchIds.length > 0) {
+        await storage.syncStaffBranchAccess(staffForResponse.id, branchIds);
+      }
+
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "staff",
+        action: "create",
+        recordId: staffForResponse.id,
+        newValue: staffForResponse,
       });
 
-      const { password: _, ...staffWithoutPassword } = staff;
-      return res.status(201).json(staffWithoutPassword);
+      const permissions = await storage.getUserBranchPermissions(staffForResponse.id);
+      const { password: _, ...staffWithoutPassword } = staffForResponse;
+      return res.status(201).json({
+        ...staffWithoutPassword,
+        branchIds: permissions.map((p) => p.branchId),
+      });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation error", errors: error.errors });
@@ -296,21 +587,77 @@ export async function registerRoutes(
     try {
       const id = param(req, "id");
       const currentUser = (req as any).user;
+      const body = req.body as Record<string, unknown>;
+      const branchIds = extractBranchIds(body);
+      const joiningDate = joinDateString((body as any)?.joinDate);
       
       // Allow user to update own profile, or Admin/MD to update any profile
       if (currentUser.staffId !== id && !["Admin", "MD"].includes(currentUser.role)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
-      const validatedData = updateStaffSchema.parse(req.body);
-      const staff = await storage.updateStaff(id, validatedData);
+      const validatedData = updateStaffSchema.parse(normalizeStaffBody(body));
+      const canManageOthers = ["Admin", "MD"].includes(currentUser.role);
+      if (!canManageOthers) {
+        delete (validatedData as any).isActive;
+        delete (validatedData as any).basicSalary;
+        delete (validatedData as any).salaryDate;
+        delete (validatedData as any).otherAdjustments;
+        delete (validatedData as any).photoUri;
+        delete (validatedData as any).role;
+        delete (validatedData as any).email;
+        delete (validatedData as any).branch;
+      }
+      const beforeStaff = await storage.getStaff(id);
+      const patch: Record<string, unknown> = { ...validatedData };
+      if (joiningDate) patch.joiningDate = joiningDate;
+      if (canManageOthers && branchIds && branchIds.length > 0) {
+        const primaryBranch = await resolvePrimaryBranchLabel(branchIds);
+        if (primaryBranch) patch.branch = primaryBranch;
+      }
+      if (canManageOthers && (validatedData as any).isActive !== undefined) {
+        const nextActive = (validatedData as any).isActive === true || (validatedData as any).isActive === 1;
+        if (!nextActive) {
+          patch.deactivatedAt = new Date();
+          patch.deactivatedBy = currentUser.staffId;
+        } else {
+          patch.deactivatedAt = null;
+          patch.deactivatedBy = null;
+        }
+      }
+      const staff = await storage.updateStaff(id, patch as any);
       
       if (!staff) {
         return res.status(404).json({ message: "Staff not found" });
       }
 
+      if (canManageOthers && branchIds && branchIds.length > 0) {
+        await storage.syncStaffBranchAccess(id, branchIds);
+      }
+
+      if (beforeStaff && canManageOthers) {
+        const actor = await auditActor(req);
+        const action =
+          (validatedData as any).isActive !== undefined &&
+          beforeStaff.isActive !== staff.isActive
+            ? staff.isActive ? "activate" : "deactivate"
+            : "update";
+        await logAudit(storage, {
+          ...actor,
+          module: "staff",
+          action,
+          recordId: id,
+          oldValue: beforeStaff,
+          newValue: staff,
+        });
+      }
+
+      const permissions = await storage.getUserBranchPermissions(id);
       const { password: _, ...staffWithoutPassword } = staff;
-      return res.json(staffWithoutPassword);
+      return res.json({
+        ...staffWithoutPassword,
+        branchIds: permissions.map((p) => p.branchId),
+      });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation error", errors: error.errors });
@@ -372,12 +719,23 @@ export async function registerRoutes(
   });
 
   // Delete staff (Admin only)
-  app.delete("/api/staff/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/staff/:id", requireAuth, requireStaffManage, async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
-      const deleted = await storage.deleteStaff(id);
+      const beforeStaff = await storage.getStaff(id);
+      const deleted = await storage.deleteStaff(id, (req as any).user?.staffId);
       if (!deleted) {
         return res.status(404).json({ message: "Staff not found" });
+      }
+      if (beforeStaff) {
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "staff",
+          action: "delete",
+          recordId: id,
+          oldValue: beforeStaff,
+        });
       }
       return res.json({ message: "Staff deleted successfully" });
     } catch (error: any) {
@@ -387,29 +745,74 @@ export async function registerRoutes(
 
   // ========== Patient Routes ==========
   
-  // Get all patients
-  app.get("/api/patients", requireAuth, async (req: Request, res: Response) => {
+  // Get all patients (optional pagination: ?page=1&limit=20&search=&status=&branch=)
+  app.get("/api/patients", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
-      const branch = req.query.branch as string | undefined;
-      let patients;
-      if (branch) {
-        patients = await storage.getPatientsByBranch(branch);
-      } else {
-        patients = await storage.getAllPatients();
+      const currentUser = (req as any).user;
+      const branch = await resolveBranchFilter(req as any, req.query.branch as string | undefined);
+      const search = req.query.search as string | undefined;
+      const status = req.query.status as string | undefined;
+      const page = req.query.page ? Number(req.query.page) : undefined;
+      const limit = req.query.limit ? Number(req.query.limit) : undefined;
+
+      const staffPatientIds = canViewAllPatients(currentUser.role)
+        ? undefined
+        : await storage.getPatientIdsForStaff(currentUser.staffId);
+
+      if (page && limit) {
+        const { parsePagination } = await import("./helpers/pagination");
+        const { page: p, limit: l } = parsePagination({ page, limit });
+        const result = await storage.getPatientsPaginated({
+          branch,
+          search,
+          status,
+          patientIds: staffPatientIds,
+          page: p,
+          limit: l,
+        });
+        return res.json({
+          data: result.data,
+          pagination: {
+            page: p,
+            limit: l,
+            total: result.total,
+            totalPages: Math.max(1, Math.ceil(result.total / l)),
+          },
+        });
       }
-      return res.json(patients);
+
+      let patientList;
+      if (canViewAllPatients(currentUser.role)) {
+        patientList = branch
+          ? await storage.getPatientsByBranch(branch)
+          : await storage.getAllPatients();
+      } else {
+        const all = await storage.getAllPatients();
+        patientList = all.filter((p) => staffPatientIds!.includes(p.id));
+        if (branch) patientList = patientList.filter((p) => p.branch === branch);
+      }
+      return res.json(patientList);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
+  registerPatientRoutes(app);
+
   // Get single patient
   app.get("/api/patients/:id", requireAuth, async (req: Request, res: Response) => {
     try {
+      const currentUser = (req as any).user;
       const id = param(req, "id");
       const patient = await storage.getPatient(id);
       if (!patient) {
         return res.status(404).json({ message: "Patient not found" });
+      }
+      if (!canViewAllPatients(currentUser.role)) {
+        const ids = await storage.getPatientIdsForStaff(currentUser.staffId);
+        if (!ids.includes(id)) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
       }
       return res.json(patient);
     } catch (error: any) {
@@ -418,10 +821,20 @@ export async function registerRoutes(
   });
 
   // Create patient (Receptionist, Physiotherapist, Admin, MD)
-  app.post("/api/patients", requireAuth, requireRole("Receptionist", "Physiotherapist", "Admin", "MD", "Staff"), async (req: Request, res: Response) => {
+  app.post("/api/patients", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const validatedData = insertPatientSchema.parse(req.body);
-      const patient = await storage.createPatient(validatedData);
+      await assertNoDuplicatePatient(storage, validatedData.phone, (validatedData as any).nicOrPassport);
+      const patientCode = (validatedData as any).patientCode ?? (await generatePatientCode(storage));
+      const patient = await storage.createPatient({ ...validatedData, patientCode, fullName: validatedData.name } as any);
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "patient",
+        action: "create",
+        recordId: patient.id,
+        newValue: patient,
+      });
       return res.status(201).json(patient);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -432,14 +845,29 @@ export async function registerRoutes(
   });
 
   // Update patient
-  app.patch("/api/patients/:id", requireAuth, requireRole("Receptionist", "Physiotherapist", "Admin", "MD", "Staff"), async (req: Request, res: Response) => {
+  app.patch("/api/patients/:id", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
+      const beforePatient = await storage.getPatient(id);
       const validatedData = updatePatientSchema.parse(req.body);
+      if (validatedData.phone) {
+        await assertNoDuplicatePatient(storage, validatedData.phone, (validatedData as any).nicOrPassport, id);
+      }
       const patient = await storage.updatePatient(id, validatedData);
       
       if (!patient) {
         return res.status(404).json({ message: "Patient not found" });
+      }
+      if (beforePatient) {
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "patient",
+          action: "update",
+          recordId: id,
+          oldValue: beforePatient,
+          newValue: patient,
+        });
       }
       return res.json(patient);
     } catch (error: any) {
@@ -451,12 +879,23 @@ export async function registerRoutes(
   });
 
   // Delete patient (Admin, MD) — cascades visits and appointments in storage to satisfy FK constraints
-  app.delete("/api/patients/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/patients/:id", requireAuth, requireCriticalDelete, async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
-      const deleted = await storage.deletePatient(id);
+      const beforePatient = await storage.getPatient(id);
+      const deleted = await storage.deletePatient(id, (req as any).user?.staffId);
       if (!deleted) {
         return res.status(404).json({ message: "Patient not found" });
+      }
+      if (beforePatient) {
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "patient",
+          action: "delete",
+          recordId: id,
+          oldValue: beforePatient,
+        });
       }
       return res.json({ message: "Patient deleted" });
     } catch (error: any) {
@@ -466,23 +905,74 @@ export async function registerRoutes(
 
   // ========== Visit Routes ==========
   
-  // Get all visits
-  app.get("/api/visits", requireAuth, async (req: Request, res: Response) => {
+  // Unpaid visits — always visible until paid (ignores month filters)
+  app.get("/api/visits/unpaid", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
+      const currentUser = (req as any).user;
+      const staffId = canViewAllVisits(currentUser.role) ? undefined : currentUser.staffId;
+      let unpaid = await storage.getUnpaidVisits(staffId);
+      const branchFilter = getBranchFilter(req as any);
+      if (branchFilter) unpaid = filterByBranchName(unpaid, branchFilter);
+      return res.json(unpaid);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get all visits (optional ?page=&limit=&branch=)
+  app.get("/api/visits", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
+    try {
+      const currentUser = (req as any).user;
       const patientId = req.query.patientId as string | undefined;
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
-      let visits;
+      const branch = await resolveBranchFilter(req as any, req.query.branch as string | undefined);
+      const page = req.query.page ? Number(req.query.page) : undefined;
+      const limit = req.query.limit ? Number(req.query.limit) : undefined;
 
-      if (patientId) {
-        visits = await storage.getVisitsByPatient(patientId);
-      } else if (startDate && endDate) {
-        visits = await storage.getVisitsByDateRange(startDate, endDate);
-      } else {
-        visits = await storage.getAllVisits();
+      if (page && limit) {
+        const { parsePagination } = await import("./helpers/pagination");
+        const { page: p, limit: l } = parsePagination({ page, limit });
+        const staffId = canViewAllVisits(currentUser.role) ? undefined : currentUser.staffId;
+        const result = await storage.getVisitsPaginated({
+          patientId,
+          startDate,
+          endDate,
+          branch,
+          staffId,
+          page: p,
+          limit: l,
+        });
+        return res.json({
+          data: result.data,
+          pagination: {
+            page: p,
+            limit: l,
+            total: result.total,
+            totalPages: Math.max(1, Math.ceil(result.total / l)),
+          },
+        });
       }
 
-      return res.json(visits);
+      let visitList;
+      if (canViewAllVisits(currentUser.role)) {
+        if (patientId) {
+          visitList = await storage.getVisitsByPatient(patientId);
+        } else if (startDate && endDate) {
+          visitList = await storage.getVisitsByDateRange(startDate, endDate);
+        } else {
+          visitList = await storage.getAllVisits();
+        }
+      } else {
+        visitList = await storage.getVisitsForStaffMember(currentUser.staffId);
+        if (patientId) visitList = visitList.filter((v) => v.patientId === patientId);
+        if (startDate && endDate) {
+          visitList = visitList.filter((v) => v.visitDate >= startDate && v.visitDate <= endDate);
+        }
+      }
+      if (branch) visitList = visitList.filter((v) => v.branch === branch);
+
+      return res.json(visitList);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -503,11 +993,60 @@ export async function registerRoutes(
   });
 
   // Create visit
-  app.post("/api/visits", requireAuth, requireRole("Physiotherapist", "Admin", "MD", "Receptionist", "Staff"), async (req: Request, res: Response) => {
+  app.post("/api/visits", requireAuth, requireBranchContext(), requireVisitsManage, async (req: Request, res: Response) => {
     try {
-      const validatedData = insertVisitSchema.parse(req.body);
+      const incoming = { ...req.body } as Record<string, unknown>;
+      const branchCheck = validateBranch(incoming.branch);
+      if (!branchCheck.ok) {
+        return res.status(400).json({ message: branchCheck.message });
+      }
+      incoming.branch = branchCheck.branch;
+      if (!incoming.paymentAmount || Number(incoming.paymentAmount) < 0) {
+        incoming.paymentAmount = "0";
+      }
+      const statusCheck = validatePaymentStatus(incoming.paymentStatus ?? "Unpaid");
+      if (!statusCheck.ok) {
+        return res.status(400).json({ message: statusCheck.message });
+      }
+      incoming.paymentStatus = statusCheck.status;
+      if (!incoming.treatingStaffId) {
+        return res.status(400).json({ message: "Staff assignment is required." });
+      }
+      if (incoming.patientId) {
+        const existing = await storage.getVisitsByPatient(String(incoming.patientId));
+        incoming.sessionNumber = computeNextSessionNumber(existing.map((v) => v.sessionNumber));
+      }
+      if (!incoming.visitStatus) incoming.visitStatus = "Completed";
+      if (!incoming.amountPaid) incoming.amountPaid = "0";
+      const validatedData = insertVisitSchema.parse(incoming);
       const visit = await storage.createVisit(validatedData);
+      if (visit.visitType === "Home") {
+        const hvType = await detectHomeVisitType(
+          storage,
+          visit.treatingStaffId,
+          visit.visitDate,
+          visit.branch,
+          (incoming.homeVisitType as string) || undefined
+        );
+        await storage.updateVisit(visit.id, { homeVisitType: hvType } as any);
+        await syncHomeVisitFromVisit(storage, { ...visit, homeVisitType: hvType } as any, hvType);
+      }
+      const patient = await storage.getPatient(visit.patientId);
+      if (patient && !patient.therapistFirstVisitId) {
+        await storage.updatePatient(visit.patientId, {
+          therapistFirstVisitId: visit.treatingStaffId,
+          firstVisitDate: visit.visitDate,
+        } as any);
+      }
       await syncAutoFineForStaffDate(storage, visit.treatingStaffId, visit.visitDate);
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "visit",
+        action: "create",
+        recordId: visit.id,
+        newValue: visit,
+      });
       return res.status(201).json(visit);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -518,7 +1057,7 @@ export async function registerRoutes(
   });
 
   // Update visit
-  app.patch("/api/visits/:id", requireAuth, requireRole("Physiotherapist", "Admin", "MD", "Receptionist", "Staff"), async (req: Request, res: Response) => {
+  app.patch("/api/visits/:id", requireAuth, requireBranchContext(), requireVisitsManage, async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
       const user = (req as any).user;
@@ -526,15 +1065,27 @@ export async function registerRoutes(
       if (!before) {
         return res.status(404).json({ message: "Visit not found" });
       }
-      const canEdit =
-        ["Admin", "MD", "Receptionist"].includes(user.role) ||
-        ["Physiotherapist", "Staff"].includes(user.role) ||
-        before.treatingStaffId === user.staffId ||
-        before.createdByStaffId === user.staffId;
+      const canEdit = canEditVisit(user.role, user.staffId, before);
       if (!canEdit) {
         return res.status(403).json({ message: "Forbidden: insufficient permissions" });
       }
-      const validatedData = updateVisitSchema.parse(req.body);
+      const incoming = { ...req.body } as Record<string, unknown>;
+      delete incoming.sessionNumber;
+      if (incoming.branch !== undefined) {
+        const branchCheck = validateBranch(incoming.branch);
+        if (!branchCheck.ok) {
+          return res.status(400).json({ message: branchCheck.message });
+        }
+        incoming.branch = branchCheck.branch;
+      }
+      if (incoming.paymentStatus !== undefined) {
+        const statusCheck = validatePaymentStatus(incoming.paymentStatus);
+        if (!statusCheck.ok) {
+          return res.status(400).json({ message: statusCheck.message });
+        }
+        incoming.paymentStatus = statusCheck.status;
+      }
+      const validatedData = updateVisitSchema.parse(incoming);
       const {
         lastUpdatedByStaffId: _luSid,
         lastUpdatedByName: _luNm,
@@ -552,6 +1103,28 @@ export async function registerRoutes(
       }
       await syncAutoFineForStaffDate(storage, before.treatingStaffId, before.visitDate);
       await syncAutoFineForStaffDate(storage, visit.treatingStaffId, visit.visitDate);
+      if (visit.visitType === "Home" || before.visitType === "Home") {
+        const hvType = await detectHomeVisitType(
+          storage,
+          visit.treatingStaffId,
+          visit.visitDate,
+          visit.branch,
+          (visit as { homeVisitType?: string }).homeVisitType
+        );
+        if (visit.visitType === "Home") {
+          await storage.updateVisit(visit.id, { homeVisitType: hvType } as any);
+          await syncHomeVisitFromVisit(storage, { ...visit, homeVisitType: hvType } as any, hvType);
+        }
+      }
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "visit",
+        action: "update",
+        recordId: id,
+        oldValue: before,
+        newValue: visit,
+      });
       return res.json(visit);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -562,16 +1135,24 @@ export async function registerRoutes(
   });
 
   // Delete visit (Admin / MD only)
-  app.delete("/api/visits/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/visits/:id", requireAuth, requireCriticalDelete, async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
       const before = await storage.getVisit(id);
-      const deleted = await storage.deleteVisit(id);
+      const deleted = await storage.deleteVisit(id, (req as any).user?.staffId);
       if (!deleted) {
         return res.status(404).json({ message: "Visit not found" });
       }
       if (before) {
         await syncAutoFineForStaffDate(storage, before.treatingStaffId, before.visitDate);
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "visit",
+          action: "delete",
+          recordId: id,
+          oldValue: before,
+        });
       }
       return res.json({ message: "Visit deleted successfully" });
     } catch (error: any) {
@@ -582,15 +1163,44 @@ export async function registerRoutes(
   // ========== Attendance Routes ==========
   
   // Get attendance records
-  app.get("/api/attendance", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/attendance", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       await autoMarkMissingAttendanceForPreviousDay();
       const staffId = req.query.staffId as string | undefined;
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       const month = req.query.month as string | undefined;
+      const branch = (req.query.branch as string | undefined) ?? getBranchFilter(req as any) ?? undefined;
+      const page = req.query.page ? Number(req.query.page) : undefined;
+      const limit = req.query.limit ? Number(req.query.limit) : undefined;
       const currentUser = (req as any).user;
       const isAdmin = ["Admin", "MD"].includes(currentUser.role);
+
+      if (page && limit) {
+        const { parsePagination } = await import("./helpers/pagination");
+        const { page: p, limit: l } = parsePagination({ page, limit });
+        const effectiveStaffId =
+          staffId && (isAdmin || currentUser.staffId === staffId) ? staffId : isAdmin ? staffId : currentUser.staffId;
+        const result = await storage.getAttendancePaginated({
+          staffId: effectiveStaffId,
+          startDate,
+          endDate,
+          month,
+          branch,
+          page: p,
+          limit: l,
+        });
+        return res.json({
+          data: result.data,
+          pagination: {
+            page: p,
+            limit: l,
+            total: result.total,
+            totalPages: Math.max(1, Math.ceil(result.total / l)),
+          },
+        });
+      }
+
       let attendance;
 
       if (month && staffId) {
@@ -638,12 +1248,13 @@ export async function registerRoutes(
     try {
       const currentUser = (req as any).user;
       const body = req.body;
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = clinicDateString();
 
-      const status = body.status;
-      if (!status || !["Present", "Absent"].includes(status)) {
-        return res.status(400).json({ message: "Status must be 'Present' or 'Absent'" });
+      const statusCheck = validateAttendanceStatus(body.status);
+      if (!statusCheck.ok) {
+        return res.status(400).json({ message: statusCheck.message });
       }
+      const status = statusCheck.status;
 
       const canManageOthers = ["Admin", "MD"].includes(currentUser.role);
 
@@ -665,6 +1276,9 @@ export async function registerRoutes(
         const currentStaff = await storage.getStaff(currentUser.staffId);
         if (!currentStaff) {
           return res.status(400).json({ message: "Staff not found" });
+        }
+        if (currentStaff.isActive === false || (currentStaff.isActive as unknown) === 0) {
+          return res.status(403).json({ message: "Deactivated staff cannot mark attendance" });
         }
         targetStaffId = currentStaff.id;
         targetStaffName = currentStaff.name;
@@ -704,6 +1318,14 @@ export async function registerRoutes(
 
       const result = await storage.createAttendance(attendanceData);
       await syncAutoFineForStaffDate(storage, targetStaffId, attendanceDate);
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "attendance",
+        action: "create",
+        recordId: result.id,
+        newValue: result,
+      });
       return res.status(201).json(result);
     } catch (error: any) {
       console.error(`[ATTENDANCE ERROR]`, error.message || error);
@@ -735,7 +1357,14 @@ export async function registerRoutes(
         body.overtimeHours = String(Number(body.overtimeHours));
       }
       const validatedData = updateAttendanceSchema.parse(body);
-      
+      if (validatedData.status !== undefined) {
+        const statusCheck = validateAttendanceStatus(validatedData.status);
+        if (!statusCheck.ok) {
+          return res.status(400).json({ message: statusCheck.message });
+        }
+        validatedData.status = statusCheck.status;
+      }
+
       // First get the existing attendance record to check ownership
       const existingAttendance = await storage.getAttendance(id);
       if (!existingAttendance) {
@@ -750,7 +1379,7 @@ export async function registerRoutes(
         if (existingAttendance.staffId !== currentUser.staffId) {
           return res.status(403).json({ message: "You can only update your own attendance" });
         }
-        const today = new Date().toISOString().split('T')[0];
+        const today = clinicDateString();
         if (existingAttendance.date !== today) {
           return res.status(403).json({ message: "You can only update today's attendance" });
         }
@@ -771,9 +1400,26 @@ export async function registerRoutes(
         }
       }
       
-      const attendance = await storage.updateAttendance(id, patch as any);
+      const attendance = await storage.updateAttendance(id, {
+        ...patch,
+        ...(canManageOthers
+          ? { editedBy: currentUser.staffId, editedAt: new Date(), editReason: (raw.editReason as string) || null }
+          : {}),
+      } as any);
       if (attendance) {
         await syncAutoFineForStaffDate(storage, attendance.staffId, attendance.date as string);
+        if (canManageOthers) {
+          const editor = await storage.getStaff(currentUser.staffId);
+          await logAudit(storage, {
+            userId: currentUser.staffId,
+            userName: editor?.name ?? "",
+            module: "attendance",
+            action: "update",
+            recordId: id,
+            oldValue: existingAttendance,
+            newValue: attendance,
+          });
+        }
       }
       return res.json(attendance);
     } catch (error: any) {
@@ -785,15 +1431,23 @@ export async function registerRoutes(
   });
 
   // Delete attendance record (Admin/MD only)
-  app.delete("/api/attendance/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/attendance/:id", requireAuth, requireAttendanceManage, async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
       const existing = await storage.getAttendance(id);
       if (!existing) {
         return res.status(404).json({ message: "Attendance record not found" });
       }
-      await storage.deleteAttendance(id);
+      await storage.deleteAttendance(id, (req as any).user?.staffId);
       await syncAutoFineForStaffDate(storage, existing.staffId, existing.date as string);
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "attendance",
+        action: "delete",
+        recordId: id,
+        oldValue: existing,
+      });
       return res.json({ message: "Attendance record deleted" });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -819,7 +1473,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/incentive-settings", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.put("/api/incentive-settings", requireAuth, requireSettingsManage, async (req: Request, res: Response) => {
     try {
       const { incentiveEnabled, minPatientsForIncentive, incentivePerPatient, clinicLocationScope } = req.body;
       const data: any = {};
@@ -837,7 +1491,7 @@ export async function registerRoutes(
 
   // ========== Reports/Statistics Routes ==========
   
-  // Get visit statistics for physio summary/reports
+  // Legacy visit-stats — delegates to centralized calculation engine
   app.get("/api/reports/visit-stats", requireAuth, async (req: Request, res: Response) => {
     try {
       const startDate = req.query.startDate as string | undefined;
@@ -849,70 +1503,42 @@ export async function registerRoutes(
         return res.status(400).json({ message: "startDate and endDate are required" });
       }
 
+      const { computeIncentiveReport } = await import("./services/reportService");
+      const { computePayrollReport } = await import("./services/payrollService");
+
+      let targetStaffId = staffId;
+      if (currentUser.role === "Physiotherapist" || currentUser.role === "Staff") {
+        targetStaffId = currentUser.staffId;
+      }
+
       let visits;
-      // Physiotherapists can only view their own stats
-      if (currentUser.role === "Physiotherapist") {
-        visits = await storage.getVisitsByStaffAndDateRange(currentUser.staffId, startDate, endDate);
-      } else if (staffId) {
-        // Admin/MD can filter by specific staff
-        visits = await storage.getVisitsByStaffAndDateRange(staffId, startDate, endDate);
+      if (targetStaffId) {
+        visits = await storage.getVisitsByStaffAndDateRange(targetStaffId, startDate, endDate);
       } else {
-        // Admin/MD can see all visits
         visits = await storage.getVisitsByDateRange(startDate, endDate);
       }
 
-      // Calculate statistics
       const stats = {
-        colomboClinic: visits.filter(v => v.branch === "Colombo" && v.visitType === "Clinic").length,
-        colomboHome: visits.filter(v => v.branch === "Colombo" && v.visitType === "Home").length,
-        bandaragamaClinic: visits.filter(v => v.branch === "Bandaragama" && v.visitType === "Clinic").length,
-        bandaragamaHome: visits.filter(v => v.branch === "Bandaragama" && v.visitType === "Home").length,
+        colomboClinic: visits.filter((v) => v.branch === "Colombo" && v.visitType === "Clinic").length,
+        colomboHome: visits.filter((v) => v.branch === "Colombo" && v.visitType === "Home").length,
+        bandaragamaClinic: visits.filter((v) => v.branch === "Bandaragama" && v.visitType === "Clinic").length,
+        bandaragamaHome: visits.filter((v) => v.branch === "Bandaragama" && v.visitType === "Home").length,
       };
 
-      // Calculate incentives (Colombo all visits, ≥5 patients/day = 100 LKR per patient)
-      const colomboClinicVisits = visits.filter(v => v.branch === "Colombo");
-      
-      // Group by treating staff and date
-      const visitsByStaffAndDate = new Map<string, Map<string, number>>();
-      colomboClinicVisits.forEach(visit => {
-        if (!visitsByStaffAndDate.has(visit.treatingStaffId)) {
-          visitsByStaffAndDate.set(visit.treatingStaffId, new Map());
-        }
-        const staffVisits = visitsByStaffAndDate.get(visit.treatingStaffId)!;
-        const count = staffVisits.get(visit.visitDate) || 0;
-        staffVisits.set(visit.visitDate, count + 1);
-      });
+      const incentiveRows = await computeIncentiveReport(storage, startDate, endDate, targetStaffId);
+      const { summaries } = await computePayrollReport(
+        storage,
+        startDate,
+        endDate,
+        targetStaffId ? [targetStaffId] : undefined
+      );
+      const incentives = summaries.map((s) => ({
+        staffName: s.name,
+        totalIncentive: s.incentiveTotal,
+        breakdown: s.incentiveDays.map((d) => ({ date: d.date, count: d.count, incentive: d.incentive })),
+      }));
 
-      // Calculate incentives
-      const incentivesByStaff = new Map<string, { staffName: string; totalIncentive: number; breakdown: Array<{ date: string; count: number; incentive: number }> }>();
-      
-      visitsByStaffAndDate.forEach((dateMap, staffId) => {
-        const staffVisit = colomboClinicVisits.find(v => v.treatingStaffId === staffId);
-        if (!staffVisit) return;
-
-        const breakdown: Array<{ date: string; count: number; incentive: number }> = [];
-        let totalIncentive = 0;
-
-        dateMap.forEach((count, date) => {
-          const incentive = count >= 5 ? count * 100 : 0;
-          totalIncentive += incentive;
-          if (incentive > 0) {
-            breakdown.push({ date, count, incentive });
-          }
-        });
-
-        if (totalIncentive > 0 || breakdown.length > 0) {
-          incentivesByStaff.set(staffId, {
-            staffName: staffVisit.treatingStaffName,
-            totalIncentive,
-            breakdown: breakdown.sort((a, b) => a.date.localeCompare(b.date)),
-          });
-        }
-      });
-
-      const incentives = Array.from(incentivesByStaff.values());
-
-      return res.json({ stats, incentives, visits });
+      return res.json({ stats, incentives, incentiveRows, visits });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -937,7 +1563,7 @@ export async function registerRoutes(
   });
 
   // All in-patient sessions in range (reports / incentives — Admin & MD)
-  app.get("/api/inpatients/sessions/all", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.get("/api/inpatients/sessions/all", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
@@ -993,7 +1619,7 @@ export async function registerRoutes(
   });
 
   // Create in-patient admission (Admin, MD, Receptionist, Physiotherapist)
-  app.post("/api/inpatients", requireAuth, requireRole("Admin", "MD", "Receptionist", "Physiotherapist"), async (req: Request, res: Response) => {
+  app.post("/api/inpatients", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const normalizedBody = normalizeInPatientAdmissionBody(req.body as Record<string, unknown>);
       const parsed = insertInPatientAdmissionSchema.safeParse(normalizedBody);
@@ -1013,7 +1639,7 @@ export async function registerRoutes(
   });
 
   // Update in-patient admission (Admin, MD)
-  app.put("/api/inpatients/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.put("/api/inpatients/:id", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const normalizedBody = normalizeInPatientAdmissionBody(req.body as Record<string, unknown>);
       const parsed = updateInPatientAdmissionSchema.safeParse(normalizedBody);
@@ -1031,7 +1657,7 @@ export async function registerRoutes(
   });
 
   // Delete in-patient admission (Admin, MD only)
-  app.delete("/api/inpatients/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/inpatients/:id", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const success = await storage.deleteInPatientAdmission(param(req, "id"));
       if (!success) {
@@ -1098,8 +1724,10 @@ export async function registerRoutes(
       }
 
       const sd = parsed.data;
+      const treatingStaff = await storage.getStaff(sd.treatingStaffId);
       const session = await storage.createInPatientSession({
         ...sd,
+        treatingStaffName: treatingStaff?.name ?? sd.treatingStaffName,
         sessionNumber,
         attachments: (sd as any).attachments ?? null,
       } as any);
@@ -1146,7 +1774,7 @@ export async function registerRoutes(
   });
 
   // Delete in-patient session (Admin, MD only)
-  app.delete("/api/inpatients/sessions/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/inpatients/sessions/:id", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const existing = await storage.getInPatientSession(param(req, "id"));
       const success = await storage.deleteInPatientSession(param(req, "id"));
@@ -1178,7 +1806,7 @@ export async function registerRoutes(
   });
 
   // Create discharge (Admin, MD only)
-  app.post("/api/inpatients/:admissionId/discharge", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.post("/api/inpatients/:admissionId/discharge", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const admission = await storage.getInPatientAdmission(param(req, "admissionId"));
       if (!admission) {
@@ -1212,7 +1840,7 @@ export async function registerRoutes(
   });
 
   // Update discharge (Admin, MD only)
-  app.put("/api/inpatients/discharge/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.put("/api/inpatients/discharge/:id", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const parsed = updateInPatientDischargeSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -1231,7 +1859,7 @@ export async function registerRoutes(
   // ========== IN-PATIENT PAYMENTS ==========
 
   // Get payments for an admission (Admin, MD, Receptionist)
-  app.get("/api/inpatients/:admissionId/payments", requireAuth, requireRole("Admin", "MD", "Receptionist"), async (req: Request, res: Response) => {
+  app.get("/api/inpatients/:admissionId/payments", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const payments = await storage.getInPatientPaymentsByAdmission(param(req, "admissionId"));
       return res.json(payments);
@@ -1241,7 +1869,7 @@ export async function registerRoutes(
   });
 
   // Get payment total for an admission (Admin, MD, Receptionist)
-  app.get("/api/inpatients/:admissionId/payments/total", requireAuth, requireRole("Admin", "MD", "Receptionist"), async (req: Request, res: Response) => {
+  app.get("/api/inpatients/:admissionId/payments/total", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const total = await storage.getPaymentTotalByAdmission(param(req, "admissionId"));
       return res.json({ total });
@@ -1251,7 +1879,7 @@ export async function registerRoutes(
   });
 
   // Create payment (Admin, MD, Receptionist)
-  app.post("/api/inpatients/:admissionId/payments", requireAuth, requireRole("Admin", "MD", "Receptionist"), async (req: Request, res: Response) => {
+  app.post("/api/inpatients/:admissionId/payments", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const staffInfo = await storage.getStaff(user.staffId);
@@ -1327,7 +1955,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/inpatients/extra-expenses/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.put("/api/inpatients/extra-expenses/:id", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const body = { ...req.body };
       if (body.description === '') body.description = null;
@@ -1348,7 +1976,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/inpatients/extra-expenses/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/inpatients/extra-expenses/:id", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const deleted = await storage.deleteInPatientExtraExpense(param(req, "id"));
       if (!deleted) {
@@ -1363,9 +1991,10 @@ export async function registerRoutes(
   // ========== Expense Routes (MD/Admin only) ==========
 
   // Get all expenses
-  app.get("/api/expenses", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.get("/api/expenses", requireAuth, requireBranchContext(), requireExpensesManage, async (req: Request, res: Response) => {
     try {
       const { startDate, endDate } = req.query;
+      const branchFilter = getBranchFilter(req as any);
       let expensesList;
       
       if (startDate && endDate) {
@@ -1373,6 +2002,7 @@ export async function registerRoutes(
       } else {
         expensesList = await storage.getAllExpenses();
       }
+      if (branchFilter) expensesList = filterByBranchName(expensesList, branchFilter);
       
       return res.json(expensesList);
     } catch (error: any) {
@@ -1392,7 +2022,7 @@ export async function registerRoutes(
   });
 
   // Get single expense
-  app.get("/api/expenses/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.get("/api/expenses/:id", requireAuth, requireBranchContext(), requireExpensesManage, async (req: Request, res: Response) => {
     try {
       const expense = await storage.getExpense(param(req, "id"));
       if (!expense) {
@@ -1405,16 +2035,18 @@ export async function registerRoutes(
   });
 
   // Create expense (all authenticated users can add expenses)
-  app.post("/api/expenses", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/expenses", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const staffInfo = await storage.getStaff(user.staffId);
+      const branchName = getBranchFilter(req as any);
       
       const body = { ...req.body };
       if (body.description === '' || body.description === undefined) body.description = null;
       
       const data = {
         ...body,
+        branch: body.branch ?? branchName ?? staffInfo?.branch ?? null,
         createdByStaffId: user.staffId,
         createdByName: staffInfo?.name || 'Unknown',
       };
@@ -1425,6 +2057,14 @@ export async function registerRoutes(
       }
       
       const expense = await storage.createExpense(parsed.data);
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "expense",
+        action: "create",
+        recordId: expense.id,
+        newValue: expense,
+      });
       return res.status(201).json(expense);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1432,7 +2072,7 @@ export async function registerRoutes(
   });
 
   // Update expense
-  app.patch("/api/expenses/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.patch("/api/expenses/:id", requireAuth, requireBranchContext(), requireExpensesManage, async (req: Request, res: Response) => {
     try {
       const body = { ...req.body };
       if (body.description === '') body.description = null;
@@ -1441,9 +2081,22 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid data", errors: parsed.error.flatten() });
       }
       
-      const expense = await storage.updateExpense(param(req, "id"), parsed.data);
+      const expenseId = param(req, "id");
+      const beforeExpense = await storage.getExpense(expenseId);
+      const expense = await storage.updateExpense(expenseId, parsed.data);
       if (!expense) {
         return res.status(404).json({ message: "Expense not found" });
+      }
+      if (beforeExpense) {
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "expense",
+          action: "update",
+          recordId: expenseId,
+          oldValue: beforeExpense,
+          newValue: expense,
+        });
       }
       return res.json(expense);
     } catch (error: any) {
@@ -1452,11 +2105,23 @@ export async function registerRoutes(
   });
 
   // Delete expense
-  app.delete("/api/expenses/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/expenses/:id", requireAuth, requireBranchContext(), requireExpensesManage, async (req: Request, res: Response) => {
     try {
-      const deleted = await storage.deleteExpense(param(req, "id"));
+      const expenseId = param(req, "id");
+      const beforeExpense = await storage.getExpense(expenseId);
+      const deleted = await storage.deleteExpense(expenseId, (req as any).user?.staffId);
       if (!deleted) {
         return res.status(404).json({ message: "Expense not found" });
+      }
+      if (beforeExpense) {
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "expense",
+          action: "delete",
+          recordId: expenseId,
+          oldValue: beforeExpense,
+        });
       }
       return res.status(204).send();
     } catch (error: any) {
@@ -1467,7 +2132,7 @@ export async function registerRoutes(
   // ========== Revenue Summary Routes (MD/Admin only) ==========
 
   // Get revenue summary
-  app.get("/api/revenue-summary", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.get("/api/revenue-summary", requireAuth, requireBranchContext(), requireReportsView, async (req: Request, res: Response) => {
     try {
       const { startDate, endDate } = req.query;
       
@@ -1496,6 +2161,9 @@ export async function registerRoutes(
 
   // Initialize database with a default admin user if none exists
   app.post("/api/init", async (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === "production" && process.env.ALLOW_INIT !== "true") {
+      return res.status(403).json({ message: "Init disabled in production" });
+    }
     try {
       const allStaff = await storage.getAllStaff();
       if (allStaff.length === 0) {
@@ -1517,14 +2185,14 @@ export async function registerRoutes(
 
   // ========== Appointment Routes ==========
 
-  app.get("/api/appointments", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/appointments", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
+      const branchFilter = getBranchFilter(req as any);
       const { date } = req.query;
-      if (date) {
-        const appts = await storage.getAppointmentsByDate(date as string);
-        return res.json(appts);
-      }
-      const appts = await storage.getAllAppointments();
+      let appts = date
+        ? await storage.getAppointmentsByDate(date as string)
+        : await storage.getAllAppointments();
+      if (branchFilter) appts = filterByBranchName(appts, branchFilter);
       return res.json(appts);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1541,14 +2209,16 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/appointments", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/appointments", requireAuth, requireBranchContext(), requireAppointmentsManage, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
+      const branchName = getBranchFilter(req as any);
       const body = { ...req.body };
       if (body.notes === '' || body.notes === undefined) body.notes = null;
 
       const data = {
         ...body,
+        branch: body.branch ?? branchName ?? null,
         createdByStaffId: user.staffId,
       };
 
@@ -1558,13 +2228,20 @@ export async function registerRoutes(
       }
 
       const appt = await storage.createAppointment(parsed.data);
+      const { sendNotification } = await import("./services/notificationService");
+      void sendNotification(storage, {
+        staffId: appt.treatingStaffId,
+        title: "New Appointment",
+        message: `${appt.patientName} on ${appt.appointmentDate} at ${appt.appointmentTime}`,
+        type: "appointment_reminder",
+      }).catch(() => {});
       return res.status(201).json(appt);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
-  app.put("/api/appointments/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.put("/api/appointments/:id", requireAuth, requireBranchContext(), requireAppointmentsManage, async (req: Request, res: Response) => {
     try {
       const body = { ...req.body };
       if (body.notes === '') body.notes = null;
@@ -1582,7 +2259,7 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/appointments/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/appointments/:id", requireAuth, requireBranchContext(), requireAppointmentsManage, async (req: Request, res: Response) => {
     try {
       const deleted = await storage.deleteAppointment(param(req, "id"));
       if (!deleted) return res.status(404).json({ message: "Appointment not found" });
@@ -1618,11 +2295,20 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/staff-fines", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.post("/api/staff-fines", requireAuth, requireSalaryManage, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       const editor = await storage.getStaff(user.staffId);
       const body = { ...req.body, source: "manual" };
+      if (!body.staffId || !String(body.staffId).trim()) {
+        return res.status(400).json({ message: "Staff is required" });
+      }
+      if (!body.fineDate || !String(body.fineDate).trim()) {
+        return res.status(400).json({ message: "Fine date is required" });
+      }
+      if (!body.reason || !String(body.reason).trim()) {
+        return res.status(400).json({ message: "Reason is required" });
+      }
       const parsed = insertStaffFineSchema.safeParse(body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
@@ -1632,13 +2318,21 @@ export async function registerRoutes(
         createdByStaffId: user.staffId,
         createdByName: editor?.name ?? "",
       } as any);
+      await logAudit(storage, {
+        userId: user.staffId,
+        userName: editor?.name ?? "",
+        module: "fine",
+        action: "create",
+        recordId: fine.id,
+        newValue: fine,
+      });
       return res.status(201).json(fine);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
-  app.patch("/api/staff-fines/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.patch("/api/staff-fines/:id", requireAuth, requireSalaryManage, async (req: Request, res: Response) => {
     try {
       const existingFine = await storage.getStaffFine(param(req, "id"));
       if (!existingFine) return res.status(404).json({ message: "Fine not found" });
@@ -1650,33 +2344,61 @@ export async function registerRoutes(
       if (!parsed.success) {
         return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
       }
-      const fine = await storage.updateStaffFine(param(req, "id"), parsed.data);
+      const fineId = param(req, "id");
+      const fine = await storage.updateStaffFine(fineId, {
+        ...parsed.data,
+        updatedByStaffId: (req as any).user?.staffId,
+      } as any);
       if (!fine) return res.status(404).json({ message: "Fine not found" });
+      const user = (req as any).user;
+      const editor = await storage.getStaff(user.staffId);
+      await logAudit(storage, {
+        userId: user.staffId,
+        userName: editor?.name ?? "",
+        module: "fine",
+        action: "update",
+        recordId: fineId,
+        oldValue: existingFine,
+        newValue: fine,
+      });
       return res.json(fine);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
-  app.delete("/api/staff-fines/:id", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+  app.delete("/api/staff-fines/:id", requireAuth, requireSalaryManage, async (req: Request, res: Response) => {
     try {
-      const deleted = await storage.deleteStaffFine(param(req, "id"));
+      const fineId = param(req, "id");
+      const existingFine = await storage.getStaffFine(fineId);
+      const deleted = await storage.deleteStaffFine(fineId, (req as any).user?.staffId);
       if (!deleted) return res.status(404).json({ message: "Fine not found" });
+      if (existingFine) {
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "fine",
+          action: "delete",
+          recordId: fineId,
+          oldValue: existingFine,
+        });
+      }
       return res.json({ message: "Fine deleted" });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
+  registerSalaryRoutes(app);
+  registerExtendedRoutes(app);
+
   void runAutoFineSweepForRecentDays().catch((e) =>
     console.error("[auto-fine] initial sweep failed:", e)
   );
-  const DAY_MS = 24 * 60 * 60 * 1000;
-  setInterval(() => {
-    void runAutoFineSweepForRecentDays().catch((e) =>
-      console.error("[auto-fine] scheduled sweep failed:", e)
-    );
-  }, DAY_MS);
+  registerAutoFineJobs(runAutoFineSweepForToday, runAutoFineSweepForRecentDays);
+  if (process.env.NODE_ENV !== "test") {
+    startScheduledJobs();
+  }
 
   return httpServer;
 }

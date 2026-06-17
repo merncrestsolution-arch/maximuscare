@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useAppointment, useUpdateAppointment, usePatients } from "@/hooks/useData";
-import { staffApi } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
+import { useAppointment, useUpdateAppointment, usePatients, useStaff } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,10 +24,7 @@ export default function EditAppointment() {
   const { data: patients = [], isLoading: loadingPatients } = usePatients();
   const updateAppointment = useUpdateAppointment();
 
-  const { data: allStaff = [], isLoading: loadingStaff } = useQuery({
-    queryKey: ["staff-for-appointments"],
-    queryFn: staffApi.getAll,
-  });
+  const { data: allStaff = [], isLoading: loadingStaff } = useStaff();
 
   const treatingStaff = allStaff.filter(
     (s: any) => s.role === "Physiotherapist" || s.role === "MD"
@@ -40,6 +35,7 @@ export default function EditAppointment() {
     appointmentTime: string;
     patientId: string;
     treatingStaffId: string;
+    status: string;
     notes: string;
   } | null>(null);
 
@@ -50,6 +46,7 @@ export default function EditAppointment() {
         appointmentTime: appointment.appointmentTime,
         patientId: appointment.patientId,
         treatingStaffId: appointment.treatingStaffId,
+        status: appointment.status || "Scheduled",
         notes: appointment.notes || "",
       });
     }
@@ -85,6 +82,7 @@ export default function EditAppointment() {
           patientName: selectedPatient?.name || appointment?.patientName || "",
           treatingStaffId: formData.treatingStaffId,
           treatingStaffName: selectedStaff?.name || appointment?.treatingStaffName || "",
+          status: formData.status,
           notes: formData.notes.trim() || null,
         },
       });
@@ -201,6 +199,23 @@ export default function EditAppointment() {
                   <SelectItem key={staff.id} value={staff.id} data-testid={`option-staff-${staff.id}`}>
                     {staff.name} ({staff.role})
                   </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-black font-medium">Status</Label>
+            <Select
+              value={formData.status}
+              onValueChange={(v) => setFormData({ ...formData, status: v })}
+            >
+              <SelectTrigger className="h-12 bg-white border-gray-300 text-black" data-testid="select-status">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["Scheduled", "Completed", "Cancelled", "No Show"].map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

@@ -5,7 +5,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Plus, UserPlus, FileText, BedDouble, Stethoscope, LogOut } from "lucide-react";
+import { Plus, UserPlus, FileText, BedDouble, Stethoscope, LogOut, Users } from "lucide-react";
+import { canManageStaff } from "@/lib/permissions";
 
 export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [, setLocation] = useLocation();
@@ -36,6 +37,8 @@ export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenCha
     if (!user) return false;
     return ["Admin", "MD"].includes(user.role);
   }, [user]);
+
+  const canAddStaff = useMemo(() => canManageStaff(user?.role), [user]);
 
   const navigate = (path: string) => {
     onOpenChange(false);
@@ -72,6 +75,21 @@ export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenCha
             </Button>
           </div>
         </section>
+
+        {canAddStaff && (
+          <section>
+            <p className="text-xs font-bold text-foreground uppercase tracking-wide mb-2">Staff</p>
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-3 h-12 bg-white border-2 hover:bg-muted/50"
+              onClick={() => navigate("/staff/new")}
+              data-testid="button-quick-add-staff"
+            >
+              <Users className="h-5 w-5" />
+              Add Staff
+            </Button>
+          </section>
+        )}
 
         <section>
           <p className="text-xs font-bold text-foreground uppercase tracking-wide mb-2">In-Patient</p>

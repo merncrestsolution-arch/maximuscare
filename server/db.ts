@@ -2,6 +2,7 @@ import "dotenv/config";
 import path from "path";
 import { mkdirSync, existsSync } from "fs";
 import { createRequire } from "module";
+import { sql } from "drizzle-orm";
 import * as schemaSqlite from "@shared/schema-sqlite";
 import * as schemaPg from "@shared/schema-pg";
 
@@ -34,3 +35,192 @@ export { db };
 
 // Export the schema used by the current database (for storage/routes)
 export const schema = usePostgres ? schemaPg : schemaSqlite;
+
+async function addSqliteColumnIfMissing(query: string) {
+  try {
+    await db.run(sql.raw(query));
+  } catch (error: any) {
+    const message = String(error?.message ?? "");
+    if (message.includes("duplicate column name")) return;
+    throw error;
+  }
+}
+
+/**
+ * Keeps older SQLite database files compatible with the current schema.
+ * We only add columns in an idempotent way here.
+ */
+export async function ensureSqliteSchemaCompatibility() {
+  if (usePostgres) return;
+
+  await addSqliteColumnIfMissing(
+    "ALTER TABLE visits ADD COLUMN last_updated_by_staff_id TEXT",
+  );
+  await addSqliteColumnIfMissing(
+    "ALTER TABLE visits ADD COLUMN last_updated_by_name TEXT",
+  );
+  await addSqliteColumnIfMissing(
+    "ALTER TABLE staff ADD COLUMN photo_uri TEXT",
+  );
+  await addSqliteColumnIfMissing(
+    "ALTER TABLE staff ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+  );
+  await addSqliteColumnIfMissing(
+    "ALTER TABLE staff ADD COLUMN basic_salary TEXT NOT NULL DEFAULT '0'",
+  );
+  await addSqliteColumnIfMissing(
+    "ALTER TABLE staff ADD COLUMN salary_date TEXT",
+  );
+  await addSqliteColumnIfMissing(
+    "ALTER TABLE staff ADD COLUMN other_adjustments TEXT NOT NULL DEFAULT '0'",
+  );
+
+  const createTables = [
+    `CREATE TABLE IF NOT EXISTS branches (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS clinic_settings (
+      id TEXT PRIMARY KEY,
+      auto_fine_amount TEXT NOT NULL DEFAULT '500',
+      home_rate_colombo TEXT NOT NULL DEFAULT '1000',
+      home_rate_bandaragama TEXT NOT NULL DEFAULT '500',
+      holiday_home_rate TEXT NOT NULL DEFAULT '1500',
+      ot_rate_per_hour TEXT NOT NULL DEFAULT '250',
+      extra_holiday_deduction TEXT NOT NULL DEFAULT '1500',
+      free_absent_days INTEGER NOT NULL DEFAULT 4,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL REFERENCES staff(id),
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'info',
+      is_read INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      assigned_to_staff_id TEXT NOT NULL REFERENCES staff(id),
+      assigned_to_staff_name TEXT NOT NULL,
+      created_by_staff_id TEXT NOT NULL REFERENCES staff(id),
+      created_by_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      priority TEXT NOT NULL DEFAULT 'normal',
+      due_date TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      action TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT,
+      old_value TEXT,
+      new_value TEXT,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL REFERENCES staff(id),
+      email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS payroll_snapshots (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL REFERENCES staff(id),
+      staff_name TEXT NOT NULL,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      breakdown TEXT NOT NULL,
+      final_salary TEXT NOT NULL,
+      created_by_staff_id TEXT NOT NULL REFERENCES staff(id),
+      created_by_name TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+  ];
+  for (const q of createTables) {
+    await addSqliteColumnIfMissing(q);
+  }
+
+  try {
+    await db.run(sql.raw(
+      "CREATE UNIQUE INDEX IF NOT EXISTS attendance_staff_date_unique ON attendance(staff_id, date)"
+    ));
+    await db.run(sql.raw("CREATE INDEX IF NOT EXISTS idx_visits_visit_date ON visits(visit_date)"));
+    await db.run(sql.raw("CREATE INDEX IF NOT EXISTS idx_visits_patient_id ON visits(patient_id)"));
+    await db.run(sql.raw(
+      "CREATE INDEX IF NOT EXISTS idx_attendance_staff_date ON attendance(staff_id, date)"
+    ));
+  } catch {
+    /* indexes optional on very old DBs */
+  }
+
+  const { runPart2SchemaMigration } = await import("./migrations/part2SchemaMigration");
+  await runPart2SchemaMigration();
+  const { runPart5SchemaMigration } = await import("./migrations/part5SchemaMigration");
+  await runPart5SchemaMigration();
+  const { runPart6SchemaMigration } = await import("./migrations/part6SchemaMigration");
+  await runPart6SchemaMigration();
+  const { runPart7SchemaMigration } = await import("./migrations/part7SchemaMigration");
+  await runPart7SchemaMigration();
+  const { runPart8SchemaMigration } = await import("./migrations/part8SchemaMigration");
+  await runPart8SchemaMigration();
+  const { runPart9EnterpriseMigration } = await import("./migrations/part9EnterpriseMigration");
+  await runPart9EnterpriseMigration();
+  const { runPart10AuthMigration } = await import("./migrations/part10AuthMigration");
+  await runPart10AuthMigration();
+  const { runPart11DocumentsAppointmentsMigration } = await import("./migrations/part11DocumentsAppointmentsMigration");
+  await runPart11DocumentsAppointmentsMigration();
+  const { runPart12BranchPermissionsMigration } = await import("./migrations/part12BranchPermissionsMigration");
+  await runPart12BranchPermissionsMigration();
+  const { runPart16PatientAgeOptionalMigration } = await import("./migrations/part16PatientAgeOptionalMigration");
+  await runPart16PatientAgeOptionalMigration();
+  const { runPart13BranchIdBackfill } = await import("./migrations/part13BranchIdBackfill");
+  await runPart13BranchIdBackfill();
+  const { runPart14ExpensesBranch } = await import("./migrations/part14ExpensesBranch");
+  await runPart14ExpensesBranch();
+  const { runPart15EnterpriseConstraints } = await import("./migrations/part15EnterpriseConstraints");
+  await runPart15EnterpriseConstraints();
+}
+
+/** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
+export async function ensurePostgresSchemaCompatibility() {
+  if (!usePostgres) return;
+  const { runPart2SchemaMigration } = await import("./migrations/part2SchemaMigration");
+  await runPart2SchemaMigration();
+  const { runPart5SchemaMigration } = await import("./migrations/part5SchemaMigration");
+  await runPart5SchemaMigration();
+  const { runPart6SchemaMigration } = await import("./migrations/part6SchemaMigration");
+  await runPart6SchemaMigration();
+  const { runPart7SchemaMigration } = await import("./migrations/part7SchemaMigration");
+  await runPart7SchemaMigration();
+  const { runPart8SchemaMigration } = await import("./migrations/part8SchemaMigration");
+  await runPart8SchemaMigration();
+  const { runPart9EnterpriseMigration } = await import("./migrations/part9EnterpriseMigration");
+  await runPart9EnterpriseMigration();
+  const { runPart10AuthMigration } = await import("./migrations/part10AuthMigration");
+  await runPart10AuthMigration();
+  const { runPart11DocumentsAppointmentsMigration } = await import("./migrations/part11DocumentsAppointmentsMigration");
+  await runPart11DocumentsAppointmentsMigration();
+  const { runPart12BranchPermissionsMigration } = await import("./migrations/part12BranchPermissionsMigration");
+  await runPart12BranchPermissionsMigration();
+  const { runPart16PatientAgeOptionalMigration } = await import("./migrations/part16PatientAgeOptionalMigration");
+  await runPart16PatientAgeOptionalMigration();
+  const { runPart13BranchIdBackfill } = await import("./migrations/part13BranchIdBackfill");
+  await runPart13BranchIdBackfill();
+  const { runPart14ExpensesBranch } = await import("./migrations/part14ExpensesBranch");
+  await runPart14ExpensesBranch();
+  const { runPart15EnterpriseConstraints } = await import("./migrations/part15EnterpriseConstraints");
+  await runPart15EnterpriseConstraints();
+}

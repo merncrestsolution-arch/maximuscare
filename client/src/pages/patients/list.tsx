@@ -11,12 +11,16 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { isManagementRole } from "@/lib/permissions";
+import { useBranchOptions } from "@/hooks/use-branch-options";
+import { useBranch } from "@/context/branch-context";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PageShell } from "@/components/layout/page-shell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,19 +34,36 @@ import {
 
 export default function PatientsList() {
   const { user } = useAuth();
+  const { selectedBranchName } = useBranch();
+  const { options: branchOptions } = useBranchOptions();
   const { toast } = useToast();
-  const { data: patients = [], isLoading, error } = usePatients();
-  const deletePatient = useDeletePatient();
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [branchFilter, setBranchFilter] = useState(selectedBranchName ?? "");
+  const [statusFilter, setStatusFilter] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [, setLocation] = useLocation();
+  const limit = 30;
+
+  const { data: patientResult, isLoading, error } = usePatients({
+    branch: branchFilter || undefined,
+    search: search.trim() || undefined,
+    status: statusFilter || undefined,
+    page,
+    limit,
+  });
+  const deletePatient = useDeletePatient();
 
   const canManage = isManagementRole(user?.role);
 
-  const filteredPatients = patients.filter(p => 
-    p.name.toLowerCase().includes(search.toLowerCase()) || 
-    p.phone.includes(search)
-  );
+  type PatientRow = { id: string; name: string; branch: string; phone: string; status: string };
+  const patients: PatientRow[] = Array.isArray(patientResult)
+    ? patientResult
+    : (patientResult as { data?: PatientRow[] })?.data ?? [];
+  const pagination = Array.isArray(patientResult)
+    ? null
+    : (patientResult as { pagination?: { page: number; totalPages: number; total: number } })?.pagination;
+  const filteredPatients = [...patients].sort((a, b) => a.name.localeCompare(b.name));
 
   const handleConfirmDeletePatient = async () => {
     if (!deleteId) return;
@@ -78,7 +99,7 @@ export default function PatientsList() {
   }
 
   return (
-    <div className="space-y-4">
+    <PageShell title="Patients" className="space-y-4">
       <Button
         variant="outline"
         className="w-full h-14 justify-start gap-3 bg-white border-border shadow-sm hover:shadow-md hover:border-primary/20 transition-all"
@@ -95,14 +116,22 @@ export default function PatientsList() {
         <ChevronRight className="h-5 w-5 text-muted-foreground/40" />
       </Button>
 
+      <div className="flex flex-wrap gap-2">
+        <Link href="/patients/dashboard"><Button variant="outline" className="h-11">Dashboard</Button></Link>
+        <Link href="/patients/home-visits"><Button variant="outline" className="h-11">Home Visits</Button></Link>
+        <Link href="/reports/unpaid"><Button variant="outline" className="h-11">Unpaid</Button></Link>
+        <Link href="/patients/export"><Button variant="outline" className="h-11">Export</Button></Link>
+        <Link href="/reports/sessions"><Button variant="outline" className="h-11">Sessions</Button></Link>
+      </div>
+
       <div className="flex items-center justify-between gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Search patients..." 
+          <Input
+            placeholder="Search name, phone, ID, NIC..."
             className="pl-9 h-11 bg-card border-border shadow-sm text-base"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
         </div>
         <Link href="/patients/new">
@@ -111,8 +140,28 @@ export default function PatientsList() {
           </Button>
         </Link>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <Select value={branchFilter || "__all__"} onValueChange={(v) => { setBranchFilter(v === "__all__" ? "" : v); setPage(1); }}>
+          <SelectTrigger className="h-11 w-full"><SelectValue placeholder="Branch" /></SelectTrigger>
+          <SelectContent>
+            {canManage && <SelectItem value="__all__">All branches</SelectItem>}
+            {branchOptions.map((b) => (
+              <SelectItem key={b.id} value={b.value}>{b.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter || "__all__"} onValueChange={(v) => { setStatusFilter(v === "__all__" ? "" : v); setPage(1); }}>
+          <SelectTrigger className="h-11 w-full"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All statuses</SelectItem>
+            {["Active", "Inactive", "Completed", "Discharged", "Transferred"].map((s) => (
+              <SelectItem key={s} value={s}>{s}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
-      <div className="space-y-3 pb-24">
+      <div className="space-y-3">
         {filteredPatients.map(patient => (
           <Card
             key={patient.id}
@@ -158,11 +207,21 @@ export default function PatientsList() {
                 </div>
               </Link>
 
-              <div className="flex items-center gap-1 shrink-0">
-                <div className="flex flex-col items-end gap-1">
-                  <Badge className={`${patient.status === 'Active' ? 'bg-success hover:bg-success/90' : 'bg-muted hover:bg-muted/90'} text-white font-semibold px-2.5`}>
-                    {patient.status}
-                  </Badge>
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                <Badge className={`${patient.status === 'Active' ? 'bg-success hover:bg-success/90' : 'bg-muted hover:bg-muted/90'} text-white font-semibold px-2.5`}>
+                  {patient.status}
+                </Badge>
+                <div className="flex gap-1 sm:hidden">
+                  {patient.phone && (
+                    <a href={`tel:${patient.phone}`} className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-muted/30" aria-label={`Call ${patient.name}`}>
+                      <Phone className="h-4 w-4 text-primary" />
+                    </a>
+                  )}
+                  <Button variant="outline" size="icon" className="h-11 w-11" asChild>
+                    <Link href={`/patients/${patient.id}`} aria-label={`View ${patient.name}`}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
                 </div>
                 {canManage ? (
                   <DropdownMenu>
@@ -170,7 +229,7 @@ export default function PatientsList() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-9 w-9"
+                        className="h-11 w-11"
                         aria-label="Patient actions"
                         onClick={(e) => e.preventDefault()}
                         data-testid={`button-patient-menu-${patient.id}`}
@@ -209,6 +268,20 @@ export default function PatientsList() {
         )}
       </div>
 
+      {pagination && pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between gap-2 pb-24">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            Previous
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {pagination.page} of {pagination.totalPages} ({pagination.total} patients)
+          </span>
+          <Button variant="outline" size="sm" disabled={page >= pagination.totalPages} onClick={() => setPage((p) => p + 1)}>
+            Next
+          </Button>
+        </div>
+      )}
+
       <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -229,6 +302,6 @@ export default function PatientsList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageShell>
   );
 }

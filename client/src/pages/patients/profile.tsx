@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
-import { usePatient, useVisits, useDeleteVisit, useDeletePatient } from "@/hooks/useData";
+import { usePatient, useVisits, useDeleteVisit, useDeletePatient, useUpdatePatient, usePatientStats, usePatientNotes, usePatientDocuments, useCreatePatientNote, useCreatePatientDocument } from "@/hooks/useData";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CollectPaymentDialog } from "@/components/patients/collect-payment-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +28,10 @@ import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
 import { useToast } from "@/hooks/use-toast";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
-import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
+import { isPaidStatus, paymentStatusBadgeClass, computeOutstanding, isUnpaidLikeStatus } from "@/lib/paymentStatus";
+import { formatLkr } from "@/lib/reportDatePresets";
+import { Banknote, Plus } from "lucide-react";
+import { openAuthenticatedFile, patientsApiExtended } from "@/lib/api";
 
 export default function PatientProfile() {
   const [match, params] = useRoute("/patients/:id");
@@ -33,10 +42,22 @@ export default function PatientProfile() {
   
   const { data: patient, isLoading: patientLoading, error: patientError } = usePatient(patientId);
   const { data: allVisits = [] } = useVisits({ patientId });
+  const { data: stats } = usePatientStats(patientId);
+  const { data: notes = [] } = usePatientNotes(patientId);
+  const { data: documents = [] } = usePatientDocuments(patientId);
   const deleteVisitMutation = useDeleteVisit();
   const deletePatientMutation = useDeletePatient();
+  const updatePatientMutation = useUpdatePatient();
+  const createNote = useCreatePatientNote();
+  const createDocument = useCreatePatientDocument();
   const { toast } = useToast();
   const [visitToDeleteId, setVisitToDeleteId] = useState<string | null>(null);
+  const [paymentVisit, setPaymentVisit] = useState<any>(null);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteDescription, setNoteDescription] = useState("");
+  const [docType, setDocType] = useState("Medical Report");
+  const [docFileName, setDocFileName] = useState("");
+  const [docFileUri, setDocFileUri] = useState("");
   
   if (!match || !params) return null;
 
@@ -101,6 +122,17 @@ export default function PatientProfile() {
   };
 
   const isAdminMD = ["Admin", "MD"].includes(user?.role || "");
+  const canCollectPayment = ["Admin", "MD", "Receptionist"].includes(user?.role || "");
+
+  const handleDocFile = (file: File | null) => {
+    if (!file) return;
+    setDocFileName(file.name);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") setDocFileUri(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleDeletePatient = async () => {
     try {
@@ -176,13 +208,27 @@ export default function PatientProfile() {
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-2xl font-bold text-foreground">{patient.name}</h2>
+              {(patient as any).patientCode && (
+                <p className="text-xs text-muted-foreground font-mono">{(patient as any).patientCode}</p>
+              )}
               <div className="flex items-center gap-2 mt-1 text-muted-foreground font-medium">
                  <Phone className="h-3.5 w-3.5" />
                  <span>{patient.phone}</span>
               </div>
+              {stats?.assignedTherapistName && (
+                <p className="text-xs text-muted-foreground mt-1">Therapist: {stats.assignedTherapistName}</p>
+              )}
             </div>
             <div className="text-right">
-              <span className="block text-xl font-bold text-primary">{patient.age} <span className="text-sm font-normal text-muted-foreground">Years</span></span>
+              <span className="block text-xl font-bold text-primary">
+                {patient.age != null && patient.age > 0 ? (
+                  <>
+                    {patient.age} <span className="text-sm font-normal text-muted-foreground">Years</span>
+                  </>
+                ) : (
+                  <span className="text-sm font-normal text-muted-foreground">Age N/A</span>
+                )}
+              </span>
               <span className="text-sm text-muted-foreground">{patient.gender}</span>
             </div>
           </div>
@@ -215,6 +261,27 @@ export default function PatientProfile() {
              <Badge className={patient.status === 'Active' ? 'bg-success' : 'bg-muted'} data-testid="badge-patient-status">
                {patient.status}
              </Badge>
+             {patient.status === "Discharged" && ["Admin", "MD", "Receptionist"].includes(user?.role ?? "") && (
+               <Button
+                 size="sm"
+                 variant="outline"
+                 className="h-7"
+                 data-testid="button-readmit-patient"
+                 onClick={async () => {
+                   try {
+                     await updatePatientMutation.mutateAsync({
+                       id: patientId,
+                       data: { status: "Active", registeredDate: new Date().toISOString().slice(0, 10) },
+                     });
+                     toast({ title: "Patient re-admitted", description: "Status set to Active with a new admission date." });
+                   } catch (e: any) {
+                     toast({ title: "Error", description: e?.message || "Failed to re-admit patient", variant: "destructive" });
+                   }
+                 }}
+               >
+                 Re-Admit Patient
+               </Button>
+             )}
           </div>
           
           <div className="text-sm text-muted-foreground flex items-center gap-1.5 pt-1">
@@ -223,6 +290,90 @@ export default function PatientProfile() {
         </CardContent>
       </Card>
 
+      {stats && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-center text-sm">
+          <Card><CardContent className="p-3"><div className="font-bold">{stats.totalVisits}</div><div className="text-muted-foreground text-xs">Visits</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="font-bold">{stats.totalSessions}</div><div className="text-muted-foreground text-xs">Sessions</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="font-bold">Rs.{stats.totalRevenue?.toLocaleString()}</div><div className="text-muted-foreground text-xs">Revenue</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="font-bold text-amber-700">Rs.{stats.outstandingAmount?.toLocaleString()}</div><div className="text-muted-foreground text-xs">Outstanding</div></CardContent></Card>
+          <Card><CardContent className="p-3"><div className="font-bold text-xs">{stats.lastVisitDate || "—"}</div><div className="text-muted-foreground text-xs">Last Visit</div></CardContent></Card>
+        </div>
+      )}
+
+      <Tabs defaultValue="visits" className="w-full">
+        <TabsList className="w-full flex flex-wrap h-auto">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="visits">Visits</TabsTrigger>
+          <TabsTrigger value="notes">Notes</TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="space-y-3 pt-4">
+          <Card><CardContent className="p-4 space-y-2 text-sm">
+            <p><span className="text-muted-foreground">Registered:</span> {patient.registeredDate}</p>
+            <p><span className="text-muted-foreground">Address:</span> {patient.address}</p>
+            {(patient as any).emergencyContact && <p><span className="text-muted-foreground">Emergency:</span> {(patient as any).emergencyContact}</p>}
+            {(patient as any).referralSource && <p><span className="text-muted-foreground">Referral:</span> {(patient as any).referralSource}</p>}
+          </CardContent></Card>
+        </TabsContent>
+        <TabsContent value="notes" className="pt-4 space-y-4">
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><Plus className="h-4 w-4" /> Add Note</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <div><Label>Title</Label><Input value={noteTitle} onChange={(e) => setNoteTitle(e.target.value)} placeholder="Note title" /></div>
+              <div><Label>Description</Label><Textarea value={noteDescription} onChange={(e) => setNoteDescription(e.target.value)} rows={3} /></div>
+              <Button size="sm" disabled={!noteTitle.trim() || createNote.isPending} onClick={() => {
+                createNote.mutate({ patientId, title: noteTitle.trim(), description: noteDescription.trim() }, {
+                  onSuccess: () => { setNoteTitle(""); setNoteDescription(""); toast({ title: "Note added" }); },
+                  onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
+                });
+              }}>Save Note</Button>
+            </CardContent>
+          </Card>
+          {notes.length === 0 ? <p className="text-sm text-muted-foreground">No notes yet.</p> : (
+            <ul className="space-y-2">{notes.map((n: any) => (
+              <li key={n.id} className="border rounded-lg p-3"><div className="font-medium">{n.title}</div><p className="text-sm text-muted-foreground">{n.description}</p><p className="text-xs mt-1">{n.createdByName} · {n.createdAt ? new Date(n.createdAt).toLocaleDateString() : ""}</p></li>
+            ))}</ul>
+          )}
+        </TabsContent>
+        <TabsContent value="documents" className="pt-4 space-y-4">
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><Plus className="h-4 w-4" /> Upload Document</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <Label>Document type</Label>
+                <Select value={docType} onValueChange={setDocType}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["Medical Report", "Prescription", "X-Ray", "Scan", "Other"].map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>File</Label>
+                <Input type="file" accept="image/*,.pdf" onChange={(e) => handleDocFile(e.target.files?.[0] ?? null)} />
+              </div>
+              <Button size="sm" disabled={!docFileUri || createDocument.isPending} onClick={() => {
+                createDocument.mutate({
+                  patientId,
+                  fileName: docFileName || "document",
+                  documentType: docType,
+                  contentBase64: docFileUri,
+                }, {
+                  onSuccess: () => { setDocFileUri(""); setDocFileName(""); toast({ title: "Document uploaded" }); },
+                  onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
+                });
+              }}>Upload</Button>
+            </CardContent>
+          </Card>
+          {documents.length === 0 ? <p className="text-sm text-muted-foreground">No documents uploaded.</p> : (
+            <ul className="space-y-2">{documents.map((d: any) => (
+              <li key={d.id} className="border rounded-lg p-3 flex justify-between"><div><div className="font-medium">{d.fileName}</div><div className="text-xs text-muted-foreground">{d.documentType} · {d.uploadedByName}</div></div><button type="button" className="text-primary text-sm hover:underline" onClick={() => openAuthenticatedFile(patientsApiExtended.documents.filePath(d.id)).catch((e: Error) => toast({ title: e.message, variant: "destructive" }))}>View</button></li>
+            ))}</ul>
+          )}
+        </TabsContent>
+        <TabsContent value="visits" className="pt-0">
       <StructuredReportActions
         reportTitle={`Patient Visit History - ${patient.name}`}
         fileBaseName={`patient-visit-history-${patient.id}`}
@@ -272,6 +423,8 @@ export default function PatientProfile() {
               visit.treatingStaffId === user?.id ||
               visit.createdByStaffId === user?.id;
             const paidAmount = Number(visit.paymentAmount);
+            const amountPaid = Number((visit as any).amountPaid ?? 0);
+            const outstanding = computeOutstanding(paidAmount, amountPaid);
             const paidLabel = Number.isFinite(paidAmount)
               ? paidAmount.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })
               : String(visit.paymentAmount ?? "");
@@ -355,11 +508,25 @@ export default function PatientProfile() {
                       {visit.paymentStatus}
                     </span>
                     <span className="font-semibold text-foreground tabular-nums" data-testid={`text-visit-paid-${visit.id}`}>
-                      Paid: {paidLabel} LKR
-                      {visit.paymentMode ? (
-                        <span className="text-muted-foreground font-normal"> · {visit.paymentMode}</span>
-                      ) : null}
+                      Total: {paidLabel} LKR
+                      {amountPaid > 0 && <span className="text-muted-foreground font-normal"> · Collected: {formatLkr(amountPaid)}</span>}
+                      {outstanding > 0 && isUnpaidLikeStatus(visit.paymentStatus) && (
+                        <span className="text-amber-700 font-normal"> · Due: {formatLkr(outstanding)}</span>
+                      )}
                     </span>
+                    {canCollectPayment && isUnpaidLikeStatus(visit.paymentStatus) && outstanding > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPaymentVisit({ ...visit, patientName: patient.name });
+                        }}
+                      >
+                        <Banknote className="h-3 w-3 mr-1" /> Collect
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -380,6 +547,17 @@ export default function PatientProfile() {
           )}
         </div>
       </div>
+        </TabsContent>
+      </Tabs>
+
+      <CollectPaymentDialog
+        visit={paymentVisit}
+        open={!!paymentVisit}
+        onOpenChange={(open) => !open && setPaymentVisit(null)}
+        onSuccess={() => {
+          setPaymentVisit(null);
+        }}
+      />
 
       <AlertDialog open={!!visitToDeleteId} onOpenChange={(open) => !open && setVisitToDeleteId(null)}>
         <AlertDialogContent>

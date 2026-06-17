@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/context/auth-context";
-import { usePatients, useCreateVisit } from "@/hooks/useData";
+import { usePatients, useCreateVisit, useVisits } from "@/hooks/useData";
 import { useStaff } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { ArrowLeft, Camera, UploadCloud, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { BranchSelectField } from "@/components/branch/branch-select-field";
 
 export default function NewVisit() {
   const [location, setLocation] = useLocation();
@@ -35,11 +36,11 @@ export default function NewVisit() {
     visitDate: format(new Date(), "yyyy-MM-dd"),
     startTime: format(new Date(), "HH:mm"),
     endTime: format(new Date(new Date().setHours(new Date().getHours() + 1)), "HH:mm"),
-    branch: user?.branch || "Colombo",
+    branch: user?.branch === "Both" ? "" : (user?.branch || ""),
     visitType: "Clinic",
     status: "Follow-up",
-    paymentAmount: "2500",
-    paymentStatus: "Paid",
+    paymentAmount: "0",
+    paymentStatus: "Unpaid",
     paymentMode: "Cash",
     notes: "",
     improvements: "",
@@ -47,6 +48,12 @@ export default function NewVisit() {
   });
 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const { data: patientVisits = [] } = useVisits({ patientId: formData.patientId || undefined });
+
+  useEffect(() => {
+    if (!formData.patientId) return;
+    setFormData((prev) => ({ ...prev, sessionNumber: String(patientVisits.length + 1) }));
+  }, [formData.patientId, patientVisits.length]);
 
   useEffect(() => {
     if (!staff.length || !user) return;
@@ -73,12 +80,16 @@ export default function NewVisit() {
     if (!user) return;
 
     try {
+      if (!formData.branch) {
+        toast({ title: "Branch is required", variant: "destructive" });
+        return;
+      }
       // Find name for selected treating staff ID
       const treatingStaff = staff.find(s => s.id === formData.treatingStaffId) || user;
 
       await createVisit.mutateAsync({
         patientId: formData.patientId,
-        sessionNumber: parseInt(formData.sessionNumber) || 1,
+        sessionNumber: patientVisits.length + 1,
         condition: formData.condition,
         treatment: formData.treatment,
         visitDate: formData.visitDate,
@@ -197,7 +208,7 @@ export default function NewVisit() {
                   type="number" 
                   className="h-14 text-base bg-card"
                   value={formData.sessionNumber}
-                  onChange={(e) => setFormData({...formData, sessionNumber: e.target.value})}
+                  readOnly
                 />
               </div>
               <div className="space-y-3">
@@ -315,15 +326,11 @@ export default function NewVisit() {
               </div>
               <div className="space-y-3">
                 <Label className="text-base font-semibold">Branch</Label>
-                <Select value={formData.branch} onValueChange={(v) => setFormData({...formData, branch: v as typeof formData.branch})}>
-                  <SelectTrigger className="h-14 text-base bg-card" data-testid="select-new-visit-branch">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Colombo">Colombo</SelectItem>
-                    <SelectItem value="Bandaragama">Bandaragama</SelectItem>
-                  </SelectContent>
-                </Select>
+                <BranchSelectField
+                  className="h-14 text-base bg-card"
+                  value={formData.branch}
+                  onChange={(v) => setFormData({ ...formData, branch: v as typeof formData.branch })}
+                />
               </div>
             </div>
 

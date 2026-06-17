@@ -2,13 +2,15 @@ import { useState } from "react";
 import { Link, useRoute } from "wouter";
 import { addDays, format, parseISO } from "date-fns";
 import { useAuth } from "@/context/auth-context";
-import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange } from "@/hooks/useData";
+import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange, usePayrollReport, useStaffStats } from "@/hooks/useData";
+import { staffApi } from "@/lib/api";
+import { format as fmt, startOfMonth, endOfMonth } from "date-fns";
+import { formatLkr } from "@/lib/reportDatePresets";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Edit2, CalendarCheck, Stethoscope, Pencil } from "lucide-react";
-import { calculateVisitStats } from "@/lib/stats";
-import { VisitStatsCards } from "@/components/dashboard/visit-stats-cards";
 import { isVisitForStaff } from "@/lib/visitAccess";
+import { VisitStatsCards } from "@/components/dashboard/visit-stats-cards";
 import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
 
 export default function StaffProfilePage() {
@@ -25,6 +27,12 @@ export default function StaffProfilePage() {
   const { data: allVisits = [] } = useVisits();
   const { data: patients = [] } = usePatients();
   const { data: staffAttendance = [] } = useAttendance({ staffId });
+  const monthStart = fmt(startOfMonth(new Date()), "yyyy-MM-dd");
+  const monthEnd = fmt(endOfMonth(new Date()), "yyyy-MM-dd");
+  const { data: payrollReport } = usePayrollReport({ startDate: monthStart, endDate: monthEnd, staffId });
+  const payrollSummary = payrollReport?.summaries?.[0];
+  const { data: hrmStats } = useStaffStats(staffId, { startDate: monthStart, endDate: monthEnd }, !!staffId);
+  const [photoUploading, setPhotoUploading] = useState(false);
 
   if (!match || !params || !currentUser) return null;
 
@@ -53,8 +61,13 @@ export default function StaffProfilePage() {
   const recentAttendance = [...staffAttendance].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
-  const visitStats = calculateVisitStats(staffVisits);
   const patientNameById = new Map(patients.map((p) => [p.id, p.name]));
+  const formatDateSafe = (value?: string | null, pattern = "dd MMM yyyy") => {
+    if (!value) return "-";
+    const d = parseISO(value);
+    if (Number.isNaN(d.getTime())) return "-";
+    return format(d, pattern);
+  };
 
   return (
     <div className="space-y-6">
@@ -65,7 +78,9 @@ export default function StaffProfilePage() {
           </Button>
         </Link>
         <h1 className="text-xl font-bold">Staff Profile</h1>
-
+        <Link href={`/staff/${profileUser.id}/report`}>
+          <Button variant="outline" size="sm" className="ml-auto mr-2">Full Report</Button>
+        </Link>
         {isManagement && (
           <Link href={`/staff/${profileUser.id}/edit`}>
             <Button
@@ -81,6 +96,45 @@ export default function StaffProfilePage() {
       </div>
 
       <div className="rounded-2xl border border-border/60 bg-white shadow-sm p-5" data-testid="card-staff-header">
+        <div className="flex items-start gap-3 mb-3">
+          {(profileUser as any).photoUri ? (
+            <img src={(profileUser as any).photoUri} alt="Staff" className="h-20 w-20 rounded-xl object-cover border" />
+          ) : (
+            <div className="h-20 w-20 rounded-xl bg-muted flex items-center justify-center text-2xl font-bold">{profileUser.name?.charAt(0)}</div>
+          )}
+          {isManagement && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-primary cursor-pointer underline">
+                {photoUploading ? "Uploading…" : "Upload photo"}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file || file.size > 5 * 1024 * 1024) return;
+                    setPhotoUploading(true);
+                    try {
+                      const reader = new FileReader();
+                      reader.onload = async () => {
+                        await staffApi.uploadPhoto(profileUser.id, reader.result as string);
+                        window.location.reload();
+                      };
+                      reader.readAsDataURL(file);
+                    } finally {
+                      setPhotoUploading(false);
+                    }
+                  }}
+                />
+              </label>
+              {(profileUser as any).photoUri && (
+                <button type="button" className="text-xs text-destructive text-left" onClick={() => staffApi.removePhoto(profileUser.id).then(() => window.location.reload())}>
+                  Remove photo
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         <div className="text-sm text-muted-foreground" data-testid="text-staff-header-label">Staff</div>
         <div className="mt-1 text-2xl font-bold text-foreground" data-testid="text-staff-name">{profileUser.name}</div>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -90,13 +144,68 @@ export default function StaffProfilePage() {
           <div className="px-3 py-1 rounded-full bg-muted/20 text-foreground text-xs font-semibold" data-testid="badge-staff-branch">
             {profileUser.branch || "Head Office"}
           </div>
+          <div className={`px-3 py-1 rounded-full text-xs font-semibold ${(profileUser as any).isActive !== false ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>
+            {(profileUser as any).isActive !== false ? "Active" : "Inactive"}
+          </div>
+        </div>
+        <div className="mt-2 text-sm text-muted-foreground space-y-0.5">
+          <div>Employee ID: {(profileUser as any).employeeCode || profileUser.id.slice(0, 8)}</div>
+          <div>Phone: {profileUser.phone || "—"} · Email: {profileUser.email}</div>
+          <div>NIC: {(profileUser as any).nic || "—"} · Joined: {formatDateSafe((profileUser as any).joiningDate ?? (profileUser as any).createdAt)}</div>
         </div>
       </div>
 
+      {hrmStats && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Statistics (This Month)</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><span className="text-muted-foreground">Visits</span><div className="font-bold">{hrmStats.totalVisits}</div></div>
+            <div><span className="text-muted-foreground">Sessions</span><div className="font-bold">{hrmStats.totalSessions}</div></div>
+            <div><span className="text-muted-foreground">Incentives</span><div className="font-bold">{hrmStats.totalIncentiveCount} ({formatLkr(hrmStats.totalIncentiveEarnings)})</div></div>
+            <div><span className="text-muted-foreground">OT Hours</span><div className="font-bold">{hrmStats.totalOtHours}</div></div>
+            <div><span className="text-muted-foreground">Home Visits</span><div className="font-bold">{hrmStats.totalHomeVisits}</div></div>
+            <div><span className="text-muted-foreground">Salary Earned</span><div className="font-bold">{formatLkr(hrmStats.totalSalaryEarned)}</div></div>
+            <div><span className="text-muted-foreground">Task Completion</span><div className="font-bold">{hrmStats.taskCompletionPercent}%</div></div>
+            <div><span className="text-muted-foreground">Attendance</span><div className="font-bold">{hrmStats.attendance.attendancePercent}%</div></div>
+          </CardContent>
+        </Card>
+      )}
+
+      {hrmStats && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Attendance Statistics</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+            <div><span className="text-muted-foreground">Present</span><div className="font-bold">{hrmStats.attendance.presentDays}</div></div>
+            <div><span className="text-muted-foreground">Absent</span><div className="font-bold">{hrmStats.attendance.absentDays}</div></div>
+            <div><span className="text-muted-foreground">Leave</span><div className="font-bold">{hrmStats.attendance.leaveDays}</div></div>
+            <div><span className="text-muted-foreground">Holiday</span><div className="font-bold">{hrmStats.attendance.holidayDays}</div></div>
+            <div><span className="text-muted-foreground">Extra Holidays</span><div className="font-bold">{hrmStats.attendance.extraHolidays}</div></div>
+            <div><span className="text-muted-foreground">Attendance %</span><div className="font-bold">{hrmStats.attendance.attendancePercent}%</div></div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="space-y-2">
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">Performance Overview</h3>
-        <VisitStatsCards stats={visitStats} />
+        <VisitStatsCards visits={staffVisits} limitToBranch={profileUser.branch} />
       </div>
+
+      {payrollSummary && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Financial Summary (This Month)</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><span className="text-muted-foreground">Basic</span><div className="font-semibold">{formatLkr(payrollSummary.basicSalary)}</div></div>
+            <div><span className="text-muted-foreground">Incentives</span><div className="font-semibold">{formatLkr(payrollSummary.incentiveTotal)}</div></div>
+            <div><span className="text-muted-foreground">Home Visits</span><div className="font-semibold">{formatLkr(payrollSummary.homeIncome)}</div></div>
+            <div><span className="text-muted-foreground">OT</span><div className="font-semibold">{formatLkr(payrollSummary.otIncome)}</div></div>
+            <div><span className="text-muted-foreground">Fines</span><div className="font-semibold">{formatLkr(payrollSummary.finesTotal)}</div></div>
+            <div><span className="text-muted-foreground">Extra Holidays</span><div className="font-semibold">{formatLkr(payrollSummary.extraHolidayDeduction)}</div></div>
+            <div className="col-span-2"><span className="text-muted-foreground">Final Salary</span><div className="font-bold text-lg">{formatLkr(payrollSummary.finalSalary)}</div></div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="bg-white border border-border/60 shadow-sm">
         <CardHeader>
@@ -118,7 +227,7 @@ export default function StaffProfilePage() {
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex justify-between text-sm font-semibold gap-2">
                   <span>Session #{visit.sessionNumber}</span>
-                  <span className="shrink-0">{format(new Date(visit.visitDate), "dd MMM yyyy")}</span>
+                  <span className="shrink-0">{formatDateSafe(visit.visitDate)}</span>
                 </div>
                 <div className="text-sm text-muted-foreground line-clamp-2">{visit.condition}</div>
                 <div className="text-xs text-foreground/80">
@@ -238,6 +347,18 @@ export default function StaffProfilePage() {
             <span className="text-muted-foreground">Degree</span>
             <span className="font-medium text-right min-w-0 break-words sm:max-w-[60%]">{profileUser.degree || "-"}</span>
           </div>
+          <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center">
+            <span className="text-muted-foreground">Join Date</span>
+            <span className="font-medium text-right min-w-0 break-words sm:max-w-[60%]">
+              {formatDateSafe((profileUser as any).joinDate || (profileUser as any).createdAt)}
+            </span>
+          </div>
+          <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center">
+            <span className="text-muted-foreground">Basic Salary</span>
+            <span className="font-medium text-right min-w-0 break-words sm:max-w-[60%]">
+              {Number((profileUser as any).basicSalary || 0).toLocaleString()} LKR
+            </span>
+          </div>
         </CardContent>
       </Card>
 
@@ -252,7 +373,7 @@ export default function StaffProfilePage() {
           {recentAttendance.length === 0 && <p className="text-sm text-muted-foreground">No records.</p>}
           {recentAttendance.slice(0, 5).map((record) => (
             <div key={record.id} className="flex items-center justify-between border-b last:border-0 pb-2 last:pb-0">
-              <span className="text-sm font-medium">{format(new Date(record.date), "EEE, dd MMM")}</span>
+              <span className="text-sm font-medium">{formatDateSafe(record.date, "EEE, dd MMM")}</span>
               <span
                 className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
                   record.status === "Present" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"

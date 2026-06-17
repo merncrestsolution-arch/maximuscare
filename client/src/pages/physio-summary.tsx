@@ -14,6 +14,7 @@ import {
   useCreateStaffFine,
   useUpdateStaffFine,
   useDeleteStaffFine,
+  usePayrollReport,
 } from "@/hooks/useData";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
+import { canViewReports } from "@/lib/permissions";
 
 function clampDate(dateStr: string, fromStr: string, toStr: string) {
   if (!dateStr) return false;
@@ -47,7 +50,7 @@ function sum(nums: number[]) {
   return nums.reduce((a, b) => a + b, 0);
 }
 
-export default function PhysioSummaryPage() {
+function PhysioSummaryContent() {
   const { user, isLoading: authLoading } = useAuth();
   const { logoUri } = useBranding();
   const { toast } = useToast();
@@ -57,8 +60,10 @@ export default function PhysioSummaryPage() {
   const [rangeTo, setRangeTo] = useState(format(new Date(today.getFullYear(), today.getMonth() + 1, 0), "yyyy-MM-dd"));
 
   const { data: staff = [], isLoading: loadingStaff, error: staffError } = useStaff();
-  const { data: visits = [], isLoading: loadingVisits, error: visitsError } = useVisits();
-  const { data: attendance = [], isLoading: loadingAttendance, error: attendanceError } = useAttendance();
+  const { data: payrollReport, isLoading: loadingPayroll, error: payrollError } = usePayrollReport({
+    startDate: rangeFrom,
+    endDate: rangeTo,
+  });
   const { data: incentiveSettings } = useIncentiveSettings();
   const updateIncentiveSettings = useUpdateIncentiveSettings();
 
@@ -96,7 +101,7 @@ export default function PhysioSummaryPage() {
     reason: "",
   });
 
-  const incEnabled = incentiveSettings?.incentiveEnabled === "true";
+  const incEnabled = String(incentiveSettings?.incentiveEnabled ?? "true").toLowerCase() === "true";
   const incMinPatients = incentiveSettings?.minPatientsForIncentive ?? 5;
   const incPerPatient = incentiveSettings?.incentivePerPatient ?? 100;
   const incScope = incentiveSettings?.clinicLocationScope ?? "Colombo";
@@ -145,115 +150,13 @@ export default function PhysioSummaryPage() {
   }, [isManagement, staff, user]);
 
   const summaries = useMemo(() => {
-    if (!physios.length) return [];
-    const safeVisits = visits || [];
-    const safeAttendance = attendance || [];
-    const safeIp = ipSessions || [];
-    const safeFines = finesList || [];
-
-    return physios.map((p) => {
-      try {
-        const physioVisits = safeVisits.filter(
-          (v) => isVisitForStaff(v, p) && clampDate(v.visitDate, rangeFrom, rangeTo)
-        );
-
-        const colomboHome = physioVisits.filter((v) => v.branch === "Colombo" && v.visitType === "Home").length;
-        const colomboClinic = physioVisits.filter((v) => v.branch === "Colombo" && v.visitType === "Clinic").length;
-        const bandaragamaHome = physioVisits.filter((v) => v.branch === "Bandaragama" && v.visitType === "Home").length;
-        const bandaragamaClinic = physioVisits.filter((v) => v.branch === "Bandaragama" && v.visitType === "Clinic").length;
-
-        const rangeAttendance = safeAttendance.filter(
-          (a) => a.staffId === p.id && clampDate(a.date, rangeFrom, rangeTo)
-        );
-
-        const uniqueDates = new Map<string, any>();
-        for (const a of rangeAttendance) {
-          const existing = uniqueDates.get(a.date);
-          if (!existing || (a.id && existing.id && a.id > existing.id)) {
-            uniqueDates.set(a.date, a);
-          }
-        }
-        const deduped = Array.from(uniqueDates.values());
-
-        const presentDays = deduped.filter((a) => a.status === "Present").length;
-        const absentDays = deduped.filter((a) => a.status === "Absent").length;
-
-        const physioAttendance = deduped.filter((a) => a.status === "Present");
-        const totalOt = sum(
-          physioAttendance
-            .map((a) => {
-              const val = Number(a.overtimeHours);
-              return Number.isFinite(val) ? val : 0;
-            })
-        );
-
-        const matchingVisits = incEnabled
-          ? physioVisits.filter((v) => {
-              if (incScope === "Colombo") return v.branch === "Colombo";
-              if (incScope === "Bandaragama") return v.branch === "Bandaragama";
-              return true;
-            })
-          : [];
-
-        const ipForThisPhysio = safeIp.filter(
-          (s: any) => s.treatingStaffId === p.id && clampDate(s.sessionDate, rangeFrom, rangeTo)
-        );
-
-        const clinicByDay: Record<string, number> = {};
-        for (const v of matchingVisits) {
-          clinicByDay[v.visitDate] = (clinicByDay[v.visitDate] || 0) + 1;
-        }
-        for (const s of ipForThisPhysio) {
-          clinicByDay[s.sessionDate] = (clinicByDay[s.sessionDate] || 0) + 1;
-        }
-
-        const incentiveDays = Object.entries(clinicByDay)
-          .map(([date, count]) => ({ date, count, incentive: count >= incMinPatients ? count * incPerPatient : 0 }))
-          .filter((d) => d.incentive > 0)
-          .sort((a, b) => (a.date < b.date ? -1 : 1));
-
-        const incentiveTotal = sum(incentiveDays.map((d) => d.incentive));
-
-        const finesTotal = sum(
-          safeFines.filter((f: any) => f.staffId === p.id).map((f: any) => Number(f.amount) || 0)
-        );
-
-        return {
-          id: p.id,
-          name: p.name,
-          totalOt,
-          incentiveTotal,
-          incentiveDays,
-          colomboHome,
-          colomboClinic,
-          bandaragamaHome,
-          bandaragamaClinic,
-          presentDays,
-          absentDays,
-          inPatientSessionsCount: ipForThisPhysio.length,
-          finesTotal,
-          error: null,
-        };
-      } catch {
-        return {
-          id: p.id,
-          name: p.name,
-          totalOt: 0,
-          incentiveTotal: 0,
-          incentiveDays: [],
-          colomboHome: 0,
-          colomboClinic: 0,
-          bandaragamaHome: 0,
-          bandaragamaClinic: 0,
-          presentDays: 0,
-          absentDays: 0,
-          inPatientSessionsCount: 0,
-          finesTotal: 0,
-          error: "Failed to calculate summary for this physiotherapist.",
-        };
-      }
-    });
-  }, [attendance, physios, rangeFrom, rangeTo, visits, incEnabled, incMinPatients, incPerPatient, incScope, ipSessions, finesList]);
+    const serverSummaries = payrollReport?.summaries ?? [];
+    return serverSummaries.map((s: any) => ({
+      ...s,
+      id: s.staffId,
+      error: null,
+    }));
+  }, [payrollReport]);
 
   if (authLoading || !user || !user.role) {
     return (
@@ -264,7 +167,7 @@ export default function PhysioSummaryPage() {
     );
   }
 
-  if (loadingStaff || loadingVisits || loadingAttendance || loadingIp || loadingFines) {
+  if (loadingStaff || loadingPayroll || loadingIp || loadingFines) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center bg-white" data-testid="loading-reports-data">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -273,7 +176,7 @@ export default function PhysioSummaryPage() {
     );
   }
 
-  const hasError = staffError || visitsError || attendanceError;
+  const hasError = staffError || payrollError;
   const generatedAt = format(new Date(), "dd MMM yyyy hh:mm a");
   const summaryColumns = [
     { key: "physio", label: "Physiotherapist" },
@@ -285,10 +188,15 @@ export default function PhysioSummaryPage() {
     { key: "bandaragamaClinic", label: "Bandaragama Clinic" },
     { key: "bandaragamaHome", label: "Bandaragama Home" },
     { key: "inPatientSessions", label: "In-Patient Sessions" },
+    { key: "incentiveCount", label: "Incentive Count" },
     { key: "fines", label: "Fines LKR" },
+    { key: "extraHolidays", label: "Extra Holidays" },
+    { key: "basicSalary", label: "Basic Salary LKR" },
+    { key: "otherAdjustments", label: "Other Adj. LKR" },
+    { key: "finalSalary", label: "Final Salary LKR" },
     { key: "incentive", label: "Incentive LKR" },
   ];
-  const summaryRows = summaries.map((s) => ({
+  const summaryRows = summaries.map((s: any) => ({
     physio: s.name,
     presentDays: String(s.presentDays),
     absentDays: String(s.absentDays),
@@ -298,7 +206,12 @@ export default function PhysioSummaryPage() {
     bandaragamaClinic: String(s.bandaragamaClinic),
     bandaragamaHome: String(s.bandaragamaHome),
     inPatientSessions: String(s.inPatientSessionsCount),
+    incentiveCount: String(s.incentiveCount),
     fines: String(s.finesTotal),
+    extraHolidays: String(s.extraHolidays),
+    basicSalary: String(s.basicSalary),
+    otherAdjustments: String(s.otherAdjustments),
+    finalSalary: String(Math.round(s.finalSalary)),
     incentive: String(s.incentiveTotal),
   }));
 
@@ -306,11 +219,15 @@ export default function PhysioSummaryPage() {
     const r = (s.role || "").toLowerCase();
     return r === "physiotherapist" || r === "staff";
   });
+  const fineStaffOptions = (staff || []).filter((s: any) => {
+    const r = String(s.role || "").toLowerCase();
+    return r !== "admin" && r !== "md";
+  });
 
   const openAddFine = () => {
     setEditingFineId(null);
     setFineForm({
-      staffId: physioOptions[0]?.id || "",
+      staffId: fineStaffOptions[0]?.id || "",
       fineDate: format(new Date(), "yyyy-MM-dd"),
       amount: "500",
       reason: "",
@@ -334,7 +251,7 @@ export default function PhysioSummaryPage() {
       toast({ title: "Missing fields", description: "Staff and reason are required.", variant: "destructive" });
       return;
     }
-    const st = physioOptions.find((x: any) => x.id === fineForm.staffId);
+    const st = fineStaffOptions.find((x: any) => x.id === fineForm.staffId);
     try {
       if (editingFineId) {
         await updateStaffFine.mutateAsync({
@@ -422,8 +339,7 @@ export default function PhysioSummaryPage() {
               <p className="text-sm text-red-700">
                 Some data could not be loaded. Results may be incomplete.
                 {staffError && <span className="block">Staff: {staffError.message}</span>}
-                {visitsError && <span className="block">Visits: {visitsError.message}</span>}
-                {attendanceError && <span className="block">Attendance: {attendanceError.message}</span>}
+                {payrollError && <span className="block">Payroll: {(payrollError as Error).message}</span>}
               </p>
             </CardContent>
           </Card>
@@ -629,7 +545,7 @@ export default function PhysioSummaryPage() {
                     <SelectValue placeholder="Select staff" />
                   </SelectTrigger>
                   <SelectContent>
-                    {physioOptions.map((s: any) => (
+                    {fineStaffOptions.map((s: any) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}
                       </SelectItem>
@@ -671,7 +587,7 @@ export default function PhysioSummaryPage() {
             </CardContent>
           </Card>
         ) : (
-          summaries.map((s) => (
+          summaries.map((s: any) => (
             <Card key={s.id} className="bg-white border border-border/60 shadow-sm" data-testid={`card-physio-${s.id}`}>
               <CardContent className="p-4 space-y-4">
                 {s.error ? (
@@ -692,16 +608,85 @@ export default function PhysioSummaryPage() {
                       <div className="px-3 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-semibold border border-slate-200" data-testid={`badge-ip-${s.id}`}>
                         In-patient sessions: {s.inPatientSessionsCount}
                       </div>
+                      <div className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-semibold border border-indigo-200">
+                        Incentive count: {s.incentiveCount}
+                      </div>
                       <div className="px-3 py-1 rounded-full bg-amber-50 text-amber-900 text-xs font-semibold border border-amber-200" data-testid={`badge-fines-${s.id}`}>
                         Fines: {s.finesTotal.toLocaleString()} LKR
+                      </div>
+                      <div className="px-3 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-semibold border border-rose-200">
+                        Extra holidays: {s.extraHolidays}
                       </div>
                       {incEnabled && (
                         <div className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200" data-testid={`badge-incentive-${s.id}`}>
                           Incentive: {s.incentiveTotal.toLocaleString()} LKR
                         </div>
                       )}
+                      <div className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-semibold border border-blue-200">
+                        Final salary: {Math.round(s.finalSalary).toLocaleString()} LKR
+                      </div>
                     </div>
                   </div>
+                  <StructuredReportActions
+                    reportTitle={`${s.name} Staff Report`}
+                    fileBaseName={`staff-report-${s.name}-${rangeFrom}-to-${rangeTo}`}
+                    logoUri={logoUri}
+                    themeColor="#2563EB"
+                    meta={[
+                      { label: "Staff", value: s.name },
+                      { label: "From", value: rangeFrom },
+                      { label: "To", value: rangeTo },
+                      { label: "Generated", value: generatedAt },
+                    ]}
+                    columns={[
+                      { key: "staffName", label: "Staff" },
+                      { key: "presentDays", label: "Present Days" },
+                      { key: "absentDays", label: "Absent Days" },
+                      { key: "totalOt", label: "OT Hours" },
+                      { key: "colomboClinic", label: "Colombo Clinic Visits" },
+                      { key: "colomboHome", label: "Colombo Home Visits" },
+                      { key: "bandaragamaClinic", label: "Bandaragama Clinic Visits" },
+                      { key: "bandaragamaHome", label: "Bandaragama Home Visits" },
+                      { key: "inPatientSessions", label: "In-patient Sessions" },
+                      { key: "incentiveCount", label: "Incentive Count" },
+                      { key: "incentiveAmount", label: "Incentive Amount (LKR)" },
+                      { key: "holidayHomeVisits", label: "Holiday Home Visits" },
+                      { key: "holidayHomeIncome", label: "Holiday Home Income (LKR)" },
+                      { key: "finesTotal", label: "Fines (LKR)" },
+                      { key: "extraHolidays", label: "Extra Holidays" },
+                      { key: "extraHolidayDeduction", label: "Extra Holiday Deduction (LKR)" },
+                      { key: "basicSalary", label: "Basic Salary (LKR)" },
+                      { key: "otherAdjustments", label: "Other Expenses / Adjustments (LKR)" },
+                      { key: "homeIncome", label: "Home Visit Income (LKR)" },
+                      { key: "otIncome", label: "OT Income (LKR)" },
+                      { key: "finalSalary", label: "Final Salary (LKR)" },
+                    ]}
+                    rows={[
+                      {
+                        staffName: s.name,
+                        presentDays: s.presentDays,
+                        absentDays: s.absentDays,
+                        totalOt: s.totalOt.toFixed(1),
+                        colomboClinic: s.colomboClinic,
+                        colomboHome: s.colomboHome,
+                        bandaragamaClinic: s.bandaragamaClinic,
+                        bandaragamaHome: s.bandaragamaHome,
+                        inPatientSessions: s.inPatientSessionsCount,
+                        incentiveCount: s.incentiveCount,
+                        incentiveAmount: s.incentiveTotal,
+                        holidayHomeVisits: s.holidayHomeVisits,
+                        holidayHomeIncome: s.holidayHomeIncome ?? 0,
+                        finesTotal: s.finesTotal,
+                        extraHolidays: s.extraHolidays,
+                        extraHolidayDeduction: s.extraHolidayDeduction,
+                        basicSalary: s.basicSalary,
+                        otherAdjustments: s.otherAdjustments,
+                        homeIncome: s.homeIncome,
+                        otIncome: s.otIncome,
+                        finalSalary: Math.round(s.finalSalary),
+                      },
+                    ]}
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3" data-testid={`grid-attendance-${s.id}`}>
@@ -756,7 +741,7 @@ export default function PhysioSummaryPage() {
                           <div className="hidden sm:block sm:text-right">Sessions (outpatient + in-patient)</div>
                           <div className="hidden sm:block sm:text-right">Incentive (LKR)</div>
                         </div>
-                        {s.incentiveDays.map((d) => (
+                        {s.incentiveDays.map((d: any) => (
                           <div
                             key={d.date}
                             className="grid grid-cols-1 gap-1 rounded-lg border border-border/60 bg-muted/10 px-3 py-2 text-sm sm:grid-cols-3 sm:gap-2"
@@ -787,5 +772,13 @@ export default function PhysioSummaryPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function PhysioSummaryPage() {
+  return (
+    <RoleProtectedRoute allowed={canViewReports}>
+      <PhysioSummaryContent />
+    </RoleProtectedRoute>
   );
 }

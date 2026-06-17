@@ -140,6 +140,38 @@
   color-scheme: light;
 }
 
+/* Dark mode preparation — toggle via class on <html> */
+.dark {
+  color-scheme: dark;
+  --color-background: 220 25% 8%;
+  --color-foreground: 40 20% 96%;
+  --color-card: 220 22% 12%;
+  --color-card-foreground: 40 20% 96%;
+  --color-muted: 220 18% 18%;
+  --color-muted-foreground: 220 10% 65%;
+  --color-border: 220 15% 22%;
+  --color-input: 220 15% 22%;
+}
+
+/* Sidebar + main content — prevent overlap / clipped KPI cards */
+[data-slot="sidebar-wrapper"] {
+  display: flex;
+  width: 100%;
+  min-height: 100svh;
+}
+[data-slot="sidebar-inset"] {
+  min-width: 0;
+  flex: 1 1 0%;
+}
+
+/* Minimum touch target helper */
+@layer utilities {
+  .touch-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+}
+
 /* Smooth transitions for interactive elements */
 @layer utilities {
   .transition-smooth {

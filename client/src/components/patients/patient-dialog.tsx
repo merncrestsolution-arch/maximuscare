@@ -7,6 +7,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Patient } from "@/lib/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
+import { BranchSelectField } from "@/components/branch/branch-select-field";
+import { useBranchOptions } from "@/hooks/use-branch-options";
 
 interface PatientDialogProps {
   patient?: Patient; // Optional for create mode
@@ -22,13 +24,14 @@ const DEFAULT_PATIENT: Omit<Patient, 'id'> = {
   gender: "Male",
   address: "",
   registeredDate: new Date().toISOString(),
-  branch: "Colombo",
+  branch: "",
   status: "Active",
   defaultVisitType: "Clinic",
 };
 
 export function PatientDialog({ patient, isOpen, onClose, onSave }: PatientDialogProps) {
   const { toast } = useToast();
+  const { defaultValue: defaultBranch } = useBranchOptions();
   // If patient is provided, use it (edit mode). Otherwise use default (create mode).
   const [formData, setFormData] = useState<Patient | Omit<Patient, 'id'>>(DEFAULT_PATIENT);
 
@@ -37,15 +40,19 @@ export function PatientDialog({ patient, isOpen, onClose, onSave }: PatientDialo
       if (patient) {
         setFormData({ ...patient });
       } else {
-        setFormData({ ...DEFAULT_PATIENT, registeredDate: new Date().toISOString() });
+        setFormData({ ...DEFAULT_PATIENT, branch: defaultBranch, registeredDate: new Date().toISOString() });
       }
     }
   }, [patient, isOpen]);
 
   const handleSave = () => {
-    const age = Number((formData as any).age);
-    if (!Number.isFinite(age) || age < 1) {
-      toast({ title: "Invalid age", description: "Please enter a valid age (1 or above).", variant: "destructive" });
+    const rawAge = (formData as any).age;
+    const age =
+      rawAge === "" || rawAge === 0 || rawAge === null || rawAge === undefined
+        ? null
+        : Number(rawAge);
+    if (age !== null && (!Number.isFinite(age) || age < 1)) {
+      toast({ title: "Invalid age", description: "Please enter a valid age (1 or above), or leave blank.", variant: "destructive" });
       return;
     }
     onSave({ ...formData, age } as typeof formData);
@@ -103,12 +110,12 @@ export function PatientDialog({ patient, isOpen, onClose, onSave }: PatientDialo
 
             <div className="grid grid-cols-2 gap-4 sm:gap-6">
               <div className="space-y-3">
-                <Label className="text-base font-semibold text-foreground">Age</Label>
+                <Label className="text-base font-semibold text-foreground">Age <span className="text-muted-foreground font-normal">(optional)</span></Label>
                 <Input 
                   type="number"
                   min={1}
                   className="h-12 text-base bg-card"
-                  value={formData.age === 0 ? "" : String(formData.age)} 
+                  value={(formData as any).age == null || (formData as any).age === 0 ? "" : String((formData as any).age)} 
                   onChange={(e) => {
                     const raw = e.target.value;
                     if (raw === "") setFormData({ ...formData, age: 0 });
@@ -148,18 +155,12 @@ export function PatientDialog({ patient, isOpen, onClose, onSave }: PatientDialo
 
             <div className="space-y-3">
               <Label className="text-base font-semibold text-foreground">Branch</Label>
-              <Select 
-                value={formData.branch} 
-                onValueChange={(v) => setFormData({...formData, branch: v as any})}
-              >
-                <SelectTrigger className="h-12 text-base bg-card">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Colombo">Colombo</SelectItem>
-                  <SelectItem value="Bandaragama">Bandaragama</SelectItem>
-                </SelectContent>
-              </Select>
+              <BranchSelectField
+                className="h-12 text-base bg-card"
+                value={formData.branch}
+                onChange={(v) => setFormData({ ...formData, branch: v })}
+                forRegistration
+              />
             </div>
             
             <div className="h-20 sm:h-0" /> {/* Spacer for mobile sticky footer */}

@@ -12,6 +12,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { format } from "date-fns";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
+import { BranchSelectField } from "@/components/branch/branch-select-field";
+import { useBranchOptions } from "@/hooks/use-branch-options";
 
 const DEFAULT_PATIENT: Omit<Patient, "id"> = {
   name: "",
@@ -20,7 +22,7 @@ const DEFAULT_PATIENT: Omit<Patient, "id"> = {
   gender: "Male",
   address: "",
   registeredDate: format(new Date(), "yyyy-MM-dd"),
-  branch: "Colombo",
+  branch: "",
   status: "Active",
   defaultVisitType: "Clinic",
   condition: "",
@@ -30,6 +32,7 @@ export default function PatientEditPage() {
   const [match, params] = useRoute("/patients/:id/edit");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { defaultValue: defaultBranch } = useBranchOptions();
 
   const patientId = match ? params?.id : undefined;
   const isEdit = !!patientId && patientId !== "new";
@@ -47,7 +50,7 @@ export default function PatientEditPage() {
       if (!existingPatient) return;
       setFormData({ ...existingPatient });
     } else {
-      setFormData({ ...DEFAULT_PATIENT, registeredDate: format(new Date(), "yyyy-MM-dd") });
+      setFormData({ ...DEFAULT_PATIENT, branch: defaultBranch, registeredDate: format(new Date(), "yyyy-MM-dd") });
     }
   }, [isEdit, existingPatient]);
 
@@ -91,11 +94,15 @@ export default function PatientEditPage() {
   };
 
   const handleSave = async () => {
-    const age = Number((formData as any).age);
-    if (!Number.isFinite(age) || age < 1) {
+    const rawAge = (formData as any).age;
+    const age =
+      rawAge === "" || rawAge === 0 || rawAge === null || rawAge === undefined
+        ? null
+        : Number(rawAge);
+    if (age !== null && (!Number.isFinite(age) || age < 1)) {
       toast({
         title: "Invalid age",
-        description: "Please enter a valid age (1 or above).",
+        description: "Please enter a valid age (1 or above), or leave blank.",
         variant: "destructive",
       });
       return;
@@ -218,23 +225,61 @@ export default function PatientEditPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-3">
-                <Label className="text-base font-semibold text-black">Age</Label>
+                <Label className="text-base font-semibold text-black">NIC / Passport (optional)</Label>
+                <Input
+                  className="h-12 text-base bg-white border-gray-300 text-black"
+                  value={(formData as any).nicOrPassport || ""}
+                  onChange={(e) => setFormData({ ...(formData as any), nicOrPassport: e.target.value })}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold text-black">Date of Birth (optional)</Label>
+                <Input
+                  type="date"
+                  className="h-12 text-base bg-white border-gray-300 text-black"
+                  value={(formData as any).dateOfBirth || ""}
+                  onChange={(e) => setFormData({ ...(formData as any), dateOfBirth: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+              <div className="space-y-3">
+                <Label className="text-base font-semibold text-black">Emergency Contact</Label>
+                <Input
+                  className="h-12 text-base bg-white border-gray-300 text-black"
+                  value={(formData as any).emergencyContact || ""}
+                  onChange={(e) => setFormData({ ...(formData as any), emergencyContact: e.target.value })}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold text-black">Referral Source</Label>
+                <Input
+                  className="h-12 text-base bg-white border-gray-300 text-black"
+                  value={(formData as any).referralSource || ""}
+                  onChange={(e) => setFormData({ ...(formData as any), referralSource: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+              <div className="space-y-3">
+                <Label className="text-base font-semibold text-black">Age <span className="font-normal text-black/60">(optional)</span></Label>
                 <Input
                   type="number"
                   min={1}
                   className="h-12 text-base bg-white border-gray-300 text-black"
-                  value={(formData as any).age === 0 ? "" : String((formData as any).age)}
+                  value={(formData as any).age == null || (formData as any).age === 0 ? "" : String((formData as any).age)}
                   onChange={(e) => {
                     const raw = e.target.value;
                     if (raw === "") {
-                      setFormData({ ...(formData as any), age: 0 });
+                      setFormData({ ...(formData as any), age: null });
                       return;
                     }
                     const n = parseInt(raw, 10);
                     if (!Number.isNaN(n)) setFormData({ ...(formData as any), age: n });
                   }}
                   data-testid="input-patient-age"
-                  required
                 />
               </div>
               <div className="space-y-3">
@@ -247,8 +292,9 @@ export default function PatientEditPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Discharged">Discharged</SelectItem>
+                    {["Active", "Inactive", "Completed", "Discharged", "Transferred"].map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -294,18 +340,12 @@ export default function PatientEditPage() {
 
             <div className="space-y-3">
               <Label className="text-base font-semibold text-black">Branch</Label>
-              <Select
-                value={(formData as any).branch}
-                onValueChange={(v) => setFormData({ ...(formData as any), branch: v })}
-              >
-                <SelectTrigger className="h-12 text-base bg-white border-gray-300 text-black" data-testid="select-patient-branch">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Colombo">Colombo</SelectItem>
-                  <SelectItem value="Bandaragama">Bandaragama</SelectItem>
-                </SelectContent>
-              </Select>
+              <BranchSelectField
+                className="h-12 text-base bg-white border-gray-300 text-black"
+                value={(formData as any).branch || defaultBranch}
+                onChange={(v) => setFormData({ ...(formData as any), branch: v })}
+                forRegistration
+              />
             </div>
           </div>
 

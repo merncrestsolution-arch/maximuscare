@@ -1,4 +1,4 @@
-export type Role = 'Admin' | 'MD' | 'Receptionist' | 'Physiotherapist' | 'Staff';
+export type Role = 'Admin' | 'MD' | 'Manager' | 'Receptionist' | 'Physiotherapist' | 'Staff';
 
 export interface User {
   id: string;
@@ -7,12 +7,21 @@ export interface User {
   role: Role;
   password?: string;
   avatar?: string;
-  branch?: 'Colombo' | 'Bandaragama' | 'Both';
+  branch?: string;
+  branchIds?: string[];
   address?: string;
   nic?: string;
   passportNo?: string;
   phone?: string;
   degree?: string;
+  joinDate?: string;
+  photoUri?: string;
+  isActive?: number | boolean;
+  basicSalary?: string;
+  salaryDate?: string;
+  otherAdjustments?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface AttendanceRecord {
@@ -33,12 +42,12 @@ export interface Patient {
   id: string;
   name: string;
   phone: string;
-  age: number;
+  age?: number | null;
   gender: 'Male' | 'Female';
   address: string;
   registeredDate: string;
-  branch: 'Colombo' | 'Bandaragama';
-  status: 'Active' | 'Discharged';
+  branch: string;
+  status: 'Active' | 'Inactive' | 'Discharged' | 'Completed' | 'Transferred';
   defaultVisitType: 'Clinic' | 'Home';
   condition?: string;
 }
@@ -52,7 +61,7 @@ export interface Visit {
   visitDate: string; // ISO Date YYYY-MM-DD
   startTime: string;
   endTime: string;
-  branch: 'Colombo' | 'Bandaragama';
+  branch: string;
   visitType: 'Clinic' | 'Home';
   status: 'Follow-up' | 'Finished';
   paymentAmount: number;
@@ -170,6 +179,9 @@ export interface Appointment {
   patientName: string;
   treatingStaffId: string;
   treatingStaffName: string;
+  status?: string;
+  branch?: string | null;
+  reminderSent?: number;
   notes?: string | null;
   createdByStaffId: string;
   createdAt: string;

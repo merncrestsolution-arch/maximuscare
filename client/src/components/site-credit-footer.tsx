@@ -71,11 +71,11 @@ export function SiteCreditFooter() {
       <div className="inline-flex max-w-[min(100%,20rem)] flex-wrap items-center justify-center gap-x-1.5 gap-y-1">
         <span className="inline-flex max-w-full items-center gap-0.5 whitespace-nowrap rounded-full border border-primary/30 bg-gradient-to-r from-primary/[0.12] via-accent/80 to-secondary/[0.14] px-1.5 py-0.5 text-[10px] font-medium tabular-nums shadow-sm ring-1 ring-primary/10">
           <CrestSunriseMark gradientId={gradPill} className="h-3 w-3" />
-          <span className="text-primary">Last update</span>
+          <span className="text-primary">Last Update</span>
           <span className="text-muted-foreground/45" aria-hidden>
             ·
           </span>
-          <span className="text-secondary">2026/04/18</span>
+          <span className="text-secondary">2026/06/10</span>
         </span>
       </div>
       <p className="flex max-w-[min(100%,22rem)] flex-wrap items-center justify-center gap-1 text-center text-[9px] leading-snug tracking-tight text-muted-foreground/90">

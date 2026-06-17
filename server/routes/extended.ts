@@ -1,0 +1,676 @@
+import type { Express, Request, Response } from "express";
+import { z } from "zod";
+import { storage } from "../storage";
+import { schema } from "../db";
+import { requireAuth } from "../auth";
+import {
+  requireAuditView,
+  requireBranchesManage,
+  requireReportsView,
+  requireSettingsManage,
+  requireTasksManage,
+  requireSalaryManage,
+  requireNotificationsManage,
+  requireCriticalDelete,
+  requireExpensesManage,
+  requireStaffManage,
+  requireReportsExport,
+} from "../middleware/secureApi";
+import { attachBranchContext, requireBranchContext, getBranchFilter } from "../middleware/branchContext";
+import { assertOverviewAccess } from "../services/branchService";
+import { computeOverviewKpis, computeMaximusComparison, computeNexusComparison } from "../services/overviewService";
+import { successResponse, errorResponse } from "../response";
+import { isManagementRole } from "../permissions";
+import { computePayrollReport, persistPayrollSnapshotRecords } from "../services/payrollService";
+import { logAudit } from "../services/auditService";
+import { handleCreateTask } from "./hrm";
+import { normalizeStatus } from "../services/taskService";
+import { computeDashboardKpis, computeBranchDashboardStats, assignPatientsToFirstVisitTherapist } from "../services/dashboardService";
+import {
+  computeRevenueReport,
+  computeIncentiveReport,
+  computeAttendanceReport,
+  computeExpenseReport,
+  computeUnpaidReport,
+  computeStaffReport,
+  computeSessionReport,
+} from "../services/reportService";
+
+const {
+  insertBranchSchema,
+  updateBranchSchema,
+  updateClinicSettingsSchema,
+  insertNotificationSchema,
+  insertTaskSchema,
+  updateTaskSchema,
+  insertPayrollSnapshotSchema,
+} = schema;
+
+function param(req: Request, name: string): string {
+  const v = req.params[name];
+  return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
+}
+
+async function editorName(staffId: string) {
+  const s = await storage.getStaff(staffId);
+  return s?.name ?? "";
+}
+
+export function registerExtendedRoutes(app: Express) {
+  // ========== Payroll ==========
+  app.get("/api/payroll/report", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      const staffId = req.query.staffId as string | undefined;
+      const user = (req as any).user;
+
+      if (!startDate || !endDate) {
+        return errorResponse(res, "startDate and endDate are required", 400);
+      }
+
+      let staffIds: string[] | undefined;
+      if (isManagementRole(user.role)) {
+        staffIds = staffId ? [staffId] : undefined;
+      } else if (user.role === "Physiotherapist" || user.role === "Staff") {
+        staffIds = [user.staffId];
+      } else {
+        return errorResponse(res, "Forbidden", 403);
+      }
+
+      const report = await computePayrollReport(storage, startDate, endDate, staffIds);
+      return successResponse(res, report);
+    } catch (error: any) {
+      return errorResponse(res, error.message || "Failed to compute payroll", 500);
+    }
+  });
+
+  app.post("/api/payroll/snapshots", requireAuth, requireSalaryManage, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const { staffId, periodStart, periodEnd } = req.body;
+      if (!staffId || !periodStart || !periodEnd) {
+        return errorResponse(res, "staffId, periodStart, periodEnd required", 400);
+      }
+      const { summaries } = await computePayrollReport(storage, periodStart, periodEnd, [staffId]);
+      const summary = summaries[0];
+      if (!summary) return errorResponse(res, "Staff not found or not eligible", 404);
+
+      const staff = await storage.getStaff(staffId);
+      const snapshot = await storage.createPayrollSnapshot(
+        insertPayrollSnapshotSchema.parse({
+          staffId,
+          staffName: staff?.name ?? summary.name,
+          periodStart,
+          periodEnd,
+          breakdown: JSON.stringify(summary),
+          finalSalary: String(summary.finalSalary),
+          createdByStaffId: user.staffId,
+          createdByName: await editorName(user.staffId),
+        })
+      );
+      await persistPayrollSnapshotRecords(storage, summary, periodStart);
+      await logAudit(storage, {
+        userId: user.staffId,
+        userName: await editorName(user.staffId),
+        module: "salary",
+        action: "create",
+        recordId: snapshot.id,
+        newValue: summary,
+      });
+      return successResponse(res, snapshot, "Payroll snapshot saved", 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message || "Failed to save snapshot", 500);
+    }
+  });
+
+  app.get("/api/payroll/snapshots", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const staffId = (req.query.staffId as string) || user.staffId;
+      if (!isManagementRole(user.role) && staffId !== user.staffId) {
+        return errorResponse(res, "Forbidden", 403);
+      }
+      const snapshots = await storage.getPayrollSnapshotsByStaff(staffId);
+      return successResponse(res, snapshots);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ========== Clinic Settings ==========
+  app.get("/api/clinic-settings", requireAuth, requireSettingsManage, async (_req, res) => {
+    try {
+      const settings = await storage.getClinicSettings();
+      return successResponse(res, settings ?? {
+        autoFineAmount: "500",
+        homeRateColombo: "1000",
+        homeRateBandaragama: "500",
+        holidayHomeRate: "1500",
+        otRatePerHour: "250",
+        extraHolidayDeduction: "1500",
+        freeAbsentDays: 4,
+      });
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.put("/api/clinic-settings", requireAuth, requireSettingsManage, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const data = updateClinicSettingsSchema.parse(req.body);
+      const settings = await storage.updateClinicSettings(data);
+      await logAudit(storage, {
+        userId: user.staffId,
+        userName: await editorName(user.staffId),
+        module: "salary",
+        action: "update",
+        recordId: settings.id,
+        newValue: data,
+      });
+      return successResponse(res, settings, "Settings saved");
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return errorResponse(res, "Validation error", 400, error.errors.map((e) => e.message));
+      }
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ========== Branches ==========
+  app.get("/api/branches", requireAuth, async (_req, res) => {
+    try {
+      const list = await storage.getAllBranches();
+      return successResponse(res, list);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.post("/api/branches", requireAuth, requireBranchesManage, async (req, res) => {
+    try {
+      const data = insertBranchSchema.parse(req.body);
+      const branch = await storage.createBranch(data as any);
+      return successResponse(res, branch, "Branch created", 201);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return errorResponse(res, "Validation error", 400);
+      }
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.patch("/api/branches/:id", requireAuth, requireBranchesManage, async (req, res) => {
+    try {
+      const data = updateBranchSchema.parse(req.body);
+      const branch = await storage.updateBranch(param(req, "id"), data as any);
+      if (!branch) return errorResponse(res, "Branch not found", 404);
+      return successResponse(res, branch);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.delete("/api/branches/:id", requireAuth, requireCriticalDelete, async (req, res) => {
+    try {
+      const deleted = await storage.deleteBranch(param(req, "id"));
+      if (!deleted) return errorResponse(res, "Branch not found", 404);
+      return successResponse(res, null, "Branch deleted");
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ========== Notifications ==========
+  app.get("/api/notifications", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const unreadOnly = req.query.unreadOnly === "true";
+      const archived =
+        req.query.archived === "true" ? true : req.query.archived === "false" ? false : undefined;
+      const list = await storage.getNotificationsByStaff(user.staffId, {
+        unreadOnly,
+        archived,
+      });
+      return successResponse(res, list);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/notifications/unread-count", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const count = await storage.getUnreadNotificationCount(user.staffId);
+      return successResponse(res, { count });
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.post("/api/notifications", requireAuth, requireNotificationsManage, async (req, res) => {
+    try {
+      const data = insertNotificationSchema.parse(req.body);
+      const notification = await storage.createNotification(data as any);
+      return successResponse(res, notification, "Notification sent", 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const n = await storage.markNotificationRead(param(req, "id"), user.staffId);
+      if (!n) return errorResponse(res, "Notification not found", 404);
+      return successResponse(res, n);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.post("/api/notifications/mark-all-read", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      await storage.markAllNotificationsRead(user.staffId);
+      return successResponse(res, null, "All marked read");
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ========== Tasks ==========
+  app.get("/api/tasks", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const status = req.query.status as string | undefined;
+      let list;
+      if (isManagementRole(user.role) && req.query.all === "true") {
+        list = await storage.getAllTasks(status);
+      } else {
+        list = await storage.getTasksForStaff(user.staffId, status);
+      }
+      return successResponse(res, list);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.post("/api/tasks", requireAuth, requireTasksManage, async (req, res) => {
+    try {
+      if (!req.body.title) return errorResponse(res, "title required", 400);
+      if (req.body.taskType !== "Common" && !req.body.assignedToStaffId && !req.body.assignedStaffIds?.length) {
+        return errorResponse(res, "Assignee required for individual tasks", 400);
+      }
+      return await handleCreateTask(req, res);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.patch("/api/tasks/:id", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const existing = await storage.getTask(param(req, "id"));
+      if (!existing) return errorResponse(res, "Task not found", 404);
+      const canEdit =
+        isManagementRole(user.role) || existing.assignedToStaffId === user.staffId;
+      if (!canEdit) return errorResponse(res, "Forbidden", 403);
+      const raw = req.body as Record<string, unknown>;
+      const data = updateTaskSchema.parse({
+        ...raw,
+        status: raw.status ? normalizeStatus(String(raw.status)) : undefined,
+      });
+      if (data.status && normalizeStatus(data.status) === "Completed") {
+        (data as any).completionNotes = raw.completionNotes ?? existing.completionNotes;
+        if (raw.completionFiles) {
+          (data as any).completionFiles = JSON.stringify(raw.completionFiles);
+        }
+      }
+      const task = await storage.updateTask(existing.id, data);
+      const action =
+        data.status && normalizeStatus(data.status) === "Completed" ? "complete" : "update";
+      await logAudit(storage, {
+        userId: user.staffId,
+        userName: await editorName(user.staffId),
+        module: "task",
+        action,
+        recordId: existing.id,
+        oldValue: existing,
+        newValue: task,
+      });
+      return successResponse(res, task);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.delete("/api/tasks/:id", requireAuth, requireTasksManage, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const existing = await storage.getTask(param(req, "id"));
+      if (!existing) return errorResponse(res, "Task not found", 404);
+      const deleted = await storage.deleteTask(existing.id, user.staffId);
+      if (!deleted) return errorResponse(res, "Task not found", 404);
+      await logAudit(storage, {
+        userId: user.staffId,
+        userName: await editorName(user.staffId),
+        module: "task",
+        action: "delete",
+        recordId: existing.id,
+        oldValue: existing,
+      });
+      return successResponse(res, null, "Task deleted");
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ========== Audit Logs ==========
+  app.get("/api/audit-logs", requireAuth, requireAuditView, async (req, res) => {
+    try {
+      const entityType = req.query.entityType as string | undefined;
+      const limit = Math.min(Number(req.query.limit) || 100, 500);
+      const logs = await storage.getAuditLogs({ entityType, limit });
+      return successResponse(res, logs);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ========== Dashboard aggregation (centralized calculation engine) ==========
+  app.get("/api/reports/dashboard-kpis", requireAuth, requireBranchContext(), async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) {
+        return errorResponse(res, "startDate and endDate required", 400);
+      }
+      const staffFilter =
+        isManagementRole(user.role) ? undefined : [user.staffId];
+      const { cacheGetOrSet } = await import("../services/cacheService");
+      const branchFilter = (req as any).branchContext?.selectedBranchName;
+      const cacheKey = `dashboard:${startDate}:${endDate}:${user.staffId}:${branchFilter ?? "none"}`;
+      const kpis = await cacheGetOrSet(cacheKey, 120, () =>
+        computeDashboardKpis(storage, startDate, endDate, staffFilter, branchFilter)
+      );
+      return successResponse(res, kpis);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/reports/maximus-overview", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const sessionId = (req as any).sessionId;
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+      assertOverviewAccess("maximus-overview", user.role);
+      const session = sessionId ? await storage.getAuthSession(sessionId) : undefined;
+      if (session?.selectedContext !== "maximus-overview") {
+        return errorResponse(res, "Maximus Overview context required", 403);
+      }
+      const kpis = await computeOverviewKpis(storage, startDate, endDate, "maximus");
+      const comparison = await computeMaximusComparison(storage, startDate, endDate);
+      return successResponse(res, { startDate, endDate, kpis, comparison });
+    } catch (error: any) {
+      return errorResponse(res, error.message, error.message?.includes("Unauthorized") ? 403 : 500);
+    }
+  });
+
+  app.get("/api/reports/nexus-overview", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const sessionId = (req as any).sessionId;
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+      assertOverviewAccess("nexus-overview", user.role);
+      const session = sessionId ? await storage.getAuthSession(sessionId) : undefined;
+      if (session?.selectedContext !== "nexus-overview") {
+        return errorResponse(res, "Nexus Overview context required", 403);
+      }
+      const kpis = await computeOverviewKpis(storage, startDate, endDate, "nexus");
+      const comparison = await computeNexusComparison(storage, startDate, endDate);
+      return successResponse(res, { startDate, endDate, kpis, comparison });
+    } catch (error: any) {
+      return errorResponse(res, error.message, error.message?.includes("Unauthorized") ? 403 : 500);
+    }
+  });
+
+  app.get("/api/reports/branch-stats", requireAuth, requireReportsView, async (req, res) => {
+    try {
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) {
+        return errorResponse(res, "startDate and endDate required", 400);
+      }
+      const stats = await computeBranchDashboardStats(storage, startDate, endDate);
+      return successResponse(res, { startDate, endDate, stats });
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/reports/therapist-patients", requireAuth, requireStaffManage, async (_req, res) => {
+    try {
+      const visits = await storage.getAllVisits();
+      const patients = await storage.getAllPatients();
+      const staff = await storage.getAllStaff();
+      const result = assignPatientsToFirstVisitTherapist(visits, patients, staff);
+      return successResponse(res, result);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ========== Part 4 report endpoints (calculation engine only) ==========
+  app.get("/api/reports/revenue", requireAuth, requireBranchContext(), requireReportsView, async (req, res) => {
+    try {
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+      const branchFilter = getBranchFilter(req as any);
+      const { cacheGetOrSet } = await import("../services/cacheService");
+      const cacheKey = `report:revenue:${startDate}:${endDate}:${branchFilter ?? "all"}`;
+      const report = await cacheGetOrSet(cacheKey, 180, () =>
+        computeRevenueReport(storage, startDate, endDate, branchFilter)
+      );
+      return successResponse(res, report);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/reports/incentive", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+      const staffId = isManagementRole(user.role) ? (req.query.staffId as string | undefined) : user.staffId;
+      const rows = await computeIncentiveReport(storage, startDate, endDate, staffId);
+      return successResponse(res, { startDate, endDate, rows });
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/reports/attendance", requireAuth, requireBranchContext(), async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+      const staffId = isManagementRole(user.role) ? (req.query.staffId as string | undefined) : user.staffId;
+      const branchFilter = getBranchFilter(req as any);
+      const report = await computeAttendanceReport(storage, startDate, endDate, staffId, branchFilter);
+      return successResponse(res, report);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/reports/expenses", requireAuth, requireBranchContext(), requireExpensesManage, async (req, res) => {
+    try {
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+      const branchFilter = getBranchFilter(req as any);
+      const report = await computeExpenseReport(storage, startDate, endDate, branchFilter);
+      return successResponse(res, report);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/reports/unpaid", requireAuth, requireBranchContext(), async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const staffId = isManagementRole(user.role) ? undefined : user.staffId;
+      const branchFilter = getBranchFilter(req as any);
+      const rows = await computeUnpaidReport(storage, staffId, branchFilter);
+      const totalAmount = rows.reduce((a, r) => a + (r.outstandingBalance ?? r.amount), 0);
+      return successResponse(res, { rows, totalAmount, patientCount: new Set(rows.map((r) => r.patientId)).size });
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/reports/sessions", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+      const staffId = isManagementRole(user.role) ? (req.query.staffId as string | undefined) : user.staffId;
+      const report = await computeSessionReport(storage, startDate, endDate, staffId);
+      return successResponse(res, report);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  app.get("/api/reports/staff/:staffId", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const staffId = param(req, "staffId");
+      if (!isManagementRole(user.role) && user.staffId !== staffId) {
+        return errorResponse(res, "Forbidden", 403);
+      }
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+      const report = await computeStaffReport(storage, staffId, startDate, endDate);
+      if (!report) return errorResponse(res, "Staff not found", 404);
+      return successResponse(res, report);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ========== Server-side report export (CSV / XLSX / PDF) ==========
+  app.get("/api/reports/export/:reportType", requireAuth, requireBranchContext(), requireReportsExport, async (req, res) => {
+    try {
+      const reportType = param(req, "reportType");
+      const format = String(req.query.format ?? "csv").toLowerCase() as "csv" | "xlsx" | "pdf";
+      if (!["csv", "xlsx", "pdf"].includes(format)) {
+        return errorResponse(res, "format must be csv, xlsx, or pdf", 400);
+      }
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
+
+      const branchFilter = getBranchFilter(req as any);
+      const exportSvc = await import("../services/exportService");
+
+      let columns: { key: string; label: string }[] = [];
+      let rows: Record<string, unknown>[] = [];
+      let title = "Report";
+
+      if (reportType === "revenue") {
+        const report = await computeRevenueReport(storage, startDate, endDate, branchFilter);
+        title = "Revenue Report";
+        columns = [
+          { key: "date", label: "Date" },
+          { key: "revenue", label: "Revenue (LKR)" },
+        ];
+        rows = report.dailyTrend.map((d) => ({ date: d.date, revenue: d.revenue }));
+      } else if (reportType === "attendance") {
+        const report = await computeAttendanceReport(storage, startDate, endDate, undefined, branchFilter);
+        title = "Attendance Report";
+        columns = [
+          { key: "staffName", label: "Staff" },
+          { key: "present", label: "Present" },
+          { key: "absent", label: "Absent" },
+          { key: "leave", label: "Leave" },
+          { key: "holiday", label: "Holiday" },
+        ];
+        rows = report.byStaff.map((s) => ({ ...s }));
+      } else if (reportType === "incentive") {
+        const report = await computeIncentiveReport(storage, startDate, endDate);
+        title = "Incentive Report";
+        columns = [
+          { key: "staffName", label: "Staff" },
+          { key: "clinicVisits", label: "Clinic Visits" },
+          { key: "sessions", label: "IP Sessions" },
+          { key: "incentiveCount", label: "Incentive Count" },
+          { key: "incentiveAmount", label: "Amount (LKR)" },
+        ];
+        rows = report.map((r) => ({ ...r }));
+      } else if (reportType === "unpaid") {
+        const report = await computeUnpaidReport(storage, undefined, branchFilter);
+        title = "Unpaid Visits";
+        columns = [
+          { key: "patientName", label: "Patient" },
+          { key: "visitDate", label: "Visit Date" },
+          { key: "outstandingBalance", label: "Outstanding (LKR)" },
+          { key: "branch", label: "Branch" },
+        ];
+        rows = report.map((r) => ({
+          patientName: r.patientName,
+          visitDate: r.visitDate,
+          outstandingBalance: r.outstandingBalance ?? r.amount,
+          branch: r.branch,
+        }));
+      } else if (reportType === "expenses") {
+        const report = await computeExpenseReport(storage, startDate, endDate, branchFilter);
+        title = "Expense Report";
+        columns = [
+          { key: "expenseDate", label: "Date" },
+          { key: "category", label: "Category" },
+          { key: "amount", label: "Amount (LKR)" },
+          { key: "description", label: "Description" },
+        ];
+        rows = report.items.map((e) => ({
+          expenseDate: e.expenseDate,
+          category: e.category,
+          amount: e.amount,
+          description: e.description ?? "",
+        }));
+      } else {
+        return errorResponse(res, "Unknown report type", 400);
+      }
+
+      const filename = `${reportType}-${startDate}-${endDate}.${exportSvc.exportFileExtension(format)}`;
+      res.setHeader("Content-Type", exportSvc.exportContentType(format));
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+      if (format === "csv") {
+        return res.send(exportSvc.rowsToCsv(columns, rows));
+      }
+      if (format === "xlsx") {
+        const buf = await exportSvc.rowsToExcelBuffer(columns, rows, title);
+        return res.send(buf);
+      }
+      const pdf = await exportSvc.rowsToPdfBuffer(title, columns, rows);
+      return res.send(pdf);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+}

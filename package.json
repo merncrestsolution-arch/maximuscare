@@ -7,7 +7,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "dev:client": "vite dev --port 5000",
+    "dev:client": "vite dev --port 5173",
     "dev": "cross-env NODE_ENV=development tsx server/index.ts",
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build",
@@ -15,10 +15,14 @@
     "build:legacy": "npx tsx script/build.ts",
     "start": "node dist/index.cjs",
     "check": "tsc",
+    "test": "vitest run",
     "db:push": "drizzle-kit push",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:migrate-part2": "tsx script/migrate-part2.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1065.0",
+    "@aws-sdk/s3-request-presigner": "^3.1065.0",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@libsql/client": "^0.14.0",
@@ -70,6 +74,7 @@
     "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "input-otp": "^1.4.2",
+    "ioredis": "^5.11.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.545.0",
     "memorystore": "^1.6.7",
@@ -105,6 +110,7 @@
     "@types/pg": "^8.10.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@types/supertest": "^7.2.0",
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
@@ -112,10 +118,12 @@
     "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.0",
     "postcss": "^8.5.6",
+    "supertest": "^7.2.2",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
-    "vite": "^7.1.9"
+    "vite": "^7.1.9",
+    "vitest": "^4.1.8"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"

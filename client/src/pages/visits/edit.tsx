@@ -22,6 +22,7 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
+import { BranchSelectField } from "@/components/branch/branch-select-field";
 
 export default function EditVisit() {
   const [match, params] = useRoute("/visits/edit/:id");
@@ -117,7 +118,6 @@ export default function EditVisit() {
           visitDate: formData.visitDate,
           treatingStaffId: formData.treatingStaffId,
           treatingStaffName: treatingStaff?.name || formData.treatingStaffName,
-          sessionNumber: parseInt(formData.sessionNumber) || 1,
           condition: formData.condition,
           treatment: formData.treatment,
           improvements: formData.improvements?.trim() || null,
@@ -213,9 +213,10 @@ export default function EditVisit() {
                 <Label className="text-sm font-semibold text-black">Session #</Label>
                 <Input
                   type="number"
-                  className="h-12 text-base bg-white border-gray-300 text-black"
+                  className="h-12 text-base bg-gray-50 border-gray-300 text-black"
                   value={formData.sessionNumber}
-                  onChange={(e) => setFormData({...formData, sessionNumber: e.target.value})}
+                  readOnly
+                  disabled
                   data-testid="input-edit-visit-session"
                 />
               </div>
@@ -235,15 +236,11 @@ export default function EditVisit() {
 
             <div className="space-y-2">
               <Label className="text-sm font-semibold text-black">Branch</Label>
-              <Select value={formData.branch} onValueChange={(v) => setFormData({...formData, branch: v})}>
-                <SelectTrigger className="h-12 text-base bg-white border-gray-300 text-black" data-testid="select-edit-visit-branch">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Colombo">Colombo</SelectItem>
-                  <SelectItem value="Bandaragama">Bandaragama</SelectItem>
-                </SelectContent>
-              </Select>
+              <BranchSelectField
+                className="h-12 text-base bg-white border-gray-300 text-black"
+                value={formData.branch}
+                onChange={(v) => setFormData({ ...formData, branch: v })}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">

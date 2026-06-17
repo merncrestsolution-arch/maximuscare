@@ -1,3 +1,7 @@
+import { normalizeBranchName } from "@shared/branches";
+import type { Visit } from "./types";
+
+/** @deprecated Legacy shape used by payroll / physio summary APIs */
 export interface VisitStats {
   colomboHome: number;
   colomboClinic: number;
@@ -5,26 +9,34 @@ export interface VisitStats {
   bandaragamaClinic: number;
 }
 
-export function calculateVisitStats(visits: import('./types').Visit[]): VisitStats {
-  return visits.reduce((acc, visit) => {
-    const branch = (visit.branch || '').trim();
-    const type = (visit.visitType || '').trim();
-    const isColombo = branch.toLowerCase() === 'colombo';
-    const isBandaragama = branch.toLowerCase() === 'bandaragama';
-    const isHome = type.toLowerCase() === 'home';
+export interface BranchVisitStats {
+  branch: string;
+  home: number;
+  clinic: number;
+}
 
-    if (isColombo) {
-      if (isHome) acc.colomboHome++;
-      else acc.colomboClinic++;
-    } else if (isBandaragama) {
-      if (isHome) acc.bandaragamaHome++;
-      else acc.bandaragamaClinic++;
-    }
-    return acc;
-  }, {
-    colomboHome: 0,
-    colomboClinic: 0,
-    bandaragamaHome: 0,
-    bandaragamaClinic: 0
-  });
+export function calculateVisitStatsByBranch(visits: Visit[]): Map<string, BranchVisitStats> {
+  const map = new Map<string, BranchVisitStats>();
+  for (const visit of visits) {
+    const branch = normalizeBranchName(visit.branch);
+    if (!branch) continue;
+    const isHome = (visit.visitType || "").trim().toLowerCase() === "home";
+    const current = map.get(branch) ?? { branch, home: 0, clinic: 0 };
+    if (isHome) current.home++;
+    else current.clinic++;
+    map.set(branch, current);
+  }
+  return map;
+}
+
+export function calculateVisitStats(visits: Visit[]): VisitStats {
+  const byBranch = calculateVisitStatsByBranch(visits);
+  const dehiwala = byBranch.get("Dehiwala") ?? { home: 0, clinic: 0 };
+  const bandaragama = byBranch.get("Bandaragama") ?? { home: 0, clinic: 0 };
+  return {
+    colomboHome: dehiwala.home,
+    colomboClinic: dehiwala.clinic,
+    bandaragamaHome: bandaragama.home,
+    bandaragamaClinic: bandaragama.clinic,
+  };
 }

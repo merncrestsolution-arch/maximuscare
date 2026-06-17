@@ -1,5 +1,11 @@
 import type { DatabaseStorage } from "./storage";
 
+/** Roles that conduct billable sessions — only they are subject to the “before noon” auto fine. */
+export function isAutoFineSessionRole(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return r === "Physiotherapist" || r === "Staff";
+}
+
 /**
  * If staff is Present on `fineDate` but had no outpatient visit or in-patient session
  * starting before 12:00, ensure a 500 LKR auto fine exists (physio roles only).
@@ -11,7 +17,7 @@ export async function syncAutoFineForStaffDate(
   fineDate: string
 ): Promise<void> {
   const staff = await storage.getStaff(staffId);
-  if (!staff || staff.role === "Admin" || staff.role === "MD") {
+  if (!staff || !isAutoFineSessionRole(staff.role)) {
     await storage.deleteAutoFineForStaffDate(staffId, fineDate);
     return;
   }

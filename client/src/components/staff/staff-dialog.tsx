@@ -9,6 +9,7 @@ import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useBranchOptions } from "@/hooks/use-branch-options";
 
 interface StaffDialogProps {
   staff?: User; // Optional for create mode
@@ -23,7 +24,7 @@ const DEFAULT_STAFF: User = {
   name: "",
   email: "",
   role: "Staff",
-  branch: "Colombo",
+  branch: "",
   address: "",
   phone: "",
   nic: "",
@@ -35,6 +36,7 @@ const DEFAULT_STAFF: User = {
 export function StaffDialog({ staff, isOpen, onClose, onSave, onDelete }: StaffDialogProps) {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { options: branchOptions, defaultValue: defaultBranch } = useBranchOptions();
   
   const [formData, setFormData] = useState<User>({ ...DEFAULT_STAFF });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -117,6 +119,7 @@ export function StaffDialog({ staff, isOpen, onClose, onSave, onDelete }: StaffD
                   <SelectContent>
                     <SelectItem value="Admin">Admin</SelectItem>
                     <SelectItem value="MD">Managing Director</SelectItem>
+                    <SelectItem value="Manager">Manager</SelectItem>
                     <SelectItem value="Physiotherapist">Physiotherapist</SelectItem>
                     <SelectItem value="Receptionist">Receptionist</SelectItem>
                     <SelectItem value="Staff">Staff</SelectItem>
@@ -147,8 +150,10 @@ export function StaffDialog({ staff, isOpen, onClose, onSave, onDelete }: StaffD
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Colombo">Colombo</SelectItem>
-                    <SelectItem value="Bandaragama">Bandaragama</SelectItem>
+                    {branchOptions.map((b) => (
+                      <SelectItem key={b.id} value={b.value}>{b.label}</SelectItem>
+                    ))}
+                    <SelectItem value="Both">All Branches</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -4,6 +4,8 @@ import { useAppointments, useDeleteAppointment } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Plus, Edit, Trash2, ChevronLeft, ChevronRight, Clock, User, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Link } from "wouter";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isSameDay, isToday } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { Appointment } from "@/lib/types";
@@ -11,6 +13,13 @@ import { isManagementRole } from "@/lib/permissions";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
+
+const STATUS_STYLES: Record<string, string> = {
+  Scheduled: "bg-blue-100 text-blue-800",
+  Completed: "bg-green-100 text-green-800",
+  Cancelled: "bg-gray-100 text-gray-600",
+  "No Show": "bg-red-100 text-red-800",
+};
 
 export default function AppointmentsList() {
   const [, setLocation] = useLocation();
@@ -106,7 +115,7 @@ export default function AppointmentsList() {
                 <button
                   key={dateStr}
                   onClick={() => setSelectedDate(day)}
-                  className={`h-10 flex flex-col items-center justify-center rounded-full relative transition-colors ${
+                  className={`h-11 min-w-[2.75rem] flex flex-col items-center justify-center rounded-full relative transition-colors touch-manipulation ${
                     isSelected
                       ? "bg-primary/20 text-primary font-bold"
                       : isTodayDate
@@ -147,13 +156,19 @@ export default function AppointmentsList() {
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
                       <Clock className="h-4 w-4" />
                       <span data-testid={`text-time-${appointment.id}`}>{appointment.appointmentTime}</span>
+                      <Badge variant="secondary" className={STATUS_STYLES[appointment.status || "Scheduled"] || ""}>
+                        {appointment.status || "Scheduled"}
+                      </Badge>
+                      {appointment.branch && (
+                        <span className="text-xs">{appointment.branch}</span>
+                      )}
                     </div>
-                    <div className="font-semibold text-foreground" data-testid={`text-patient-${appointment.id}`}>
+                    <Link href={`/patients/${appointment.patientId}`} className="font-semibold text-foreground hover:text-primary" data-testid={`text-patient-${appointment.id}`}>
                       {appointment.patientName}
-                    </div>
+                    </Link>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <User className="h-4 w-4" />
                       <span data-testid={`text-staff-${appointment.id}`}>{appointment.treatingStaffName}</span>

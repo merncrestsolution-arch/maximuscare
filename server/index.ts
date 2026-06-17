@@ -6,6 +6,9 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { seedDefaultUsers } from "./seed";
+import { ensureSqliteSchemaCompatibility, ensurePostgresSchemaCompatibility } from "./db";
+import { storage } from "./storage";
+import { purgeExpiredSessions } from "./auth";
 
 const app = express();
 const httpServer = createServer(app);
@@ -17,9 +20,21 @@ declare module "http" {
 }
 
 // --- Firewall: Security headers ---
+const isProduction = process.env.NODE_ENV === "production";
 app.use(
   helmet({
-    contentSecurityPolicy: false, // SPA may use inline scripts; enable with custom CSP if needed
+    contentSecurityPolicy: isProduction
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com"],
+            imgSrc: ["'self'", "data:", "blob:", "https:"],
+            connectSrc: ["'self'", "ws:", "wss:"],
+          },
+        }
+      : false,
     crossOriginEmbedderPolicy: false,
   }),
 );
@@ -50,7 +65,7 @@ app.use("/api", globalLimiter);
 // --- Firewall: Stricter rate limit for auth endpoints (brute-force protection) ---
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 attempts per 15 min per IP
+  max: process.env.NODE_ENV === "production" ? 10 : 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: "Too many login attempts. Please try again in 15 minutes." },
@@ -96,7 +111,14 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await ensureSqliteSchemaCompatibility();
+  await ensurePostgresSchemaCompatibility();
   await seedDefaultUsers();
+  await storage.seedEnterpriseBranches();
+  await purgeExpiredSessions();
+  setInterval(() => {
+    void purgeExpiredSessions();
+  }, 60 * 60 * 1000);
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

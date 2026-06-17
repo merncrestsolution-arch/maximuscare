@@ -15,6 +15,19 @@ export const staff = pgTable("staff", {
   passportNo: text("passport_no"),
   phone: text("phone"),
   degree: text("degree"),
+  photoUri: text("photo_uri"),
+  profilePhoto: text("profile_photo"),
+  employeeCode: text("employee_code"),
+  designation: text("designation"),
+  isActive: integer("is_active").notNull().default(1),
+  basicSalary: decimal("basic_salary", { precision: 12, scale: 2 }).notNull().default("0"),
+  salaryDate: date("salary_date"),
+  joiningDate: date("joining_date"),
+  otherAdjustments: decimal("other_adjustments", { precision: 12, scale: 2 }).notNull().default("0"),
+  deactivatedAt: timestamp("deactivated_at"),
+  deactivatedBy: varchar("deactivated_by"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -29,7 +42,7 @@ export const patients = pgTable("patients", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   phone: text("phone").notNull(),
-  age: integer("age").notNull(),
+  age: integer("age"),
   gender: text("gender").notNull(),
   address: text("address").notNull(),
   registeredDate: date("registered_date").notNull(),
@@ -37,12 +50,26 @@ export const patients = pgTable("patients", {
   status: text("status").notNull().default("Active"),
   defaultVisitType: text("default_visit_type").notNull(),
   condition: text("condition"),
+  patientCode: text("patient_code"),
+  fullName: text("full_name"),
+  therapistFirstVisitId: varchar("therapist_first_visit_id"),
+  firstVisitDate: date("first_visit_date"),
+  branchId: varchar("branch_id"),
+  dateOfBirth: date("date_of_birth"),
+  nicOrPassport: text("nic_or_passport"),
+  emergencyContact: text("emergency_contact"),
+  referralSource: text("referral_source"),
+  photoUri: text("photo_uri"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+export const PATIENT_STATUSES = ["Active", "Inactive", "Completed", "Discharged", "Transferred"] as const;
+
 export const insertPatientSchema = createInsertSchema(patients).omit({ id: true, createdAt: true, updatedAt: true }).extend({
-  age: z.number().int().min(1, "Age must be at least 1").max(130),
+  age: z.union([z.number().int().min(1, "Age must be at least 1").max(130), z.null()]).optional(),
 });
 export const updatePatientSchema = insertPatientSchema.partial();
 export type InsertPatient = z.infer<typeof insertPatientSchema>;
@@ -61,9 +88,12 @@ export const visits = pgTable("visits", {
   branch: text("branch").notNull(),
   visitType: text("visit_type").notNull(),
   status: text("status").notNull(),
-  paymentAmount: decimal("payment_amount", { precision: 10, scale: 2 }).notNull(),
-  paymentStatus: text("payment_status").notNull(),
-  paymentMode: text("payment_mode").notNull(),
+  paymentAmount: decimal("payment_amount", { precision: 10, scale: 2 }).notNull().default("0"),
+  amountPaid: decimal("amount_paid", { precision: 10, scale: 2 }).notNull().default("0"),
+  paymentStatus: text("payment_status").notNull().default("Unpaid"),
+  paymentMode: text("payment_mode").notNull().default("Cash"),
+  visitStatus: text("visit_status").notNull().default("Completed"),
+  homeVisitType: text("home_visit_type"),
   notes: text("notes"),
   improvements: text("improvements"),
   reportImageUri: text("report_image_uri"),
@@ -73,6 +103,9 @@ export const visits = pgTable("visits", {
   treatingStaffName: text("treating_staff_name").notNull(),
   lastUpdatedByStaffId: varchar("last_updated_by_staff_id"),
   lastUpdatedByName: text("last_updated_by_name"),
+  branchId: varchar("branch_id"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -94,6 +127,65 @@ export type InsertVisit = z.infer<typeof insertVisitSchema>;
 export type UpdateVisit = z.infer<typeof updateVisitSchema>;
 export type Visit = typeof visits.$inferSelect;
 
+export const PAYMENT_STATUSES = ["Paid", "Partially Paid", "Unpaid", "Cancelled"] as const;
+export const VISIT_STATUSES = ["Scheduled", "Completed", "Cancelled", "No Show"] as const;
+export const HOME_VISIT_TYPES = ["Colombo", "Bandaragama", "Holiday"] as const;
+export const VISIT_PAYMENT_METHODS = ["Cash", "Bank Transfer", "Cheque", "Online Payment", "Other"] as const;
+
+export const visitPayments = pgTable("visit_payments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  visitId: varchar("visit_id").notNull().references(() => visits.id),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  paymentMethod: text("payment_method").notNull().default("Cash"),
+  paymentReference: text("payment_reference"),
+  paymentDate: date("payment_date").notNull(),
+  remarks: text("remarks"),
+  createdByStaffId: varchar("created_by_staff_id"),
+  createdByName: text("created_by_name"),
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertVisitPaymentSchema = createInsertSchema(visitPayments).omit({ id: true, createdAt: true }).extend({
+  amount: z.union([z.string(), z.number()]).transform((v) => String(v)),
+});
+export type InsertVisitPayment = z.infer<typeof insertVisitPaymentSchema>;
+export type VisitPayment = typeof visitPayments.$inferSelect;
+
+export const patientDocuments = pgTable("patient_documents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  patientId: varchar("patient_id").notNull().references(() => patients.id),
+  fileName: text("file_name").notNull(),
+  documentType: text("document_type").notNull(),
+  fileUri: text("file_uri").notNull(),
+  storageKey: text("storage_key"),
+  mimeType: text("mime_type"),
+  fileSize: integer("file_size"),
+  uploadedByStaffId: varchar("uploaded_by_staff_id"),
+  uploadedByName: text("uploaded_by_name"),
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPatientDocumentSchema = createInsertSchema(patientDocuments).omit({ id: true, createdAt: true });
+export type InsertPatientDocument = z.infer<typeof insertPatientDocumentSchema>;
+export type PatientDocument = typeof patientDocuments.$inferSelect;
+
+export const patientNotes = pgTable("patient_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  patientId: varchar("patient_id").notNull().references(() => patients.id),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  createdByStaffId: varchar("created_by_staff_id"),
+  createdByName: text("created_by_name"),
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPatientNoteSchema = createInsertSchema(patientNotes).omit({ id: true, createdAt: true });
+export type InsertPatientNote = z.infer<typeof insertPatientNoteSchema>;
+export type PatientNote = typeof patientNotes.$inferSelect;
+
 export const attendance = pgTable("attendance", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   staffId: varchar("staff_id").notNull().references(() => staff.id),
@@ -106,6 +198,13 @@ export const attendance = pgTable("attendance", {
   overtimeHours: decimal("overtime_hours", { precision: 4, scale: 2 }),
   branch: text("branch"),
   notes: text("notes"),
+  attendanceDate: date("attendance_date"),
+  remarks: text("remarks"),
+  editedBy: varchar("edited_by"),
+  editedAt: timestamp("edited_at"),
+  editReason: text("edit_reason"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -190,6 +289,9 @@ export const inPatientSessions = pgTable("in_patient_sessions", {
   treatmentProvided: text("treatment_provided").notNull(),
   improvements: text("improvements"),
   attachments: text("attachments").array(),
+  patientId: varchar("patient_id"),
+  branchId: varchar("branch_id"),
+  notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -279,8 +381,13 @@ export const expenses = pgTable("expenses", {
   description: text("description"),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
   paymentMode: text("payment_mode").notNull(),
+  staffId: varchar("staff_id"),
   createdByStaffId: varchar("created_by_staff_id").notNull().references(() => staff.id),
   createdByName: text("created_by_name").notNull(),
+  remarks: text("remarks"),
+  branch: text("branch"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -317,6 +424,12 @@ export const appointments = pgTable("appointments", {
   patientName: text("patient_name").notNull(),
   treatingStaffId: varchar("treating_staff_id").notNull().references(() => staff.id),
   treatingStaffName: text("treating_staff_name").notNull(),
+  status: text("status").notNull().default("Scheduled"),
+  branch: text("branch"),
+  branchId: varchar("branch_id"),
+  reminderSent: integer("reminder_sent").notNull().default(0),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
   notes: text("notes"),
   createdByStaffId: varchar("created_by_staff_id").notNull().references(() => staff.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -337,8 +450,14 @@ export const staffFines = pgTable("staff_fines", {
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull().default("500"),
   reason: text("reason").notNull(),
   source: text("source").notNull().default("manual"),
+  fineType: text("fine_type").notNull().default("Manual Fine"),
+  remarks: text("remarks"),
+  status: text("status").notNull().default("active"),
   createdByStaffId: varchar("created_by_staff_id"),
   createdByName: text("created_by_name"),
+  updatedByStaffId: varchar("updated_by_staff_id"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -356,3 +475,324 @@ export const updateStaffFineSchema = insertStaffFineSchema.partial();
 export type InsertStaffFine = z.infer<typeof insertStaffFineSchema>;
 export type UpdateStaffFine = z.infer<typeof updateStaffFineSchema>;
 export type StaffFine = typeof staffFines.$inferSelect;
+
+export const branches = pgTable("branches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  branchName: text("branch_name"),
+  code: text("code"),
+  address: text("address"),
+  isActive: integer("is_active").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const userBranchAccess = pgTable("user_branch_access", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  branchId: varchar("branch_id").notNull().references(() => branches.id),
+  isDefault: integer("is_default").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type UserBranchAccess = typeof userBranchAccess.$inferSelect;
+
+export const userBranchPermissions = pgTable("user_branch_permissions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => staff.id),
+  branchId: varchar("branch_id").notNull().references(() => branches.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type UserBranchPermission = typeof userBranchPermissions.$inferSelect;
+
+export const insertBranchSchema = createInsertSchema(branches).omit({ id: true, createdAt: true, updatedAt: true });
+export const updateBranchSchema = insertBranchSchema.partial();
+export type InsertBranch = z.infer<typeof insertBranchSchema>;
+export type UpdateBranch = z.infer<typeof updateBranchSchema>;
+export type Branch = typeof branches.$inferSelect;
+
+export const clinicSettings = pgTable("clinic_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  autoFineAmount: decimal("auto_fine_amount", { precision: 10, scale: 2 }).notNull().default("500"),
+  homeRateColombo: decimal("home_rate_colombo", { precision: 10, scale: 2 }).notNull().default("1000"),
+  homeRateBandaragama: decimal("home_rate_bandaragama", { precision: 10, scale: 2 }).notNull().default("500"),
+  holidayHomeRate: decimal("holiday_home_rate", { precision: 10, scale: 2 }).notNull().default("1500"),
+  otRatePerHour: decimal("ot_rate_per_hour", { precision: 10, scale: 2 }).notNull().default("250"),
+  extraHolidayDeduction: decimal("extra_holiday_deduction", { precision: 10, scale: 2 }).notNull().default("1500"),
+  freeAbsentDays: integer("free_absent_days").notNull().default(4),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const updateClinicSettingsSchema = createInsertSchema(clinicSettings).omit({ id: true, updatedAt: true }).partial();
+export type UpdateClinicSettings = z.infer<typeof updateClinicSettingsSchema>;
+export type ClinicSettings = typeof clinicSettings.$inferSelect;
+
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  userId: varchar("user_id"),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  type: text("type").notNull().default("info"),
+  isRead: integer("is_read").notNull().default(0),
+  isArchived: integer("is_archived").notNull().default(0),
+  readAt: timestamp("read_at"),
+  sentAt: timestamp("sent_at"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
+
+export const tasks = pgTable("tasks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  title: text("title").notNull(),
+  description: text("description"),
+  assignedToStaffId: varchar("assigned_to_staff_id").notNull().references(() => staff.id),
+  assignedToStaffName: text("assigned_to_staff_name").notNull(),
+  createdByStaffId: varchar("created_by_staff_id").notNull().references(() => staff.id),
+  createdByName: text("created_by_name").notNull(),
+  status: text("status").notNull().default("pending"),
+  priority: text("priority").notNull().default("normal"),
+  dueDate: date("due_date"),
+  taskType: text("task_type").notNull().default("Individual"),
+  assignedBy: varchar("assigned_by"),
+  completionNotes: text("completion_notes"),
+  completionFiles: text("completion_files"),
+  remarks: text("remarks"),
+  reminderSentAt: timestamp("reminder_sent_at"),
+  overdueNotifiedAt: timestamp("overdue_notified_at"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertTaskSchema = createInsertSchema(tasks).omit({ id: true, createdAt: true, updatedAt: true });
+export const updateTaskSchema = insertTaskSchema.partial();
+export type InsertTask = z.infer<typeof insertTaskSchema>;
+export type UpdateTask = z.infer<typeof updateTaskSchema>;
+export type Task = typeof tasks.$inferSelect;
+
+export const auditLogs = pgTable("audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
+  userName: text("user_name").notNull(),
+  module: text("module"),
+  action: text("action").notNull(),
+  recordId: text("record_id"),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id"),
+  oldValues: text("old_values"),
+  newValues: text("new_values"),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
+  ipAddress: text("ip_address"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const TASK_PRIORITIES = ["Low", "Medium", "High", "Critical"] as const;
+export const TASK_STATUSES = ["Pending", "In Progress", "Completed", "Cancelled", "Overdue"] as const;
+export const TASK_TYPES = ["Individual", "Common"] as const;
+export const NOTIFICATION_TYPES = [
+  "system",
+  "attendance_reminder",
+  "task_reminder",
+  "task_assignment",
+  "salary",
+  "fine",
+  "report",
+] as const;
+
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, createdAt: true });
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
+
+export const authSessions = pgTable("auth_sessions", {
+  id: varchar("id").primaryKey(),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  email: text("email").notNull(),
+  role: text("role").notNull(),
+  selectedBranchId: varchar("selected_branch_id"),
+  selectedContext: text("selected_context"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type AuthSession = typeof authSessions.$inferSelect;
+
+export const payrollSnapshots = pgTable("payroll_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  staffName: text("staff_name").notNull(),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  breakdown: text("breakdown").notNull(),
+  finalSalary: decimal("final_salary", { precision: 12, scale: 2 }).notNull(),
+  createdByStaffId: varchar("created_by_staff_id").notNull().references(() => staff.id),
+  createdByName: text("created_by_name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertPayrollSnapshotSchema = createInsertSchema(payrollSnapshots).omit({ id: true, createdAt: true });
+export type InsertPayrollSnapshot = z.infer<typeof insertPayrollSnapshotSchema>;
+export type PayrollSnapshot = typeof payrollSnapshots.$inferSelect;
+
+export const homeVisits = pgTable("home_visits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  staffName: text("staff_name"),
+  patientId: varchar("patient_id").references(() => patients.id),
+  patientName: text("patient_name"),
+  visitType: text("visit_type").notNull(),
+  visitDate: date("visit_date"),
+  visitDateTs: timestamp("visit_date_ts"),
+  branch: text("branch"),
+  notes: text("notes"),
+  visitId: varchar("visit_id").references(() => visits.id),
+  paymentAmount: decimal("payment_amount", { precision: 10, scale: 2 }).notNull().default("0"),
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export const insertHomeVisitSchema = createInsertSchema(homeVisits).omit({ id: true, createdAt: true });
+export type InsertHomeVisit = z.infer<typeof insertHomeVisitSchema>;
+export type HomeVisit = typeof homeVisits.$inferSelect;
+
+export const salaries = pgTable("salaries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  staffName: text("staff_name"),
+  salaryMonth: date("salary_month").notNull(),
+  periodStart: date("period_start"),
+  periodEnd: date("period_end"),
+  basicSalary: decimal("basic_salary", { precision: 12, scale: 2 }).notNull().default("0"),
+  incentiveAmount: decimal("incentive_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  homeVisitAmount: decimal("home_visit_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  otAmount: decimal("ot_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  finesTotal: decimal("fines_total", { precision: 12, scale: 2 }).notNull().default("0"),
+  extraHolidayDeduction: decimal("extra_holiday_deduction", { precision: 12, scale: 2 }).notNull().default("0"),
+  otherDeductions: decimal("other_deductions", { precision: 12, scale: 2 }).notNull().default("0"),
+  deductionsTotal: decimal("deductions_total", { precision: 12, scale: 2 }).notNull().default("0"),
+  finalSalary: decimal("final_salary", { precision: 12, scale: 2 }).notNull().default("0"),
+  status: text("status").notNull().default("Generated"),
+  breakdown: text("breakdown"),
+  generatedByStaffId: varchar("generated_by_staff_id"),
+  generatedByName: text("generated_by_name"),
+  approvedByStaffId: varchar("approved_by_staff_id"),
+  approvedByName: text("approved_by_name"),
+  approvedAt: timestamp("approved_at"),
+  paidAt: timestamp("paid_at"),
+  paymentMethod: text("payment_method"),
+  paymentReference: text("payment_reference"),
+  paidByStaffId: varchar("paid_by_staff_id"),
+  paymentRemarks: text("payment_remarks"),
+  rejectedReason: text("rejected_reason"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+export const insertSalarySchema = createInsertSchema(salaries).omit({ id: true, createdAt: true, updatedAt: true });
+export const updateSalarySchema = insertSalarySchema.partial();
+export type InsertSalary = z.infer<typeof insertSalarySchema>;
+export type UpdateSalary = z.infer<typeof updateSalarySchema>;
+export type Salary = typeof salaries.$inferSelect;
+
+export const SALARY_STATUSES = ["Draft", "Generated", "Approved", "Paid", "Cancelled"] as const;
+export const FINE_TYPES = ["Manual Fine", "Auto Fine", "Attendance Fine", "Disciplinary Fine", "Other Fine"] as const;
+export const DEDUCTION_CATEGORIES = [
+  "Food Charges",
+  "Accommodation Charges",
+  "Transport Charges",
+  "Advance Payments",
+  "Other Deductions",
+] as const;
+export const PAYMENT_METHODS = ["Cash", "Bank Transfer", "Cheque", "Other"] as const;
+
+export const staffIncentives = pgTable("staff_incentives", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  incentiveDate: date("incentive_date").notNull(),
+  clinicVisits: integer("clinic_visits").notNull().default(0),
+  inpatientSessions: integer("inpatient_sessions").notNull().default(0),
+  incentiveCount: integer("incentive_count").notNull().default(0),
+  incentiveAmount: decimal("incentive_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export const insertStaffIncentiveSchema = createInsertSchema(staffIncentives).omit({ id: true, createdAt: true });
+export type InsertStaffIncentive = z.infer<typeof insertStaffIncentiveSchema>;
+export type StaffIncentive = typeof staffIncentives.$inferSelect;
+
+export const taskAssignments = pgTable("task_assignments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  taskId: varchar("task_id").notNull().references(() => tasks.id),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  status: text("status").notNull().default("Pending"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export const insertTaskAssignmentSchema = createInsertSchema(taskAssignments).omit({ id: true, createdAt: true });
+export type InsertTaskAssignment = z.infer<typeof insertTaskAssignmentSchema>;
+export type TaskAssignment = typeof taskAssignments.$inferSelect;
+
+export const staffDeductions = pgTable("staff_deductions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  staffName: text("staff_name").notNull(),
+  category: text("category").notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  deductionDate: date("deduction_date").notNull(),
+  remarks: text("remarks"),
+  createdByStaffId: varchar("created_by_staff_id"),
+  createdByName: text("created_by_name"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertStaffDeductionSchema = createInsertSchema(staffDeductions).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  amount: z.union([z.string(), z.number()]).transform((v) => String(v)),
+});
+export const updateStaffDeductionSchema = insertStaffDeductionSchema.partial();
+export type InsertStaffDeduction = z.infer<typeof insertStaffDeductionSchema>;
+export type UpdateStaffDeduction = z.infer<typeof updateStaffDeductionSchema>;
+export type StaffDeduction = typeof staffDeductions.$inferSelect;
+
+export const staffOtEntries = pgTable("staff_ot_entries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  staffName: text("staff_name").notNull(),
+  otDate: date("ot_date").notNull(),
+  hours: decimal("hours", { precision: 6, scale: 2 }).notNull(),
+  reason: text("reason"),
+  approvedByStaffId: varchar("approved_by_staff_id"),
+  approvedByName: text("approved_by_name"),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertStaffOtEntrySchema = createInsertSchema(staffOtEntries).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  amount: true,
+}).extend({
+  hours: z.union([z.string(), z.number()]).transform((v) => String(v)),
+});
+export const updateStaffOtEntrySchema = insertStaffOtEntrySchema.partial();
+export type InsertStaffOtEntry = z.infer<typeof insertStaffOtEntrySchema>;
+export type UpdateStaffOtEntry = z.infer<typeof updateStaffOtEntrySchema>;
+export type StaffOtEntry = typeof staffOtEntries.$inferSelect;

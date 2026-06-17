@@ -1,23 +1,31 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/context/auth-context";
-import { usePatients, useVisits, useAttendance, useRevenueSummary, useExpenses, useMyExpenses, useDeleteExpense, useDeleteVisit } from "@/hooks/useData";
+import { usePatients, useVisits, useUnpaidVisits, useAttendance, useRevenueSummary, useExpenses, useMyExpenses, useDeleteExpense, useDeleteVisit, useDashboardKpis } from "@/hooks/useData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Users, Calendar, DollarSign, Activity, TrendingUp, Loader2, Plus, Pencil, Trash2, Wallet, ArrowDownLeft, ArrowUpRight } from "lucide-react";
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts";
+import { Bar, BarChart, Line, LineChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
+import { ReportDateFilters } from "@/components/reports/report-date-filters";
+import { getDateRangeForPreset, type DatePreset } from "@/lib/reportDatePresets";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { addDays, format, parseISO, subDays, startOfMonth, addMonths, subMonths, getDaysInMonth } from "date-fns";
 import { useInPatientSessionsForStaffRange, useAllInPatientSessionsInRange } from "@/hooks/useData";
 
-import { calculateVisitStats } from "@/lib/stats";
 import { isVisitForStaff } from "@/lib/visitAccess";
 import { VisitStatsCards } from "@/components/dashboard/visit-stats-cards";
+import { useBranch } from "@/context/branch-context";
+import { normalizeBranchName } from "@shared/branches";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { SiteCreditFooter } from "@/components/site-credit-footer";
+import { StaffHomeWidgets } from "@/components/dashboard/staff-home-widgets";
+import { computeOutstanding } from "@/lib/paymentStatus";
+import { isManagementRole, canViewFinancialSummary, isManager } from "@/lib/permissions";
+import { StatCard, KpiGrid } from "@/components/ui/stat-card";
+import { PageShell } from "@/components/layout/page-shell";
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR', minimumFractionDigits: 0 }).format(amount);
@@ -29,25 +37,42 @@ export default function Dashboard() {
   const { toast } = useToast();
   const { data: patients = [], isLoading: loadingPatients, error: patientsError } = usePatients();
   const { data: visits = [], isLoading: loadingVisits, error: visitsError } = useVisits();
+  const { data: unpaidVisitsData = [] } = useUnpaidVisits();
   const { data: attendance = [], isLoading: loadingAttendance } = useAttendance();
 
   const now = new Date();
+  const [datePreset, setDatePreset] = useState<DatePreset>("currentMonth");
+  const [filterStart, setFilterStart] = useState(format(startOfMonth(now), "yyyy-MM-dd"));
+  const [filterEnd, setFilterEnd] = useState(format(now, "yyyy-MM-dd"));
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+
+  useEffect(() => {
+    const r = getDateRangeForPreset(datePreset, filterStart, filterEnd);
+    setFilterStart(r.startDate);
+    setFilterEnd(r.endDate);
+  }, [datePreset]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
   const [visitDeleteId, setVisitDeleteId] = useState<string | null>(null);
   const [selectedVisitDate, setSelectedVisitDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [ipSessionDate, setIpSessionDate] = useState(format(new Date(), "yyyy-MM-dd"));
 
+  const { selectedBranchName, selectedContext } = useBranch();
   const role = (user?.role || "").toLowerCase();
   const isManagement = role === "admin" || role === "md";
+  const isManagerRole = isManager(user?.role);
+  const canSeeFinancials = canViewFinancialSummary(user?.role);
+  const showFinancialDashboard = isManagement && canSeeFinancials;
+  const showManagerDashboard = isManagerRole;
   const isStaff = role === "physiotherapist" || role === "receptionist" || role === "staff";
 
   const selectedDate = new Date(selectedYear, selectedMonth, 1);
   const monthStart = format(selectedDate, 'yyyy-MM-dd');
   const monthEnd = format(addMonths(selectedDate, 1), 'yyyy-MM-dd');
-  const dateParams = { startDate: monthStart, endDate: monthEnd };
+  const dateParams = isManagement
+    ? { startDate: filterStart, endDate: filterEnd }
+    : { startDate: monthStart, endDate: monthEnd };
 
   const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const monthOptions: { label: string; month: number; year: number }[] = [];
@@ -57,8 +82,9 @@ export default function Dashboard() {
   }
 
   // Revenue and Expense hooks (only for management) - enabled flag prevents API calls for non-management users
-  const { data: revenueSummary, isLoading: loadingRevenue } = useRevenueSummary(dateParams, isManagement);
-  const { data: expenses = [], isLoading: loadingExpenses } = useExpenses(dateParams, isManagement);
+  const { data: revenueSummary, isLoading: loadingRevenue } = useRevenueSummary(dateParams, showFinancialDashboard);
+  const { data: expenses = [], isLoading: loadingExpenses } = useExpenses(dateParams, showFinancialDashboard);
+  const { data: dashboardKpis, isLoading: loadingKpis } = useDashboardKpis(dateParams, showFinancialDashboard || showManagerDashboard);
   
   // My expenses hook (for staff to view their own expenses)
   const { data: myExpenses = [], isLoading: loadingMyExpenses } = useMyExpenses(isStaff);
@@ -81,6 +107,16 @@ export default function Dashboard() {
     () => new Map(patients.map((p) => [p.id, p.name])),
     [patients]
   );
+  const expensesByCategory = useMemo(() => {
+    const grouped = new Map<string, any[]>();
+    (expenses || []).forEach((expense: any) => {
+      const key = expense.category || "Other";
+      const existing = grouped.get(key) || [];
+      existing.push(expense);
+      grouped.set(key, existing);
+    });
+    return Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [expenses]);
 
   const handleDeleteExpense = async () => {
     if (!deletingExpenseId) return;
@@ -129,13 +165,25 @@ export default function Dashboard() {
     isManagement ? true : isVisitForStaff(v, user, { includeCreator: true })
   );
   const myVisits = allMyVisits.filter(v => v.visitDate >= monthStart && v.visitDate < monthEnd);
+  const visitsForStats =
+    selectedBranchName && !selectedContext
+      ? myVisits.filter(
+          (v) =>
+            normalizeBranchName(v.branch).toLowerCase() ===
+            normalizeBranchName(selectedBranchName).toLowerCase()
+        )
+      : myVisits;
 
-  const visitStats = calculateVisitStats(myVisits);
-  const totalPatients = isManagement ? patients.length : patients.filter(p => myVisits.some(v => v.patientId === p.id)).length;
-  const todayVisits = myVisits.filter(v => v.visitDate === format(new Date(), 'yyyy-MM-dd')).length;
+  const totalPatients = (isManagement || isManagerRole) ? patients.length : patients.filter(p => myVisits.some(v => v.patientId === p.id)).length;
+  const todayVisits = (isManagement || isManagerRole)
+    ? (dashboardKpis?.todayVisits ?? myVisits.filter((v) => v.visitDate === format(new Date(), "yyyy-MM-dd")).length)
+    : myVisits.filter((v) => v.visitDate === format(new Date(), "yyyy-MM-dd")).length;
   const paidVisits = myVisits.filter(v => v.paymentStatus?.toLowerCase() === 'paid').length;
-  const unpaidVisits = myVisits.filter(v => v.paymentStatus?.toLowerCase() !== 'paid').length;
-  const unpaidVisitList = myVisits.filter(v => v.paymentStatus?.toLowerCase() !== 'paid').slice(0, 12);
+  const scopedUnpaid = (isManagement || isManagerRole)
+    ? unpaidVisitsData
+    : unpaidVisitsData.filter((v) => isVisitForStaff(v, user, { includeCreator: true }));
+  const unpaidVisits = scopedUnpaid.length;
+  const unpaidVisitList = scopedUnpaid.slice(0, 12);
   const selectedDayVisits = allMyVisits.filter((v) => v.visitDate === selectedVisitDate);
 
   const daysInMonth = getDaysInMonth(selectedDate);
@@ -149,12 +197,10 @@ export default function Dashboard() {
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1 min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight truncate">Dashboard</h1>
-          <p className="text-muted-foreground truncate">Welcome back, {user.name}.</p>
-        </div>
+    <PageShell
+      title="Dashboard"
+      description={`Welcome back, ${user.name}.`}
+      actions={
         <div className="flex flex-col gap-1 w-full sm:w-auto sm:min-w-[180px]">
           <span className="text-xs font-medium text-muted-foreground">Select Month</span>
           <Select
@@ -165,7 +211,7 @@ export default function Dashboard() {
               setSelectedYear(y);
             }}
           >
-            <SelectTrigger className="w-full sm:w-[180px]" data-testid="select-month">
+            <SelectTrigger className="w-full sm:w-[180px] h-11" data-testid="select-month">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -177,52 +223,160 @@ export default function Dashboard() {
             </SelectContent>
           </Select>
         </div>
-      </div>
+      }
+    >
 
-      {isManagement && (
+      {showFinancialDashboard && (
         <>
           {/* Visit Stats Breakdown */}
-          <VisitStatsCards stats={visitStats} />
+          <VisitStatsCards visits={visitsForStats} />
 
-          {/* Quick Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-semibold text-muted-foreground">Today's Visits</CardTitle>
-                <Calendar className="h-4 w-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-extrabold text-foreground">{todayVisits}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-semibold text-muted-foreground">Total Patients</CardTitle>
-                <Users className="h-4 w-4 text-accent" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-extrabold text-foreground">{totalPatients}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-semibold text-muted-foreground">Paid Visits</CardTitle>
-                <DollarSign className="h-4 w-4 text-emerald-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-extrabold text-emerald-700">{paidVisits}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-semibold text-muted-foreground">Unpaid</CardTitle>
-                <DollarSign className="h-4 w-4 text-amber-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-extrabold text-amber-600">{unpaidVisits}</div>
-              </CardContent>
-            </Card>
-          </div>
+          <KpiGrid>
+            <StatCard title="Total Patients" value={totalPatients} accent="primary" icon={<Users className="h-5 w-5" />} />
+            <StatCard title="Paid Visits" value={paidVisits} accent="success" icon={<Activity className="h-5 w-5" />} />
+            <StatCard title="Unpaid Visits" value={unpaidVisits} accent="warning" icon={<Wallet className="h-5 w-5" />} />
+            <StatCard
+              title="Outstanding"
+              value={formatCurrency(dashboardKpis?.outstandingAmount ?? scopedUnpaid.reduce((a, v) => a + computeOutstanding(Number(v.paymentAmount), Number(v.amountPaid)), 0))}
+              accent="danger"
+              icon={<DollarSign className="h-5 w-5" />}
+            />
+          </KpiGrid>
+
+          <KpiGrid>
+            <StatCard
+              title="Today's Visits"
+              value={loadingKpis ? "—" : todayVisits}
+              subtitle={dashboardKpis ? `${dashboardKpis.todaySessions} IP sessions today` : undefined}
+              accent="primary"
+              icon={<Calendar className="h-5 w-5" />}
+            />
+            <StatCard
+              title="Today's Revenue"
+              value={loadingKpis ? "—" : formatCurrency(dashboardKpis?.todayRevenue ?? 0)}
+              accent="success"
+              icon={<DollarSign className="h-5 w-5" />}
+            />
+            <StatCard
+              title="Attendance Today"
+              value={loadingKpis ? "—" : (dashboardKpis?.todayAttendance?.present ?? 0)}
+              subtitle={
+                loadingKpis ? undefined : (
+                  <>Present · Absent {dashboardKpis?.todayAttendance?.absent ?? 0} · Leave {dashboardKpis?.todayAttendance?.leave ?? 0}</>
+                )
+              }
+              accent="neutral"
+              icon={<Users className="h-5 w-5" />}
+            />
+            <StatCard
+              title="Salary Liability"
+              value={loadingKpis ? "—" : formatCurrency(dashboardKpis?.salaryLiability ?? 0)}
+              subtitle={`Unpaid visits: ${unpaidVisits}`}
+              accent="warning"
+              icon={<TrendingUp className="h-5 w-5" />}
+            />
+          </KpiGrid>
+
+          <KpiGrid className="lg:grid-cols-3">
+            <StatCard
+              title="Incentive Today"
+              value={loadingKpis ? "—" : formatCurrency(dashboardKpis?.incentiveAmountToday ?? 0)}
+              subtitle={`Count: ${dashboardKpis?.incentiveCountToday ?? 0}`}
+              accent="secondary"
+            />
+            <StatCard
+              title="Home Visit Income Today"
+              value={loadingKpis ? "—" : formatCurrency(dashboardKpis?.homeVisitIncomeToday ?? 0)}
+              accent="primary"
+            />
+            <StatCard
+              title="Month Revenue"
+              value={loadingKpis ? "—" : formatCurrency(dashboardKpis?.revenue?.total ?? revenueSummary?.totalIncome ?? 0)}
+              subtitle={`Paid visits: ${paidVisits}`}
+              accent="success"
+            />
+          </KpiGrid>
+
+          <Card className="mb-4">
+            <CardContent className="pt-6">
+              <ReportDateFilters
+                preset={datePreset}
+                onPresetChange={setDatePreset}
+                startDate={filterStart}
+                endDate={filterEnd}
+                onStartDateChange={setFilterStart}
+                onEndDateChange={setFilterEnd}
+              />
+            </CardContent>
+          </Card>
+
+          {dashboardKpis?.charts && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+              <Card>
+                <CardHeader><CardTitle className="text-base">Revenue Trend</CardTitle></CardHeader>
+                <CardContent className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={dashboardKpis.charts.revenueTrend}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 11 }} width={48} />
+                      <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                      <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-base">Attendance</CardTitle></CardHeader>
+                <CardContent className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dashboardKpis.charts.attendanceTrend.slice(-14)}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="present" stackId="a" fill="#22c55e" />
+                      <Bar dataKey="absent" stackId="a" fill="#ef4444" />
+                      <Bar dataKey="leave" stackId="a" fill="#3b82f6" />
+                      <Bar dataKey="holiday" stackId="a" fill="#f59e0b" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-base">Visit Analytics</CardTitle></CardHeader>
+                <CardContent className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dashboardKpis.charts.visitAnalytics.slice(-14)}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="clinic" stackId="v" fill="#2563eb" name="Clinic" />
+                      <Bar dataKey="home" stackId="v" fill="#16a34a" name="Home" />
+                      <Bar dataKey="sessions" stackId="v" fill="#f59e0b" name="Sessions" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-base">Branch Revenue</CardTitle></CardHeader>
+                <CardContent className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dashboardKpis.charts.branchRevenue}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="branch" />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                      <Bar dataKey="revenue" fill="hsl(var(--primary))" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           {/* Charts Section */}
           <Card>
@@ -257,6 +411,93 @@ export default function Dashboard() {
           </Card>
         </>
       )}
+
+      {showManagerDashboard && (
+        <>
+          <VisitStatsCards visits={visitsForStats} />
+          <KpiGrid>
+            <StatCard title="Total Patients" value={totalPatients} accent="primary" icon={<Users className="h-5 w-5" />} />
+            <StatCard title="Paid Visits" value={paidVisits} accent="success" icon={<Activity className="h-5 w-5" />} />
+            <StatCard title="Unpaid Visits" value={unpaidVisits} accent="warning" icon={<Wallet className="h-5 w-5" />} />
+            <StatCard
+              title="Today's Visits"
+              value={loadingKpis ? "—" : todayVisits}
+              subtitle={dashboardKpis ? `${dashboardKpis.todaySessions} IP sessions today` : undefined}
+              accent="primary"
+              icon={<Calendar className="h-5 w-5" />}
+            />
+          </KpiGrid>
+          <KpiGrid>
+            <StatCard
+              title="Attendance Today"
+              value={loadingKpis ? "—" : (dashboardKpis?.todayAttendance?.present ?? 0)}
+              subtitle={
+                loadingKpis ? undefined : (
+                  <>Present · Absent {dashboardKpis?.todayAttendance?.absent ?? 0} · Leave {dashboardKpis?.todayAttendance?.leave ?? 0}</>
+                )
+              }
+              accent="neutral"
+              icon={<Users className="h-5 w-5" />}
+            />
+          </KpiGrid>
+          {dashboardKpis?.charts && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+              <Card>
+                <CardHeader><CardTitle className="text-base">Attendance</CardTitle></CardHeader>
+                <CardContent className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dashboardKpis.charts.attendanceTrend.slice(-14)}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="present" stackId="a" fill="#22c55e" />
+                      <Bar dataKey="absent" stackId="a" fill="#ef4444" />
+                      <Bar dataKey="leave" stackId="a" fill="#3b82f6" />
+                      <Bar dataKey="holiday" stackId="a" fill="#f59e0b" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader><CardTitle className="text-base">Visit Analytics</CardTitle></CardHeader>
+                <CardContent className="h-52">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={dashboardKpis.charts.visitAnalytics.slice(-14)}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="clinic" stackId="v" fill="#2563eb" name="Clinic" />
+                      <Bar dataKey="home" stackId="v" fill="#16a34a" name="Home" />
+                      <Bar dataKey="sessions" stackId="v" fill="#f59e0b" name="Sessions" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+          <Card>
+            <CardHeader>
+              <CardTitle>Visit Trends ({MONTH_NAMES[selectedMonth]} {selectedYear})</CardTitle>
+            </CardHeader>
+            <CardContent className="pl-0">
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={chartData}>
+                  <XAxis dataKey="name" stroke="#888888" fontSize={10} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#888888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${value}`} />
+                  <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                  <Bar dataKey="visits" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {isStaff && <StaffHomeWidgets />}
 
       {/* Staff Expense Entry - Physiotherapist/Receptionist Only */}
       {isStaff && (
@@ -320,7 +561,7 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent>
           {unpaidVisitList.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No unpaid visits in selected month.</div>
+            <div className="text-sm text-muted-foreground">No unpaid visits pending payment.</div>
           ) : (
             <div className="space-y-2">
               {unpaidVisitList.map((visit: any) => (
@@ -526,41 +767,47 @@ export default function Dashboard() {
                 No expenses recorded for this period.
               </div>
             ) : (
-              <div className="space-y-2">
-                <div className="hidden md:grid md:grid-cols-6 gap-2 text-xs font-semibold text-muted-foreground uppercase border-b pb-2">
-                  <div>Date</div>
-                  <div>Category</div>
-                  <div className="col-span-2">Description</div>
-                  <div>Amount</div>
-                  <div className="text-right">Actions</div>
-                </div>
-                {expenses.map((expense: any) => (
-                  <div key={expense.id} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center border-b pb-2 last:border-0" data-testid={`row-expense-${expense.id}`}>
-                    <div className="text-sm">
-                      <span className="md:hidden font-medium text-muted-foreground mr-2">Date:</span>
-                      {format(new Date(expense.expenseDate), 'dd MMM yyyy')}
+              <div className="space-y-5">
+                {expensesByCategory.map(([category, categoryExpenses]) => (
+                  <div key={category} className="space-y-2">
+                    <div className="flex items-center justify-between border-b pb-1">
+                      <div className="text-sm font-semibold">{category}</div>
+                      <div className="text-xs text-muted-foreground">
+                        Total:{" "}
+                        {formatCurrency(
+                          categoryExpenses.reduce((acc: number, item: any) => acc + (parseFloat(item.amount) || 0), 0)
+                        )}
+                      </div>
                     </div>
-                    <div className="text-sm">
-                      <span className="md:hidden font-medium text-muted-foreground mr-2">Category:</span>
-                      <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{expense.category}</span>
-                    </div>
-                    <div className="col-span-2 text-sm">
-                      <span className="md:hidden font-medium text-muted-foreground mr-2">Description:</span>
-                      {expense.description}
-                    </div>
-                    <div className="text-sm font-medium">
-                      <span className="md:hidden font-medium text-muted-foreground mr-2">Amount:</span>
-                      {formatCurrency(parseFloat(expense.amount))}
-                      <span className="text-xs text-muted-foreground ml-1">({expense.paymentMode})</span>
-                    </div>
-                    <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => navigate(`/expenses/edit/${expense.id}`)} data-testid={`button-edit-expense-${expense.id}`}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => { setDeletingExpenseId(expense.id); setDeleteConfirmOpen(true); }} data-testid={`button-delete-expense-${expense.id}`}>
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
+                    {categoryExpenses.map((expense: any) => (
+                      <div key={expense.id} className="grid grid-cols-1 md:grid-cols-6 gap-2 items-center border-b pb-2 last:border-0" data-testid={`row-expense-${expense.id}`}>
+                        <div className="text-sm">
+                          <span className="md:hidden font-medium text-muted-foreground mr-2">Date:</span>
+                          {format(new Date(expense.expenseDate), 'dd MMM yyyy')}
+                        </div>
+                        <div className="text-sm">
+                          <span className="md:hidden font-medium text-muted-foreground mr-2">Category:</span>
+                          <span className="px-2 py-0.5 bg-slate-100 rounded text-xs">{expense.category}</span>
+                        </div>
+                        <div className="col-span-2 text-sm">
+                          <span className="md:hidden font-medium text-muted-foreground mr-2">Description:</span>
+                          {expense.description}
+                        </div>
+                        <div className="text-sm font-medium">
+                          <span className="md:hidden font-medium text-muted-foreground mr-2">Amount:</span>
+                          {formatCurrency(parseFloat(expense.amount))}
+                          <span className="text-xs text-muted-foreground ml-1">({expense.paymentMode})</span>
+                        </div>
+                        <div className="flex justify-end gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => navigate(`/expenses/edit/${expense.id}`)} data-testid={`button-edit-expense-${expense.id}`}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => { setDeletingExpenseId(expense.id); setDeleteConfirmOpen(true); }} data-testid={`button-delete-expense-${expense.id}`}>
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
@@ -632,6 +879,6 @@ export default function Dashboard() {
       </Dialog>
 
       <SiteCreditFooter />
-    </div>
+    </PageShell>
   );
 }

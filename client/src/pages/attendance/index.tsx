@@ -39,8 +39,32 @@ function AttendanceReportTable({
       {records.length === 0 ? (
         <div className="text-sm text-muted-foreground">No records found for this report.</div>
       ) : (
-        <div className="rounded-lg border border-border/60 overflow-hidden">
-          <div className="grid grid-cols-5 gap-2 bg-muted/20 px-3 py-2 text-[11px] font-semibold text-muted-foreground uppercase">
+        <>
+          {/* Mobile: card layout */}
+          <div className="space-y-3 md:hidden">
+            {records.map((r) => (
+              <div key={r.id} className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-semibold text-foreground">{r.staffName}</div>
+                    <div className="text-sm text-muted-foreground">{format(new Date(r.date), "dd MMM yyyy")}</div>
+                  </div>
+                  <span className={`text-sm font-semibold px-2 py-0.5 rounded-full ${r.status === "Present" ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>
+                    {r.status}
+                  </span>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {r.checkInTime ? format(new Date(r.checkInTime), "hh:mm a") : "—"}
+                  {r.checkOutTime ? ` → ${format(new Date(r.checkOutTime), "hh:mm a")}` : ""}
+                </div>
+                {r.branch && <div className="text-xs text-muted-foreground">Branch: {r.branch}</div>}
+                <div className="text-sm">OT: <strong>{Number(r.overtimeHours || 0).toFixed(1)}h</strong></div>
+              </div>
+            ))}
+          </div>
+          {/* Desktop: table */}
+          <div className="hidden md:block rounded-lg border border-border/60 overflow-x-auto">
+          <div className="grid grid-cols-5 gap-2 bg-muted/20 px-3 py-2 text-xs font-semibold text-muted-foreground uppercase min-w-[640px]">
             <div>Date</div>
             <div>Staff</div>
             <div>Status</div>
@@ -48,7 +72,7 @@ function AttendanceReportTable({
             <div className="text-right">OT</div>
           </div>
           {records.map((r) => (
-            <div key={r.id} className="grid grid-cols-5 gap-2 px-3 py-2 text-sm border-t border-border/40">
+            <div key={r.id} className="grid grid-cols-5 gap-2 px-3 py-2.5 text-sm border-t border-border/40 min-w-[640px]">
               <div>{format(new Date(r.date), "dd MMM yyyy")}</div>
               <div className="truncate">{r.staffName}</div>
               <div className={r.status === "Present" ? "text-emerald-700 font-medium" : "text-red-700 font-medium"}>
@@ -61,7 +85,8 @@ function AttendanceReportTable({
               <div className="text-right">{Number(r.overtimeHours || 0).toFixed(1)}</div>
             </div>
           ))}
-        </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -77,19 +102,14 @@ export default function AttendancePage() {
   const deleteAttendanceMutation = useDeleteAttendance();
   const { toast } = useToast();
 
-  if (!user) return null;
-
-  const isManagement = ['Admin', 'MD'].includes(user.role);
-
   const today = format(new Date(), 'yyyy-MM-dd');
-  const todayRecord = attendance.find(a => a.staffId === user.id && a.date === today);
-  const myHistory = attendance.filter(a => a.staffId === user.id);
-  const allHistory = attendance;
+  const userId = user?.id ?? "";
+  const isManagement = user ? ['Admin', 'MD'].includes(user.role) : false;
 
   const [otInput, setOtInput] = useState("");
   const [markingStatus, setMarkingStatus] = useState<string | null>(null);
 
-  const [selectedStaffId, setSelectedStaffId] = useState(user.id);
+  const [selectedStaffId, setSelectedStaffId] = useState("");
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'));
   const [monthMenuOpen, setMonthMenuOpen] = useState(false);
   /** Month shown in the popover calendar (commits to selectedMonth when popover closes or a day is picked). */
@@ -97,7 +117,7 @@ export default function AttendancePage() {
   const [summaryStatusFilter, setSummaryStatusFilter] = useState<"all" | "Present" | "Absent">("all");
 
   const [adminMarkStaffId, setAdminMarkStaffId] = useState("");
-  const [adminMarkDate, setAdminMarkDate] = useState(today);
+  const [adminMarkDate, setAdminMarkDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [adminMarkLoading, setAdminMarkLoading] = useState(false);
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -108,9 +128,15 @@ export default function AttendancePage() {
   const [editCheckIn, setEditCheckIn] = useState("");
   const [editCheckOut, setEditCheckOut] = useState("");
   const [editOt, setEditOt] = useState("");
+  const [editReason, setEditReason] = useState("");
   const [editSaving, setEditSaving] = useState(false);
 
+  useEffect(() => {
+    if (userId && !selectedStaffId) setSelectedStaffId(userId);
+  }, [userId, selectedStaffId]);
+
   const staffOptions = useMemo(() => {
+    if (!user) return [];
     if (!isManagement) return [{ id: user.id, name: user.name }];
     const map = new Map<string, string>();
     for (const s of allStaff) {
@@ -120,7 +146,7 @@ export default function AttendancePage() {
     return Array.from(map.entries())
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [allStaff, isManagement, user.id, user.name]);
+  }, [allStaff, isManagement, user]);
 
   const { year, monthIndex, monthLabel } = useMemo(() => {
     const [y, m] = selectedMonth.split('-');
@@ -131,8 +157,8 @@ export default function AttendancePage() {
   }, [selectedMonth]);
 
   const selectedRecords = useMemo(() => {
-    return attendance.filter((r) => r.staffId === (isManagement ? selectedStaffId : user.id));
-  }, [attendance, isManagement, selectedStaffId, user.id]);
+    return attendance.filter((r) => r.staffId === (isManagement ? selectedStaffId : userId));
+  }, [attendance, isManagement, selectedStaffId, userId]);
 
   const selectedMonthRecords = useMemo(() => {
     const prefix = `${year}-${String(monthIndex + 1).padStart(2, '0')}-`;
@@ -166,7 +192,12 @@ export default function AttendancePage() {
     return 0;
   }, []);
 
+  const todayRecord = user ? attendance.find((a) => a.staffId === user.id && a.date === today) : undefined;
+  const myHistory = user ? attendance.filter((a) => a.staffId === user.id) : [];
+  const allHistory = attendance;
+
   const markAttendance = async (status: 'Present' | 'Absent') => {
+    if (!user) return;
     if (todayRecord || markingStatus) return;
 
     setMarkingStatus(status);
@@ -312,6 +343,7 @@ export default function AttendancePage() {
     setEditCheckOut(isoToDatetimeLocal(editRecord.checkOutTime));
     const o = formatOt(editRecord.overtimeHours);
     setEditOt(o !== null ? String(o) : "");
+    setEditReason("");
   }, [editRecord]);
 
   useEffect(() => {
@@ -337,9 +369,13 @@ export default function AttendancePage() {
       }
     }
 
+    if (!editReason.trim()) {
+      toast({ title: "Reason required", description: "Provide a reason for editing attendance.", variant: "destructive" });
+      return;
+    }
     setEditSaving(true);
     try {
-      const data: Record<string, unknown> = { status: editStatus };
+      const data: Record<string, unknown> = { status: editStatus, editReason: editReason.trim() };
       if (editStatus === "Present") {
         data.checkInTime = new Date(editCheckIn).toISOString();
         data.checkOutTime = editCheckOut.trim() ? new Date(editCheckOut).toISOString() : null;
@@ -441,6 +477,24 @@ export default function AttendancePage() {
       checkOut: r.checkOutTime ? format(new Date(r.checkOutTime), "hh:mm a") : "",
       ot: Number(r.overtimeHours || 0).toFixed(1),
     }));
+
+  if (!user) return null;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12 text-muted-foreground">
+        Loading attendance…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 text-destructive">
+        Failed to load attendance: {error instanceof Error ? error.message : "Unknown error"}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -963,6 +1017,17 @@ export default function AttendancePage() {
                   </div>
                 </>
               )}
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold text-black">Edit reason (required)</Label>
+                <Input
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  placeholder="Why is this attendance being changed?"
+                  className="h-11 border-gray-300 bg-white text-black"
+                  data-testid="input-edit-attendance-reason"
+                />
+              </div>
 
               <div className="flex gap-3 justify-end pt-2">
                 <Button variant="outline" onClick={() => setEditRecord(null)} className="h-11 px-5" disabled={editSaving} data-testid="button-cancel-edit-attendance">

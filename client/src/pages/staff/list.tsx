@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/context/auth-context";
-import { useStaff, useDeleteStaff } from "@/hooks/useData";
+import { useBranch } from "@/context/branch-context";
+import { useStaffDirectory, useDeleteStaff, useUpdateStaff } from "@/hooks/useData";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -23,12 +25,36 @@ import {
 
 export default function StaffListPage() {
   const { user } = useAuth();
+  const { selectedBranchName } = useBranch();
   const { toast } = useToast();
-  const { data: staff = [], isLoading, error } = useStaff();
-  const deleteStaff = useDeleteStaff();
-  const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
+  const [branchFilter, setBranchFilter] = useState("");
+  const [roleFilter, setRoleFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
+  useEffect(() => {
+    if (selectedBranchName) {
+      setBranchFilter(selectedBranchName);
+    }
+  }, [selectedBranchName]);
+
+  const { data: staff = [], isLoading, error } = useStaffDirectory({
+    includeInactive: true,
+    search,
+    ...(branchFilter ? { branch: branchFilter } : {}),
+    ...(roleFilter ? { role: roleFilter } : {}),
+    ...(statusFilter ? { status: statusFilter } : {}),
+  });
+  const deleteStaff = useDeleteStaff();
+  const updateStaff = useUpdateStaff();
+  const [, setLocation] = useLocation();
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const formatJoinDate = (value?: string | null) => {
+    if (!value) return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  };
 
   if (!user || !['Admin', 'MD'].includes(user.role)) return <div className="p-4">Unauthorized</div>;
 
@@ -50,10 +76,9 @@ export default function StaffListPage() {
     );
   }
 
-  const filteredStaff = staff.filter(s => 
-    s.name.toLowerCase().includes(search.toLowerCase()) || 
-    s.role.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredStaff = staff;
+  const branches = selectedBranchName ? [selectedBranchName] : Array.from(new Set(staff.map((s: any) => s.branch).filter(Boolean))) as string[];
+  const roles = Array.from(new Set(staff.map((s: any) => s.role).filter(Boolean))) as string[];
 
   const handleDeleteStaff = async () => {
     if (!deleteId) return;
@@ -70,34 +95,87 @@ export default function StaffListPage() {
     setDeleteId(null);
   };
 
+  const toggleActive = async (member: any, nextActive: boolean) => {
+    try {
+      await updateStaff.mutateAsync({ id: member.id, data: { isActive: nextActive ? 1 : 0 } });
+      toast({ title: nextActive ? "Staff activated" : "Staff deactivated" });
+    } catch (e) {
+      toast({
+        title: "Could not update staff",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Select value={branchFilter || "all"} onValueChange={(v) => setBranchFilter(v === "all" ? "" : v)} disabled={!!selectedBranchName}>
+          <SelectTrigger className="bg-background"><SelectValue placeholder="Branch" /></SelectTrigger>
+          <SelectContent>
+            {!selectedBranchName && <SelectItem value="all">All branches</SelectItem>}
+            {branches.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={roleFilter || "all"} onValueChange={(v) => setRoleFilter(v === "all" ? "" : v)}>
+          <SelectTrigger><SelectValue placeholder="Role" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All roles</SelectItem>
+            {roles.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={statusFilter || "all"} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
+          <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All status</SelectItem>
+            <SelectItem value="Active">Active</SelectItem>
+            <SelectItem value="Inactive">Inactive</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <Input 
-            placeholder="Search staff..." 
-            className="pl-9 h-10 bg-background"
+            placeholder="Search ID, name, phone, role..." 
+            className="pl-9 h-11 bg-background"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Link href="/staff/new">
-          <Button size="icon" className="shrink-0 h-11 w-11 shadow-sm" data-testid="button-add-staff">
+        <Link href="/staff/new" className="shrink-0">
+          <Button className="w-full sm:w-auto h-11 gap-2 shadow-sm" data-testid="button-add-staff">
             <UserPlus className="h-5 w-5" />
+            Add Staff
           </Button>
         </Link>
       </div>
 
       <div className="space-y-3 pb-24">
-        {filteredStaff.map(member => (
+        {filteredStaff.map((member: any) => (
           <Card key={member.id} className="bg-white border border-border/60 shadow-sm active:scale-[0.99] transition-transform">
             <CardContent className="p-4 flex items-center gap-4">
+              {member.photoUri ? (
+                <img src={member.photoUri} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0" />
+              ) : (
+                <div className="h-12 w-12 rounded-lg bg-muted flex items-center justify-center font-bold shrink-0">
+                  {member.name?.charAt(0)}
+                </div>
+              )}
               <Link href={`/staff/${member.id}`} className="flex-1 min-w-0">
                 <div>
+                  <div className="text-xs text-muted-foreground">{member.employeeCode || member.id.slice(0, 8)}</div>
                   <div className="font-bold text-lg text-foreground truncate" data-testid={`text-staff-name-${member.id}`}>{member.name}</div>
                   <div className="text-sm text-muted-foreground flex flex-wrap items-center gap-2 mt-0.5">
-                    <span className="font-medium text-foreground" data-testid={`text-staff-role-${member.id}`}>{member.role}</span>
+                    <span className="font-medium text-foreground" data-testid={`text-staff-role-${member.id}`}>{member.designation || member.role}</span>
+                    {member.attendanceStatus && (
+                      <span className="text-xs font-semibold text-blue-700">· {member.attendanceStatus} today</span>
+                    )}
+                    <span className={`text-xs font-semibold ${(member.isActive ?? 1) ? "text-emerald-700" : "text-red-600"}`}>
+                      {(member.isActive ?? 1) ? "Active" : "Deactivated"}
+                    </span>
                     {member.branch && (
                       <>
                         <span className="text-white/20">•</span>
@@ -107,6 +185,11 @@ export default function StaffListPage() {
                       </>
                     )}
                   </div>
+                  {(formatJoinDate((member as any).joinDate || (member as any).createdAt) && ['Admin', 'MD'].includes(user.role)) && (
+                    <div className="text-xs text-muted-foreground mt-1" data-testid={`text-staff-join-date-${member.id}`}>
+                      Joined: {formatJoinDate((member as any).joinDate || (member as any).createdAt)}
+                    </div>
+                  )}
                 </div>
               </Link>
               
@@ -119,6 +202,9 @@ export default function StaffListPage() {
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => setLocation(`/staff/${member.id}/edit`)}>
                     Edit Details
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => toggleActive(member, !Boolean(member.isActive ?? 1))}>
+                    {Boolean(member.isActive ?? 1) ? "Deactivate" : "Activate"}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"

@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Patient } from "@/lib/types";
+import { BranchSelectField } from "@/components/branch/branch-select-field";
 
 interface EditPatientDialogProps {
   patient: Patient;
@@ -70,11 +71,14 @@ export function EditPatientDialog({ patient, isOpen, onClose, onSave }: EditPati
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Age</Label>
+              <Label>Age <span className="text-muted-foreground font-normal">(optional)</span></Label>
               <Input 
                 type="number"
-                value={formData.age} 
-                onChange={(e) => setFormData({...formData, age: parseInt(e.target.value) || 0})}
+                value={formData.age == null || formData.age === 0 ? "" : formData.age} 
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setFormData({ ...formData, age: raw === "" ? null : parseInt(raw, 10) || null });
+                }}
               />
             </div>
             <div className="space-y-2">
@@ -104,18 +108,7 @@ export function EditPatientDialog({ patient, isOpen, onClose, onSave }: EditPati
 
           <div className="space-y-2">
             <Label>Branch</Label>
-            <Select 
-              value={formData.branch} 
-              onValueChange={(v) => setFormData({...formData, branch: v as any})}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Colombo">Colombo</SelectItem>
-                <SelectItem value="Bandaragama">Bandaragama</SelectItem>
-              </SelectContent>
-            </Select>
+            <BranchSelectField value={formData.branch} onChange={(v) => setFormData({ ...formData, branch: v })} forRegistration />
           </div>
         </div>
 

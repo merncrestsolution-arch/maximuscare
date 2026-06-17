@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const loggedInUser = await authApi.login(email, password);
       await waitMinElapsed(startedAt);
       setUser(loggedInUser);
-      setLocation('/dashboard');
+      setLocation('/auth/branch-select');
     } catch (error: any) {
       throw new Error(error.message || 'Login failed');
     }

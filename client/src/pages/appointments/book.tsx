@@ -1,27 +1,19 @@
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
-import { usePatients, useCreateAppointment, useCreatePatient } from "@/hooks/useData";
-import { staffApi } from "@/lib/api";
-import { useQuery } from "@tanstack/react-query";
+import { usePatients, useCreateAppointment, useCreatePatient, useStaff } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import { ArrowLeft, Loader2, ChevronsUpDown } from "lucide-react";
+import { ArrowLeft, Loader2, Search, UserPlus, Check } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/auth-context";
+import { useBranch } from "@/context/branch-context";
+import { useBranchOptions } from "@/hooks/use-branch-options";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 type PatientPick =
   | { kind: "existing"; id: string; name: string }
@@ -31,15 +23,14 @@ type PatientPick =
 export default function BookAppointment() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
+  const { selectedBranchName } = useBranch();
+  const { defaultValue: defaultBranch } = useBranchOptions();
   const { toast } = useToast();
   const { data: patients = [], isLoading: loadingPatients } = usePatients();
   const createAppointment = useCreateAppointment();
   const createPatient = useCreatePatient();
 
-  const { data: allStaff = [], isLoading: loadingStaff } = useQuery({
-    queryKey: ["staff-for-appointments"],
-    queryFn: staffApi.getAll,
-  });
+  const { data: allStaff = [], isLoading: loadingStaff } = useStaff();
 
   const treatingStaff = allStaff.filter(
     (s: any) => s.role === "Physiotherapist" || s.role === "MD"
@@ -48,7 +39,6 @@ export default function BookAppointment() {
   const searchParams = new URLSearchParams(window.location.search);
   const dateParam = searchParams.get("date");
 
-  const [patientOpen, setPatientOpen] = useState(false);
   const [patientSearch, setPatientSearch] = useState("");
   const [patientPick, setPatientPick] = useState<PatientPick>(null);
 
@@ -61,8 +51,15 @@ export default function BookAppointment() {
 
   const filteredPatients = useMemo(() => {
     const q = patientSearch.trim().toLowerCase();
-    if (!q) return patients as any[];
-    return (patients as any[]).filter((p) => p.name.toLowerCase().includes(q));
+    const list = patients as any[];
+    if (!q) return list.slice(0, 50);
+    return list.filter((p) => {
+      const haystack = [p.name, p.phone, p.patientCode, p.nic]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
   }, [patients, patientSearch]);
 
   const exactMatch = useMemo(() => {
@@ -94,14 +91,11 @@ export default function BookAppointment() {
       let patientName: string;
 
       if (patientPick.kind === "new") {
-        const branch =
-          user?.branch === "Colombo" || user?.branch === "Bandaragama"
-            ? user.branch
-            : "Colombo";
+        const branch = selectedBranchName || user?.branch || defaultBranch || "Dehiwala";
         const created = await createPatient.mutateAsync({
           name: patientPick.name.trim(),
           phone: "0000000000",
-          age: 25,
+          age: null,
           gender: "Male" as const,
           address: "Pending — update in Patients",
           registeredDate: format(new Date(), "yyyy-MM-dd"),
@@ -123,6 +117,7 @@ export default function BookAppointment() {
         patientName,
         treatingStaffId: formData.treatingStaffId,
         treatingStaffName: selectedStaff?.name || "",
+        branch: selectedBranchName || defaultBranch || "Dehiwala",
         notes: formData.notes.trim() || null,
         createdByStaffId: user?.id || "",
       });
@@ -142,8 +137,7 @@ export default function BookAppointment() {
     );
   }
 
-  const showQuickCreate =
-    patientSearch.trim().length >= 2 && !exactMatch;
+  const showQuickCreate = patientSearch.trim().length >= 2 && !exactMatch;
 
   return (
     <div className="min-h-screen bg-white">
@@ -185,77 +179,88 @@ export default function BookAppointment() {
             />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             <Label>Patient</Label>
-            <p className="text-xs text-muted-foreground">
-              Search existing patients or type a new name — if not found, use quick create.
-            </p>
-            <Popover open={patientOpen} onOpenChange={setPatientOpen}>
-              <PopoverTrigger asChild>
+            <div className="rounded-xl border-2 border-border bg-muted/20 p-3 space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by name, phone, ID, or NIC…"
+                  value={patientSearch}
+                  onChange={(e) => setPatientSearch(e.target.value)}
+                  className="h-12 pl-9 bg-white"
+                  data-testid="input-patient-search"
+                />
+              </div>
+
+              {patientPick && (
+                <div className="flex items-center gap-2 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-sm font-medium text-primary">
+                  <Check className="h-4 w-4 shrink-0" />
+                  <span className="truncate">
+                    Selected: {patientPick.kind === "new" ? `New patient — ${patientPick.name}` : patientPick.name}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-8 text-xs"
+                    onClick={() => setPatientPick(null)}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              )}
+
+              <ScrollArea className="h-[220px] rounded-lg border bg-white">
+                <div className="p-1 space-y-1">
+                  {filteredPatients.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-8 px-3">
+                      No matching patients. Type at least 2 characters to quick-create a new patient.
+                    </p>
+                  ) : (
+                    filteredPatients.map((patient: any) => {
+                      const selected =
+                        patientPick?.kind === "existing" && patientPick.id === patient.id;
+                      return (
+                        <button
+                          key={patient.id}
+                          type="button"
+                          onClick={() => {
+                            setPatientPick({ kind: "existing", id: patient.id, name: patient.name });
+                            setPatientSearch(patient.name);
+                          }}
+                          className={cn(
+                            "w-full text-left rounded-lg px-3 py-3 transition-colors border",
+                            selected
+                              ? "border-primary bg-primary/10"
+                              : "border-transparent hover:bg-muted/60"
+                          )}
+                          data-testid={`option-patient-${patient.id}`}
+                        >
+                          <div className="font-semibold text-foreground">{patient.name}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            {[patient.phone, patient.branch, patient.patientCode].filter(Boolean).join(" · ")}
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </ScrollArea>
+
+              {showQuickCreate ? (
                 <Button
                   type="button"
                   variant="outline"
-                  role="combobox"
-                  aria-expanded={patientOpen}
-                  className="h-12 w-full justify-between font-normal"
-                  data-testid="button-patient-combobox"
+                  className="w-full h-11 justify-start gap-2 border-dashed"
+                  onClick={() => setPatientPick({ kind: "new", name: patientSearch.trim() })}
+                  data-testid="option-patient-quick-create"
                 >
-                  <span className={cn("truncate", !patientPick && "text-muted-foreground")}>
-                    {patientPick
-                      ? patientPick.kind === "new"
-                        ? `New: ${patientPick.name}`
-                        : patientPick.name
-                      : "Select or type patient name…"}
-                  </span>
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  <UserPlus className="h-4 w-4" />
+                  Quick create patient: {patientSearch.trim()}
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                <Command shouldFilter={false}>
-                  <CommandInput
-                    placeholder="Search name…"
-                    value={patientSearch}
-                    onValueChange={setPatientSearch}
-                    data-testid="input-patient-search"
-                  />
-                  <CommandList>
-                    <CommandEmpty className="py-2 text-sm text-muted-foreground px-2">
-                      No matching patient.
-                    </CommandEmpty>
-                    <CommandGroup heading="Existing patients">
-                      {filteredPatients.map((patient: any) => (
-                        <CommandItem
-                          key={patient.id}
-                          value={patient.name}
-                          onSelect={() => {
-                            setPatientPick({ kind: "existing", id: patient.id, name: patient.name });
-                            setPatientSearch(patient.name);
-                            setPatientOpen(false);
-                          }}
-                          data-testid={`option-patient-${patient.id}`}
-                        >
-                          {patient.name}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                    {showQuickCreate ? (
-                      <CommandGroup heading="Quick entry">
-                        <CommandItem
-                          value={`__new__${patientSearch}`}
-                          onSelect={() => {
-                            setPatientPick({ kind: "new", name: patientSearch.trim() });
-                            setPatientOpen(false);
-                          }}
-                          data-testid="option-patient-quick-create"
-                        >
-                          Create quick patient: {patientSearch.trim()}
-                        </CommandItem>
-                      </CommandGroup>
-                    ) : null}
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+              ) : null}
+            </div>
           </div>
 
           <div className="space-y-2">

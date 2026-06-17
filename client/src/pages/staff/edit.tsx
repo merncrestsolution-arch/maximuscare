@@ -13,19 +13,27 @@ import { ManageLoginSection } from "@/components/staff/manage-login-section";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
+import { useBranchOptions } from "@/hooks/use-branch-options";
+import { BranchMultiSelectField } from "@/components/branch/branch-multi-select-field";
 
 const DEFAULT_STAFF: User = {
   id: "",
   name: "",
   email: "",
   role: "Physiotherapist",
-  branch: "Colombo",
+  branch: "",
   address: "",
   phone: "",
   nic: "",
   passportNo: "",
   degree: "",
+  joinDate: new Date().toISOString().split("T")[0],
   avatar: "",
+  photoUri: "",
+  isActive: true,
+  basicSalary: "0",
+  salaryDate: "",
+  otherAdjustments: "0",
 };
 
 interface FormDataWithPassword extends User {
@@ -33,42 +41,74 @@ interface FormDataWithPassword extends User {
   confirmPassword?: string;
 }
 
+function toDateInputValue(value?: string | null): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().split("T")[0];
+}
+
 export default function StaffEditPage() {
-  const [match, params] = useRoute("/staff/:id/edit");
+  const [matchNew] = useRoute("/staff/new");
+  const [matchEdit, editParams] = useRoute("/staff/:id/edit");
   const [, setLocation] = useLocation();
   const { user: currentUser, refreshStaff } = useAuth();
   const { toast } = useToast();
+  const { options: branchOptions, defaultValue: defaultBranch } = useBranchOptions({ forRegistration: true });
 
-  if (!currentUser) return null;
+  const isNew = !!matchNew;
+  const staffId = matchEdit ? editParams?.id : undefined;
+  const isEdit = !!staffId && staffId !== "new" && !isNew;
 
-  const staffId = match ? params?.id : undefined;
-  const isEdit = !!staffId && staffId !== "new";
-
-  const canEditSensitive = ["Admin", "MD"].includes(currentUser.role);
-
-  const { data: existing, isLoading, error } = useStaffMember(staffId || "");
+  const { data: existing, isLoading, error } = useStaffMember(isEdit ? staffId || "" : "");
   const createStaff = useCreateStaff();
   const updateStaffMutation = useUpdateStaff();
   const deleteStaffMutation = useDeleteStaff();
 
+  const [branchIds, setBranchIds] = useState<string[]>([]);
   const [formData, setFormData] = useState<FormDataWithPassword>(
-    isEdit && existing ? { ...existing } : { ...DEFAULT_STAFF, password: "", confirmPassword: "" }
+    { ...DEFAULT_STAFF, password: "", confirmPassword: "" }
   );
 
   useEffect(() => {
     if (isEdit) {
       if (!existing) return;
-      setFormData({ ...existing });
+      setFormData({
+        ...existing,
+        joinDate: toDateInputValue((existing as any).joiningDate || (existing as any).joinDate || existing.createdAt),
+      });
+      const existingIds = (existing as any).branchIds as string[] | undefined;
+      if (existingIds?.length) {
+        setBranchIds(existingIds);
+      } else if (existing.branch) {
+        const match = branchOptions.find((b) => b.value === existing.branch);
+        setBranchIds(match ? [match.id] : []);
+      } else {
+        setBranchIds([]);
+      }
     } else {
-      setFormData({ ...DEFAULT_STAFF, password: "", confirmPassword: "" });
+      setFormData({
+        ...DEFAULT_STAFF,
+        branch: defaultBranch || DEFAULT_STAFF.branch,
+        password: "",
+        confirmPassword: "",
+      });
+      const defaultOption = branchOptions.find((b) => b.value === defaultBranch);
+      setBranchIds(defaultOption ? [defaultOption.id] : branchOptions[0] ? [branchOptions[0].id] : []);
     }
-  }, [isEdit, existing]);
+  }, [isEdit, existing, defaultBranch, isNew, branchOptions]);
 
-  if (!canEditSensitive) {
+  if (!currentUser) return null;
+
+  const canEditSensitive = ["Admin", "MD"].includes(currentUser.role);
+
+  if (!canEditSensitive || (!isNew && !isEdit)) {
     return (
       <div className={EDIT_PAGE_ROOT}>
         <div className="max-w-[720px] mx-auto p-4">
-          <div className="text-base font-semibold text-black">Unauthorized.</div>
+          <div className="text-base font-semibold text-black">
+            {!canEditSensitive ? "Only Admin or MD can add or edit staff." : "Page not found."}
+          </div>
           <Button className="mt-4 h-12" onClick={() => setLocation("/staff")}>Back</Button>
         </div>
       </div>
@@ -114,13 +154,34 @@ export default function StaffEditPage() {
     else setLocation("/staff");
   };
 
+  const buildStaffPayload = () => ({
+    name: formData.name.trim(),
+    email: formData.email.trim(),
+    role: formData.role,
+    branch: branchOptions.find((b) => b.id === branchIds[0])?.value ?? formData.branch,
+    branchIds,
+    address: formData.address,
+    phone: formData.phone,
+    nic: formData.nic,
+    passportNo: formData.passportNo,
+    degree: formData.degree,
+    isActive: formData.isActive === true || formData.isActive === 1,
+    basicSalary: formData.basicSalary ?? "0",
+    salaryDate: formData.salaryDate || undefined,
+    otherAdjustments: formData.otherAdjustments ?? "0",
+    joinDate: formData.joinDate,
+  });
+
   const handleSave = async () => {
     try {
+      if (branchIds.length === 0) {
+        toast({ title: "Error", description: "Select at least one branch", variant: "destructive" });
+        return;
+      }
       if (isEdit) {
-        const { password, confirmPassword, ...updateData } = formData;
         await updateStaffMutation.mutateAsync({ 
           id: staffId!, 
-          data: { ...updateData, avatar: "" } 
+          data: buildStaffPayload(),
         });
         await refreshStaff();
         toast({
@@ -145,9 +206,15 @@ export default function StaffEditPage() {
           toast({ title: "Error", description: "Passwords do not match", variant: "destructive" });
           return;
         }
+        if (branchIds.length === 0) {
+          toast({ title: "Error", description: "Select at least one branch", variant: "destructive" });
+          return;
+        }
 
-        const { confirmPassword, ...createData } = formData;
-        await createStaff.mutateAsync(createData);
+        await createStaff.mutateAsync({
+          ...buildStaffPayload(),
+          password: formData.password,
+        });
         await refreshStaff();
         toast({
           title: "Success",
@@ -241,6 +308,7 @@ export default function StaffEditPage() {
                   <SelectContent>
                     <SelectItem value="Admin">Admin</SelectItem>
                     <SelectItem value="MD">Managing Director</SelectItem>
+                    <SelectItem value="Manager">Manager</SelectItem>
                     <SelectItem value="Physiotherapist">Physiotherapist</SelectItem>
                     <SelectItem value="Receptionist">Receptionist</SelectItem>
                     <SelectItem value="Staff">Staff</SelectItem>
@@ -290,21 +358,13 @@ export default function StaffEditPage() {
               </div>
             )}
 
+            <div className="space-y-3">
+              <Label className="text-base font-semibold text-black">Branches</Label>
+              <BranchMultiSelectField value={branchIds} onChange={setBranchIds} />
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-              <div className="space-y-3">
-                <Label className="text-base font-semibold text-black">Branch</Label>
-                <Select value={formData.branch} onValueChange={(v) => setFormData({ ...formData, branch: v as any })}>
-                  <SelectTrigger className="h-12 text-base bg-white border-gray-300 text-black" data-testid="select-staff-branch">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Colombo">Colombo</SelectItem>
-                    <SelectItem value="Bandaragama">Bandaragama</SelectItem>
-                    <SelectItem value="Both">Both</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-3">
+              <div className="space-y-3 md:col-span-2">
                 <Label className="text-base font-semibold text-black">Phone</Label>
                 <Input
                   className="h-12 text-base bg-white border-gray-300 text-black"
@@ -354,6 +414,47 @@ export default function StaffEditPage() {
                 onChange={(e) => setFormData({ ...formData, degree: e.target.value })}
                 data-testid="input-staff-degree"
               />
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-base font-semibold text-black">Join Date</Label>
+              <Input
+                type="date"
+                className="h-12 text-base bg-white border-gray-300 text-black"
+                value={formData.joinDate || ""}
+                onChange={(e) => setFormData({ ...formData, joinDate: e.target.value })}
+                data-testid="input-staff-join-date"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+              <div className="space-y-3">
+                <Label className="text-base font-semibold text-black">Basic Salary</Label>
+                <Input
+                  type="number"
+                  className="h-12 text-base bg-white border-gray-300 text-black"
+                  value={formData.basicSalary || "0"}
+                  onChange={(e) => setFormData({ ...formData, basicSalary: e.target.value })}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold text-black">Salary Date</Label>
+                <Input
+                  type="date"
+                  className="h-12 text-base bg-white border-gray-300 text-black"
+                  value={formData.salaryDate || ""}
+                  onChange={(e) => setFormData({ ...formData, salaryDate: e.target.value })}
+                />
+              </div>
+              <div className="space-y-3">
+                <Label className="text-base font-semibold text-black">Other Adj. (+/-)</Label>
+                <Input
+                  type="number"
+                  className="h-12 text-base bg-white border-gray-300 text-black"
+                  value={formData.otherAdjustments || "0"}
+                  onChange={(e) => setFormData({ ...formData, otherAdjustments: e.target.value })}
+                />
+              </div>
             </div>
 
             {isEdit && (
