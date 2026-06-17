@@ -34,11 +34,15 @@ const allowlist = [
   "zod-validation-error",
 ];
 
-async function buildAll() {
-  await rm("dist", { recursive: true, force: true });
+const serverOnly =
+  process.argv.includes("--server-only") || process.env.BUILD_SERVER_ONLY === "1";
 
-  console.log("building client...");
-  await viteBuild();
+async function buildAll() {
+  if (!serverOnly) {
+    await rm("dist", { recursive: true, force: true });
+    console.log("building client...");
+    await viteBuild();
+  }
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));

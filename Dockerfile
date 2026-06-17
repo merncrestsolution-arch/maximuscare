@@ -14,8 +14,7 @@ ENV HOST=0.0.0.0
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/data ./data
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data/uploads
 EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
   CMD wget -qO- http://127.0.0.1:5000/api/health || exit 1
