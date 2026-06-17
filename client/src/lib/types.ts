@@ -50,6 +50,8 @@ export interface Patient {
   status: 'Active' | 'Inactive' | 'Discharged' | 'Completed' | 'Transferred';
   defaultVisitType: 'Clinic' | 'Home';
   condition?: string;
+  patientCode?: string | null;
+  fullName?: string | null;
 }
 
 export interface Visit {

@@ -208,8 +208,8 @@ export default function PatientProfile() {
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-2xl font-bold text-foreground">{patient.name}</h2>
-              {(patient as any).patientCode && (
-                <p className="text-xs text-muted-foreground font-mono">{(patient as any).patientCode}</p>
+              {patient.patientCode && (
+                <p className="text-xs text-muted-foreground font-mono">Patient ID: {patient.patientCode}</p>
               )}
               <div className="flex items-center gap-2 mt-1 text-muted-foreground font-medium">
                  <Phone className="h-3.5 w-3.5" />

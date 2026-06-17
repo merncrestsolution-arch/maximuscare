@@ -186,6 +186,8 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart12BranchPermissionsMigration();
   const { runPart16PatientAgeOptionalMigration } = await import("./migrations/part16PatientAgeOptionalMigration");
   await runPart16PatientAgeOptionalMigration();
+  const { runPart17PatientCodeBackfill } = await import("./migrations/part17PatientCodeBackfill");
+  await runPart17PatientCodeBackfill();
   const { runPart13BranchIdBackfill } = await import("./migrations/part13BranchIdBackfill");
   await runPart13BranchIdBackfill();
   const { runPart14ExpensesBranch } = await import("./migrations/part14ExpensesBranch");
@@ -217,6 +219,8 @@ export async function ensurePostgresSchemaCompatibility() {
   await runPart12BranchPermissionsMigration();
   const { runPart16PatientAgeOptionalMigration } = await import("./migrations/part16PatientAgeOptionalMigration");
   await runPart16PatientAgeOptionalMigration();
+  const { runPart17PatientCodeBackfill } = await import("./migrations/part17PatientCodeBackfill");
+  await runPart17PatientCodeBackfill();
   const { runPart13BranchIdBackfill } = await import("./migrations/part13BranchIdBackfill");
   await runPart13BranchIdBackfill();
   const { runPart14ExpensesBranch } = await import("./migrations/part14ExpensesBranch");

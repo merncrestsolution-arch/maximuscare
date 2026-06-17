@@ -51,9 +51,8 @@ export default function BookAppointment() {
 
   const filteredPatients = useMemo(() => {
     const q = patientSearch.trim().toLowerCase();
-    const list = patients as any[];
-    if (!q) return list.slice(0, 50);
-    return list.filter((p) => {
+    if (!q) return [];
+    return (patients as any[]).filter((p) => {
       const haystack = [p.name, p.phone, p.patientCode, p.nic]
         .filter(Boolean)
         .join(" ")
@@ -215,7 +214,9 @@ export default function BookAppointment() {
                 <div className="p-1 space-y-1">
                   {filteredPatients.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-8 px-3">
-                      No matching patients. Type at least 2 characters to quick-create a new patient.
+                      {patientSearch.trim()
+                        ? "No matching patients. Type at least 2 characters to quick-create a new patient."
+                        : "Search by name, phone, ID, or NIC to find a patient."}
                     </p>
                   ) : (
                     filteredPatients.map((patient: any) => {

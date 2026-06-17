@@ -26,6 +26,15 @@ function clearTokens() {
 
 let refreshPromise: Promise<boolean> | null = null;
 
+export const AUTH_EVENTS = {
+  tokensRefreshed: "maximus:auth-tokens-refreshed",
+  branchRequired: "maximus:branch-required",
+} as const;
+
+function notifyAuthEvent(event: (typeof AUTH_EVENTS)[keyof typeof AUTH_EVENTS]) {
+  window.dispatchEvent(new CustomEvent(event));
+}
+
 async function tryRefreshToken(): Promise<boolean> {
   const refresh = getRefreshToken();
   if (!refresh) return false;
@@ -44,6 +53,7 @@ async function tryRefreshToken(): Promise<boolean> {
           refreshToken: string;
         };
         setTokens(data.accessToken, data.refreshToken);
+        notifyAuthEvent(AUTH_EVENTS.tokensRefreshed);
         return true;
       } catch {
         return false;
@@ -91,8 +101,12 @@ async function apiRequest<T>(
     }
     const error = (await response.json().catch(() => ({ message: "Request failed" }))) as {
       message?: string;
+      code?: string;
       errors?: { fieldErrors?: Record<string, string[]>; formErrors?: string[] };
     };
+    if (response.status === 403 && error.code === "BRANCH_REQUIRED") {
+      notifyAuthEvent(AUTH_EVENTS.branchRequired);
+    }
     let msg = error.message || `HTTP ${response.status}`;
     const fe = error.errors?.fieldErrors;
     if (fe && typeof fe === "object") {
@@ -260,6 +274,12 @@ export const patientApi = {
     return apiRequest<any[] | PaginatedResponse<any>>(`/patients${qs}`);
   },
   getOne: (id: string) => apiRequest<any>(`/patients/${id}`),
+  nextId: (registeredDate?: string) => {
+    const q = new URLSearchParams();
+    if (registeredDate) q.set("date", registeredDate);
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return apiRequest<{ patientCode: string }>(`/patients/next-id${qs}`);
+  },
   create: (data: any) => apiRequest<any>('/patients', {
     method: 'POST',
     body: JSON.stringify(data),

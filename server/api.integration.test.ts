@@ -56,6 +56,35 @@ describe("API integration", () => {
     expect(refresh.body.refreshToken).toBeTruthy();
   });
 
+  it("POST /api/auth/refresh preserves selected branch", async () => {
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ email: "admin@maximuscare.com", password: "admin123" });
+    const branchId = login.body.allowedBranches?.[0]?.id;
+    expect(branchId).toBeTruthy();
+
+    await request(app)
+      .post("/api/auth/select-branch")
+      .set("Authorization", `Bearer ${login.body.accessToken}`)
+      .send({ branchId });
+
+    const refresh = await request(app)
+      .post("/api/auth/refresh")
+      .send({ refreshToken: login.body.refreshToken });
+    expect(refresh.status).toBe(200);
+
+    const me = await request(app)
+      .get("/api/auth/me")
+      .set("Authorization", `Bearer ${refresh.body.accessToken}`);
+    expect(me.status).toBe(200);
+    expect(me.body.selectedBranchId).toBe(branchId);
+
+    const patients = await request(app)
+      .get("/api/patients?page=1&limit=10")
+      .set("Authorization", `Bearer ${refresh.body.accessToken}`);
+    expect(patients.status).toBe(200);
+  });
+
   it("GET /api/patients without branch returns 403", async () => {
     const login = await request(app)
       .post("/api/auth/login")

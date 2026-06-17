@@ -40,7 +40,7 @@ import {
 import { registerExtendedRoutes } from "./routes/extended";
 import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
-import { generatePatientCode, assertNoDuplicatePatient } from "./services/patientService";
+import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient } from "./services/patientService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
 import { logAudit } from "./services/auditService";
 
@@ -797,6 +797,17 @@ export async function registerRoutes(
     }
   });
 
+  // Preview next patient ID for a branch (must be registered before /api/patients/:id)
+  app.get("/api/patients/next-id", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
+    try {
+      const registeredDate = String(req.query.date ?? "").trim() || undefined;
+      const patientCode = await generatePatientCode(storage, registeredDate);
+      return res.json({ patientCode });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   registerPatientRoutes(app);
 
   // Get single patient
@@ -825,7 +836,7 @@ export async function registerRoutes(
     try {
       const validatedData = insertPatientSchema.parse(req.body);
       await assertNoDuplicatePatient(storage, validatedData.phone, (validatedData as any).nicOrPassport);
-      const patientCode = (validatedData as any).patientCode ?? (await generatePatientCode(storage));
+      const patientCode = await generateUniquePatientCode(storage, validatedData.registeredDate);
       const patient = await storage.createPatient({ ...validatedData, patientCode, fullName: validatedData.name } as any);
       const actor = await auditActor(req);
       await logAudit(storage, {

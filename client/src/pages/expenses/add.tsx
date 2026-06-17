@@ -10,7 +10,7 @@ import { useAuth } from "@/context/auth-context";
 import { useCreateExpense } from "@/hooks/useData";
 
 const EXPENSE_CATEGORIES_ADMIN = ['Travel', 'Clinic things', 'Salary', 'Bill', 'Rent', 'Food', 'Patient expenses', 'Others'];
-const EXPENSE_CATEGORIES_STAFF = ['Travel', 'Clinic things', 'Patient expenses', 'Others'];
+const EXPENSE_CATEGORIES_STAFF = ['Travel', 'Clinic things', 'Bill', 'Food', 'Patient expenses', 'Others'];
 const PAYMENT_MODES = ['Cash', 'Online'];
 
 export default function AddExpensePage() {

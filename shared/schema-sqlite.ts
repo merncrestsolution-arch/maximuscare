@@ -70,7 +70,7 @@ export const patients = sqliteTable("patients", {
 
 export const PATIENT_STATUSES = ["Active", "Inactive", "Completed", "Discharged", "Transferred"] as const;
 
-export const insertPatientSchema = createInsertSchema(patients).omit({ id: true, createdAt: true, updatedAt: true }).extend({
+export const insertPatientSchema = createInsertSchema(patients).omit({ id: true, patientCode: true, createdAt: true, updatedAt: true }).extend({
   age: z.union([z.number().int().min(1, "Age must be at least 1").max(130), z.null()]).optional(),
 });
 export const updatePatientSchema = insertPatientSchema.partial();

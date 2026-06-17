@@ -12,6 +12,10 @@ import {
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+function isStaffActive(staff: { isActive?: boolean | number | null }): boolean {
+  return staff.isActive !== false && staff.isActive !== 0;
+}
+
 export interface SessionUser {
   staffId: string;
   email: string;
@@ -49,12 +53,29 @@ export async function refreshAuthTokens(refreshToken: string): Promise<AuthToken
   const row = await storage.getValidRefreshToken(hashToken(refreshToken));
   if (!row) return null;
   const staff = await storage.getStaff(row.staffId);
-  if (!staff || staff.isActive === false || (staff as { isActive?: number }).isActive === 0) {
+  if (!staff || !isStaffActive(staff)) {
     await storage.revokeRefreshToken(row.id);
     return null;
   }
+
+  const previousSession = row.sessionId
+    ? await storage.getAuthSession(row.sessionId)
+    : undefined;
+
   await storage.revokeRefreshToken(row.id);
-  return issueAuthTokens(staff.id, staff.email, staff.role);
+  const tokens = await issueAuthTokens(staff.id, staff.email, staff.role);
+
+  if (previousSession?.selectedBranchId) {
+    await storage.updateAuthSessionBranch(tokens.sessionId, previousSession.selectedBranchId);
+  } else if (previousSession?.selectedContext) {
+    await storage.updateAuthSessionContext(tokens.sessionId, previousSession.selectedContext);
+  }
+
+  if (row.sessionId && row.sessionId !== tokens.sessionId) {
+    await storage.deleteAuthSession(row.sessionId);
+  }
+
+  return tokens;
 }
 
 async function resolveUserFromSessionId(sessionId: string): Promise<SessionUser | null> {
@@ -65,7 +86,7 @@ async function resolveUserFromSessionId(sessionId: string): Promise<SessionUser 
     return null;
   }
   const staff = await storage.getStaff(row.staffId);
-  if (!staff || staff.isActive === false || (staff as { isActive?: number }).isActive === 0) {
+  if (!staff || !isStaffActive(staff)) {
     await storage.deleteAuthSession(sessionId);
     return null;
   }

@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useCallback, useState } from "react";
+import React, { createContext, useContext, useCallback, useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { authApi } from "@/lib/api";
+import { useLocation } from "wouter";
+import { authApi, AUTH_EVENTS } from "@/lib/api";
 import { useAuth } from "./auth-context";
 import type { OverviewContext } from "@shared/branchAccess";
 
@@ -31,6 +32,7 @@ const BranchContext = createContext<BranchContextType | undefined>(undefined);
 export function BranchProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
   const [optimisticBranchId, setOptimisticBranchId] = useState<string | null>(null);
 
   const { data, isLoading, refetch } = useQuery({
@@ -88,13 +90,37 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
     await refetch();
   }, [refetch]);
 
+  useEffect(() => {
+    const onTokensRefreshed = () => {
+      void queryClient.invalidateQueries({ queryKey: ["auth-me-branch"] });
+      void refetch();
+    };
+    const onBranchRequired = () => {
+      void queryClient.invalidateQueries({ queryKey: ["auth-me-branch"] });
+      void refetch().then((result) => {
+        if (!result.data?.selectedBranchId && !result.data?.selectedContext) {
+          if (!window.location.pathname.startsWith("/auth/")) {
+            setLocation("/auth/branch-select");
+          }
+        }
+      });
+    };
+
+    window.addEventListener(AUTH_EVENTS.tokensRefreshed, onTokensRefreshed);
+    window.addEventListener(AUTH_EVENTS.branchRequired, onBranchRequired);
+    return () => {
+      window.removeEventListener(AUTH_EVENTS.tokensRefreshed, onTokensRefreshed);
+      window.removeEventListener(AUTH_EVENTS.branchRequired, onBranchRequired);
+    };
+  }, [queryClient, refetch, setLocation]);
+
   return (
     <BranchContext.Provider
       value={{
         selectedBranchId: optimisticBranchId ?? data?.selectedBranchId ?? null,
         selectedBranchName: optimisticBranchId
-          ? (data?.allowedBranches ?? []).find((b) => b.id === optimisticBranchId)?.branchName ??
-            (data?.allowedBranches ?? []).find((b) => b.id === optimisticBranchId)?.name ??
+          ? (data?.allowedBranches ?? []).find((b: BranchOption) => b.id === optimisticBranchId)?.branchName ??
+            (data?.allowedBranches ?? []).find((b: BranchOption) => b.id === optimisticBranchId)?.name ??
             data?.selectedBranchName ??
             null
           : (data?.selectedBranchName ?? null),

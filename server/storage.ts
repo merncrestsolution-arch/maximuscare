@@ -198,6 +198,7 @@ export interface IStorage {
   purgeExpiredRefreshTokens(): Promise<void>;
   getPatientsByBranch(branch: string): Promise<Patient[]>;
   createPatient(data: InsertPatient): Promise<Patient>;
+  isPatientCodeTaken(code: string, excludeId?: string): Promise<boolean>;
   updatePatient(id: string, data: UpdatePatient): Promise<Patient | undefined>;
   deletePatient(id: string): Promise<boolean>;
 
@@ -671,6 +672,19 @@ export class DatabaseStorage implements IStorage {
           : `DELETE FROM refresh_tokens WHERE expires_at < ${now} OR revoked_at IS NOT NULL`
       )
     );
+  }
+
+  async isPatientCodeTaken(code: string, excludeId?: string): Promise<boolean> {
+    const normalized = code.trim();
+    if (!normalized) return false;
+    const rows = await db
+      .select({ id: patients.id })
+      .from(patients)
+      .where(eq(patients.patientCode, normalized))
+      .limit(1);
+    const hit = rows[0];
+    if (!hit) return false;
+    return excludeId ? hit.id !== excludeId : true;
   }
 
   async createPatient(data: InsertPatient): Promise<Patient> {

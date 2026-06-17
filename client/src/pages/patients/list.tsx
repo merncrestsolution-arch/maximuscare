@@ -56,13 +56,22 @@ export default function PatientsList() {
 
   const canManage = isManagementRole(user?.role);
 
-  type PatientRow = { id: string; name: string; branch: string; phone: string; status: string };
+  type PatientRow = {
+    id: string;
+    name: string;
+    branch: string;
+    phone: string;
+    status: string;
+    patientCode?: string | null;
+    defaultVisitType?: string | null;
+    condition?: string | null;
+  };
   const patients: PatientRow[] = Array.isArray(patientResult)
     ? patientResult
-    : (patientResult as { data?: PatientRow[] })?.data ?? [];
+    : ((patientResult as unknown) as { data?: PatientRow[] })?.data ?? [];
   const pagination = Array.isArray(patientResult)
     ? null
-    : (patientResult as { pagination?: { page: number; totalPages: number; total: number } })?.pagination;
+    : ((patientResult as unknown) as { pagination?: { page: number; totalPages: number; total: number } })?.pagination;
   const filteredPatients = [...patients].sort((a, b) => a.name.localeCompare(b.name));
 
   const handleConfirmDeletePatient = async () => {
@@ -174,6 +183,9 @@ export default function PatientsList() {
                 </Avatar>
                 <div className="space-y-1 min-w-0 flex-1">
                   <div className="font-bold text-lg text-foreground leading-tight truncate">{patient.name}</div>
+                  {patient.patientCode && (
+                    <p className="text-[11px] font-mono text-muted-foreground">{patient.patientCode}</p>
+                  )}
                   <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                     <span className="flex items-center gap-1 font-medium">
                       <Phone className="h-3.5 w-3.5" /> {patient.phone}

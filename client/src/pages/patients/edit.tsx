@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useRoute } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { usePatient, useCreatePatient, useUpdatePatient } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ import { format } from "date-fns";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
 import { BranchSelectField } from "@/components/branch/branch-select-field";
 import { useBranchOptions } from "@/hooks/use-branch-options";
+import { patientApi } from "@/lib/api";
 
 const DEFAULT_PATIENT: Omit<Patient, "id"> = {
   name: "",
@@ -44,6 +46,13 @@ export default function PatientEditPage() {
   const [formData, setFormData] = useState<Patient | Omit<Patient, "id">>(
     isEdit && existingPatient ? { ...existingPatient } : { ...DEFAULT_PATIENT }
   );
+
+  const registeredDateForId = String((formData as Patient).registeredDate ?? "").trim();
+  const { data: nextPatientId } = useQuery({
+    queryKey: ["patient-next-id", registeredDateForId],
+    queryFn: () => patientApi.nextId(registeredDateForId || undefined),
+    enabled: !isEdit,
+  });
 
   useEffect(() => {
     if (isEdit) {
@@ -181,6 +190,25 @@ export default function PatientEditPage() {
             <h3 className="text-base font-bold text-black" data-testid="text-section-patient-details">
               Patient Details
             </h3>
+
+            {(isEdit ? (formData as Patient).patientCode : nextPatientId?.patientCode) && (
+              <div className="space-y-2">
+                <Label className="text-base font-semibold text-black">Patient ID</Label>
+                <Input
+                  readOnly
+                  className="h-12 text-base bg-muted/40 border-gray-300 text-black font-mono"
+                  value={
+                    isEdit
+                      ? String((formData as Patient).patientCode ?? "")
+                      : String(nextPatientId?.patientCode ?? "")
+                  }
+                  data-testid="input-patient-id"
+                />
+                {!isEdit && (
+                  <p className="text-xs text-black/60">Assigned automatically when you register this patient.</p>
+                )}
+              </div>
+            )}
 
             <div className="space-y-3">
               <Label className="text-base font-semibold text-black">Full Name</Label>

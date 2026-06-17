@@ -1,16 +1,31 @@
 import type { IStorage } from "../storage";
 import type { Patient, Visit, InPatientSession } from "@shared/schema";
+import { nextPatientIdFromCodes } from "@shared/patientId";
 import { computeOutstandingBalance, derivePaymentStatus } from "./calculationEngine";
 
-export async function generatePatientCode(storage: IStorage): Promise<string> {
+export async function generatePatientCode(
+  storage: IStorage,
+  registeredDate?: string | Date | null,
+): Promise<string> {
   const all = await storage.getAllPatients();
-  let max = 0;
-  for (const p of all) {
-    const code = String(p.patientCode ?? "");
-    const m = code.match(/PAT(\d+)/i) || code.match(/P-(\d+)/i);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
+  return nextPatientIdFromCodes(
+    all.map((p) => p.patientCode),
+    registeredDate,
+  );
+}
+
+export async function generateUniquePatientCode(
+  storage: IStorage,
+  registeredDate?: string | Date | null,
+): Promise<string> {
+  const all = await storage.getAllPatients();
+  const codes = all.map((p) => p.patientCode);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = nextPatientIdFromCodes(codes, registeredDate);
+    if (!(await storage.isPatientCodeTaken(code))) return code;
+    codes.push(code);
   }
-  return `PAT${String(max + 1).padStart(6, "0")}`;
+  throw new Error("Could not generate a unique patient ID. Please try again.");
 }
 
 export async function assertNoDuplicatePatient(

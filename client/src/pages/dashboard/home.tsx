@@ -23,7 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { SiteCreditFooter } from "@/components/site-credit-footer";
 import { StaffHomeWidgets } from "@/components/dashboard/staff-home-widgets";
 import { computeOutstanding } from "@/lib/paymentStatus";
-import { isManagementRole, canViewFinancialSummary, isManager } from "@/lib/permissions";
+import { isManagementRole, canViewFinancialSummary, isManager, isBranchManager } from "@/lib/permissions";
 import { StatCard, KpiGrid } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/layout/page-shell";
 
@@ -62,9 +62,10 @@ export default function Dashboard() {
   const role = (user?.role || "").toLowerCase();
   const isManagement = role === "admin" || role === "md";
   const isManagerRole = isManager(user?.role);
+  const isBranchManagerRole = isBranchManager(user?.role);
   const canSeeFinancials = canViewFinancialSummary(user?.role);
   const showFinancialDashboard = isManagement && canSeeFinancials;
-  const showManagerDashboard = isManagerRole;
+  const showManagerDashboard = isManagerRole || isBranchManagerRole;
   const isStaff = role === "physiotherapist" || role === "receptionist" || role === "staff";
 
   const selectedDate = new Date(selectedYear, selectedMonth, 1);
