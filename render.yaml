@@ -1,0 +1,21 @@
+# Render Blueprint — native Node deploy (no Docker)
+# Dashboard: connect repo, then set JWT_SECRET + DATABASE_URL manually.
+services:
+  - type: web
+    name: maximuscare
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=4096
+      - key: JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
