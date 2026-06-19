@@ -20,11 +20,22 @@ import { db, schema } from "./db";
 import { isStrictlyBeforeNoon } from "./clinicTime";
 
 /** Same check as server/db.ts — raw SQL below must run on the active driver. */
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
+
+/**
+ * Execute raw SQL on whichever driver is active. node-postgres exposes
+ * `.execute()` while libsql/better-sqlite3 expose `.run()`; calling the wrong
+ * one throws "db.run is not a function" on Postgres.
+ */
+async function runRaw(q: SQL): Promise<{ rows?: unknown[] } & Record<string, unknown>> {
+  if (usePostgres) {
+    return (await (db as { execute: (x: SQL) => Promise<unknown> }).execute(q)) as never;
+  }
+  return (await (db as unknown as { run: (x: SQL) => Promise<unknown> }).run(q)) as never;
+}
 
 async function runDeleteSql(q: SQL) {
-  if (usePostgres) await (db as { execute: (x: SQL) => Promise<unknown> }).execute(q);
-  else await db.run(q);
+  await runRaw(q);
 }
 
 const {
@@ -626,7 +637,7 @@ export class DatabaseStorage implements IStorage {
     const id = crypto.randomUUID();
     const expires = usePostgres ? data.expiresAt.toISOString() : String(data.expiresAt.getTime());
     const created = usePostgres ? new Date().toISOString() : String(Date.now());
-    await db.run(
+    await runRaw(
       sql.raw(
         `INSERT INTO refresh_tokens (id, staff_id, session_id, token_hash, expires_at, created_at) VALUES ('${id}', '${data.staffId}', '${data.sessionId}', '${data.tokenHash}', ${usePostgres ? `'${expires}'` : expires}, ${usePostgres ? `'${created}'` : created})`
       )
@@ -637,7 +648,7 @@ export class DatabaseStorage implements IStorage {
     tokenHash: string
   ): Promise<{ id: string; staffId: string; sessionId: string } | undefined> {
     const now = usePostgres ? new Date().toISOString() : String(Date.now());
-    const result = await db.run(
+    const result = await runRaw(
       sql.raw(
         usePostgres
           ? `SELECT id, staff_id, session_id FROM refresh_tokens WHERE token_hash = '${tokenHash}' AND revoked_at IS NULL AND expires_at > '${now}' LIMIT 1`
@@ -651,7 +662,7 @@ export class DatabaseStorage implements IStorage {
 
   async revokeRefreshToken(id: string): Promise<void> {
     const revoked = usePostgres ? new Date().toISOString() : String(Date.now());
-    await db.run(
+    await runRaw(
       sql.raw(
         usePostgres
           ? `UPDATE refresh_tokens SET revoked_at = '${revoked}' WHERE id = '${id}'`
@@ -662,7 +673,7 @@ export class DatabaseStorage implements IStorage {
 
   async revokeRefreshTokensForSession(sessionId: string): Promise<void> {
     const revoked = usePostgres ? new Date().toISOString() : String(Date.now());
-    await db.run(
+    await runRaw(
       sql.raw(
         usePostgres
           ? `UPDATE refresh_tokens SET revoked_at = '${revoked}' WHERE session_id = '${sessionId}' AND revoked_at IS NULL`
@@ -673,7 +684,7 @@ export class DatabaseStorage implements IStorage {
 
   async purgeExpiredRefreshTokens(): Promise<void> {
     const now = usePostgres ? new Date().toISOString() : String(Date.now());
-    await db.run(
+    await runRaw(
       sql.raw(
         usePostgres
           ? `DELETE FROM refresh_tokens WHERE expires_at < '${now}' OR revoked_at IS NOT NULL`
@@ -1667,23 +1678,23 @@ export class DatabaseStorage implements IStorage {
       if (legacy === modern.toLowerCase()) continue;
       const target = branchByShort.get(normalizeBranchName(modern));
       if (!target) continue;
-      await db.run(
+      await runRaw(
         sql`UPDATE patients SET branch = ${modern}, branch_id = ${target.id} WHERE LOWER(TRIM(branch)) = ${legacy}`
       );
-      await db.run(
+      await runRaw(
         sql`UPDATE visits SET branch = ${modern}, branch_id = ${target.id} WHERE LOWER(TRIM(branch)) = ${legacy}`
       );
-      await db.run(sql`UPDATE staff SET branch = ${modern} WHERE LOWER(TRIM(branch)) = ${legacy}`);
-      await db.run(sql`UPDATE attendance SET branch = ${modern} WHERE LOWER(TRIM(branch)) = ${legacy}`);
-      await db.run(sql`UPDATE home_visits SET branch = ${modern} WHERE LOWER(TRIM(branch)) = ${legacy}`);
+      await runRaw(sql`UPDATE staff SET branch = ${modern} WHERE LOWER(TRIM(branch)) = ${legacy}`);
+      await runRaw(sql`UPDATE attendance SET branch = ${modern} WHERE LOWER(TRIM(branch)) = ${legacy}`);
+      await runRaw(sql`UPDATE home_visits SET branch = ${modern} WHERE LOWER(TRIM(branch)) = ${legacy}`);
     }
 
     for (const br of allBranches) {
       const short = normalizeBranchName(br.branchName ?? br.name);
-      await db.run(
+      await runRaw(
         sql`UPDATE patients SET branch_id = ${br.id} WHERE branch_id IS NULL AND branch = ${short}`
       );
-      await db.run(
+      await runRaw(
         sql`UPDATE visits SET branch_id = ${br.id} WHERE branch_id IS NULL AND branch = ${short}`
       );
     }

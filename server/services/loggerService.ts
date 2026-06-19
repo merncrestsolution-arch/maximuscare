@@ -1,7 +1,7 @@
 import { db, schema } from "../db";
 import { sql } from "drizzle-orm";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
 
 export type LogLevel = "info" | "warn" | "error";
 
@@ -40,7 +40,11 @@ export async function writeSystemLog(input: SystemLogInput): Promise<void> {
             VALUES (${id}, ${input.level ?? "info"}, ${input.category}, ${input.message}, ${input.userId ?? null}, ${input.ipAddress ?? null}, ${input.action ?? null}, ${input.stackTrace ?? null}, ${metadata}, NOW())`
       : sql`INSERT INTO system_logs (id, level, category, message, user_id, ip_address, action, stack_trace, metadata, created_at)
             VALUES (${id}, ${input.level ?? "info"}, ${input.category}, ${input.message}, ${input.userId ?? null}, ${input.ipAddress ?? null}, ${input.action ?? null}, ${input.stackTrace ?? null}, ${metadata}, ${now})`;
-    await db.run(stmt);
+    if (usePostgres) {
+      await (db as unknown as { execute: (x: typeof stmt) => Promise<unknown> }).execute(stmt);
+    } else {
+      await (db as unknown as { run: (x: typeof stmt) => Promise<unknown> }).run(stmt);
+    }
   } catch (err) {
     console.error("[LOGGER] Failed to persist log:", err);
   }
