@@ -1016,7 +1016,9 @@ export class DatabaseStorage implements IStorage {
       .select({ count: sql<number>`count(*)` })
       .from(inPatientSessions)
       .where(and(eq(inPatientSessions.admissionId, admissionId), eq(inPatientSessions.sessionDate, date)));
-    return result[0]?.count || 0;
+    // Postgres returns count(*) as a bigint string; coerce so callers do
+    // numeric (count + 1) instead of string concatenation ("0" + 1 = "01").
+    return Number(result[0]?.count ?? 0) || 0;
   }
 
   async createInPatientSession(data: InsertInPatientSession): Promise<InPatientSession> {
