@@ -17,7 +17,18 @@ const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
 
 function createDb() {
   if (usePostgres) {
-    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    const connectionString = process.env.DATABASE_URL!;
+    // Managed Postgres (Neon, Vercel, Supabase, RDS, Render) requires TLS. Local
+    // Postgres usually doesn't. Enable SSL for remote hosts and relax cert checks,
+    // which Neon's pooled endpoints need on serverless.
+    const needsSsl =
+      /sslmode=require/i.test(connectionString) ||
+      /neon\.tech|vercel|supabase|amazonaws|render\.com|azure|googleapis/i.test(connectionString);
+    const isLocal = /@(localhost|127\.0\.0\.1)/i.test(connectionString);
+    const pool = new pg.Pool({
+      connectionString,
+      ssl: needsSsl && !isLocal ? { rejectUnauthorized: false } : undefined,
+    });
     return drizzlePg(pool, { schema: schemaPg });
   } else {
     const { drizzle } = requireMod("drizzle-orm/libsql");

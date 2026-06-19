@@ -3,7 +3,8 @@
 // Vercel/Neon integrations inject the Postgres connection under various names
 // (POSTGRES_URL, POSTGRES_PRISMA_URL, DATABASE_URL_UNPOOLED, or a custom-prefixed
 // name like STORAGE_POSTGRES_URL). Our DB layer only reads DATABASE_URL, so if it's
-// missing we discover any Postgres URL present in the environment and map it over.
+// missing — or is a leftover placeholder — we discover a real Postgres URL present
+// in the environment and map it over.
 //
 // IMPORTANT: import this BEFORE any module that reads process.env.DATABASE_URL at
 // import time (e.g. server/db.ts).
@@ -12,8 +13,16 @@ function looksLikePostgres(value: string | undefined): value is string {
   return !!value && /^postgres(ql)?:\/\//i.test(value);
 }
 
-if (!looksLikePostgres(process.env.DATABASE_URL)) {
-  // Prefer well-known pooled connection strings first.
+// Detect the example/placeholder strings that were never real (e.g. the
+// "postgresql://USER:PASSWORD@ep-xxxx..." sample). These must NOT be used.
+function isPlaceholder(value: string | undefined): boolean {
+  if (!value) return false;
+  return /USER:PASSWORD|ep-xxxx|your-[a-z-]*host|<[a-z_]+>|example\.com|CHANGE_ME/i.test(value);
+}
+
+const current = process.env.DATABASE_URL;
+if (!looksLikePostgres(current) || isPlaceholder(current)) {
+  // Prefer well-known connection-string env vars first.
   const preferredKeys = [
     "POSTGRES_URL",
     "POSTGRES_PRISMA_URL",
@@ -24,8 +33,9 @@ if (!looksLikePostgres(process.env.DATABASE_URL)) {
 
   let found: string | undefined;
   for (const key of preferredKeys) {
-    if (looksLikePostgres(process.env[key])) {
-      found = process.env[key];
+    const value = process.env[key];
+    if (looksLikePostgres(value) && !isPlaceholder(value)) {
+      found = value;
       break;
     }
   }
@@ -34,7 +44,7 @@ if (!looksLikePostgres(process.env.DATABASE_URL)) {
   // (avoid *_NON_POOLING / *_UNPOOLED) since serverless reuses connections poorly.
   if (!found) {
     for (const [key, value] of Object.entries(process.env)) {
-      if (looksLikePostgres(value)) {
+      if (looksLikePostgres(value) && !isPlaceholder(value)) {
         found = value;
         if (!/non_pooling|unpooled/i.test(key)) break;
       }
