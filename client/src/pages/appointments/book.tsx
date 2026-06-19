@@ -1,12 +1,12 @@
 import { useState, useMemo } from "react";
 import { useLocation } from "wouter";
-import { usePatients, useCreateAppointment, useCreatePatient, useStaff } from "@/hooks/useData";
+import { usePatients, useCreateAppointment, useCreatePatient, useTreatingStaff } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Loader2, Search, UserPlus, Check } from "lucide-react";
+import { TreatingStaffCombobox } from "@/components/staff/treating-staff-combobox";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/auth-context";
@@ -26,15 +26,13 @@ export default function BookAppointment() {
   const { selectedBranchName } = useBranch();
   const { defaultValue: defaultBranch } = useBranchOptions();
   const { toast } = useToast();
-  const { data: patients = [], isLoading: loadingPatients } = usePatients();
+  // Show patients from every branch the user can access (not just the selected
+  // branch) so an appointment can be booked for any registered patient.
+  const { data: patients = [], isLoading: loadingPatients } = usePatients({ branch: "all" });
   const createAppointment = useCreateAppointment();
   const createPatient = useCreatePatient();
 
-  const { data: allStaff = [], isLoading: loadingStaff } = useStaff();
-
-  const treatingStaff = allStaff.filter(
-    (s: any) => s.role === "Physiotherapist" || s.role === "MD"
-  );
+  const { data: allStaff = [], isLoading: loadingStaff } = useTreatingStaff();
 
   const searchParams = new URLSearchParams(window.location.search);
   const dateParam = searchParams.get("date");
@@ -49,22 +47,50 @@ export default function BookAppointment() {
     notes: "",
   });
 
+  const sortedPatients = useMemo(
+    () =>
+      [...(patients as any[])].sort((a, b) =>
+        String(a.name ?? "").localeCompare(String(b.name ?? ""))
+      ),
+    [patients]
+  );
+
   const filteredPatients = useMemo(() => {
-    const q = patientSearch.trim().toLowerCase();
-    if (!q) return [];
-    return (patients as any[]).filter((p) => {
-      const haystack = [p.name, p.phone, p.patientCode, p.nic]
+    const raw = patientSearch.trim().toLowerCase();
+    // Empty search → show the full registered patient list (the container scrolls).
+    if (!raw) return sortedPatients;
+    // Tokenized matching: every whitespace-separated term must match somewhere in
+    // the haystack. Lets "joh sil" match "John Silva", and supports Patient ID,
+    // registration number (patientCode), first/last/full name, and mobile number.
+    const terms = raw.split(/\s+/).filter(Boolean);
+    return sortedPatients.filter((p) => {
+      const haystack = [
+        p.name,
+        p.fullName,
+        p.phone,
+        p.mobile,
+        p.patientCode,
+        p.registrationNumber,
+        p.regNo,
+        p.nicOrPassport,
+        p.nic,
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
-      return haystack.includes(q);
+      return terms.every((t) => haystack.includes(t));
     });
-  }, [patients, patientSearch]);
+  }, [sortedPatients, patientSearch]);
 
   const exactMatch = useMemo(() => {
     const q = patientSearch.trim().toLowerCase();
     if (!q) return undefined;
-    return (patients as any[]).find((p) => p.name.toLowerCase() === q);
+    return (patients as any[]).find(
+      (p) =>
+        String(p.name ?? "").toLowerCase() === q ||
+        String(p.fullName ?? "").toLowerCase() === q ||
+        String(p.patientCode ?? "").toLowerCase() === q
+    );
   }, [patients, patientSearch]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -83,7 +109,7 @@ export default function BookAppointment() {
       return;
     }
 
-    const selectedStaff = treatingStaff.find((s: any) => s.id === formData.treatingStaffId);
+    const selectedStaff = (allStaff as any[]).find((s: any) => s.id === formData.treatingStaffId);
 
     try {
       let patientId: string;
@@ -215,8 +241,8 @@ export default function BookAppointment() {
                   {filteredPatients.length === 0 ? (
                     <p className="text-sm text-muted-foreground text-center py-8 px-3">
                       {patientSearch.trim()
-                        ? "No matching patients. Type at least 2 characters to quick-create a new patient."
-                        : "Search by name, phone, ID, or NIC to find a patient."}
+                        ? "No matching patients found. Type at least 2 characters to quick-create a new patient."
+                        : "No patients registered yet."}
                     </p>
                   ) : (
                     filteredPatients.map((patient: any) => {
@@ -266,21 +292,14 @@ export default function BookAppointment() {
 
           <div className="space-y-2">
             <Label>Treatment By</Label>
-            <Select
+            <TreatingStaffCombobox
+              staff={allStaff as any[]}
               value={formData.treatingStaffId}
-              onValueChange={(value) => setFormData({ ...formData, treatingStaffId: value })}
-            >
-              <SelectTrigger className="h-12" data-testid="select-staff">
-                <SelectValue placeholder="Select staff" />
-              </SelectTrigger>
-              <SelectContent>
-                {treatingStaff.map((staff: any) => (
-                  <SelectItem key={staff.id} value={staff.id} data-testid={`option-staff-${staff.id}`}>
-                    {staff.name} ({staff.role})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={(value) => setFormData({ ...formData, treatingStaffId: value })}
+              placeholder="Select treating staff"
+              className="h-12"
+              data-testid="select-staff"
+            />
           </div>
 
           <div className="space-y-2">

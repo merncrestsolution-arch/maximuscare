@@ -3,19 +3,22 @@ import path from "path";
 import { mkdirSync, existsSync } from "fs";
 import { createRequire } from "module";
 import { sql } from "drizzle-orm";
+// Static Postgres imports so bundlers (esbuild / Vercel) inline the driver instead of
+// resolving it from disk at runtime. The SQLite driver stays dynamic (dev-only, native).
+import { drizzle as drizzlePg } from "drizzle-orm/node-postgres";
+import pg from "pg";
 import * as schemaSqlite from "@shared/schema-sqlite";
 import * as schemaPg from "@shared/schema-pg";
 
 // Resolve native deps from project root (works in CJS bundle and tsx dev; avoids import.meta in dist)
 const requireMod = createRequire(path.join(process.cwd(), "package.json"));
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+// Accept both "postgresql://" and "postgres://" (Neon, Vercel Postgres, Supabase, etc.).
+const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
 
 function createDb() {
   if (usePostgres) {
-    const { drizzle } = requireMod("drizzle-orm/node-postgres");
-    const { Pool } = requireMod("pg");
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-    return drizzle(pool, { schema: schemaPg });
+    const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+    return drizzlePg(pool, { schema: schemaPg });
   } else {
     const { drizzle } = requireMod("drizzle-orm/libsql");
     const { createClient } = requireMod("@libsql/client");

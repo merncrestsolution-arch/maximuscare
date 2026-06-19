@@ -91,6 +91,36 @@ export async function computeOverviewKpis(
   };
 }
 
+export interface OverviewExpenseCategory {
+  category: string;
+  amount: number;
+}
+
+export interface OverviewExpenseBreakdown {
+  total: number;
+  byCategory: OverviewExpenseCategory[];
+}
+
+/** Expense totals grouped by category for the whole organization (smart chart). */
+export async function computeOverviewExpenseBreakdown(
+  storage: IStorage,
+  rangeFrom: string,
+  rangeTo: string,
+  type: "maximus" | "nexus"
+): Promise<OverviewExpenseBreakdown> {
+  const codes = branchCodesForOverview(type);
+  const branchIdMap = await buildBranchIdMap(storage);
+  const expenses = (await storage.getExpensesByDateRange(rangeFrom, rangeTo)).filter((e) =>
+    itemMatchesBranchCodes(e, codes, branchIdMap)
+  );
+  const { total, byCategory } = computeExpenseBreakdown(expenses);
+  const rows = Object.entries(byCategory)
+    .map(([category, amount]) => ({ category: category || "Uncategorized", amount: Number(amount) || 0 }))
+    .filter((r) => r.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+  return { total, byCategory: rows };
+}
+
 export async function computeBranchComparisonRow(
   storage: IStorage,
   rangeFrom: string,

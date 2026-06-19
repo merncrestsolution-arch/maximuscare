@@ -15,22 +15,22 @@ export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenCha
 
   const canAddPatient = useMemo(() => {
     if (!user) return false;
-    return ["Admin", "MD", "Receptionist", "Physiotherapist", "Staff"].includes(user.role);
+    return ["Admin", "MD", "Receptionist", "Physiotherapist", "Staff", "Manager", "Branch Manager", "Nexus MD"].includes(user.role);
   }, [user]);
 
   const canAddVisit = useMemo(() => {
     if (!user) return false;
-    return ["Admin", "MD", "Receptionist", "Physiotherapist", "Staff"].includes(user.role);
+    return ["Admin", "MD", "Receptionist", "Physiotherapist", "Staff", "Manager", "Branch Manager", "Nexus MD"].includes(user.role);
   }, [user]);
 
   const canAddInPatient = useMemo(() => {
     if (!user) return false;
-    return ["Admin", "MD", "Receptionist", "Physiotherapist"].includes(user.role);
+    return ["Admin", "MD", "Receptionist", "Physiotherapist", "Manager", "Branch Manager", "Nexus MD"].includes(user.role);
   }, [user]);
 
   const canAddInPatientSession = useMemo(() => {
     if (!user) return false;
-    return ["Admin", "MD", "Receptionist", "Physiotherapist"].includes(user.role);
+    return ["Admin", "MD", "Receptionist", "Physiotherapist", "Manager", "Branch Manager", "Nexus MD"].includes(user.role);
   }, [user]);
 
   const canDischargeInPatient = useMemo(() => {

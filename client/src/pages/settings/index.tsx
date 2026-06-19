@@ -1,16 +1,20 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useClinicSettings, useUpdateClinicSettings, useIncentiveSettings, useUpdateIncentiveSettings } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, ScrollText, ChevronRight } from "lucide-react";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canManageSettings } from "@/lib/permissions";
+import { useAuth } from "@/context/auth-context";
+import { canManageSettings, canViewAuditLogs } from "@/lib/permissions";
 
 function SettingsContent() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
+  const { user } = useAuth();
   const { data: clinic, isLoading } = useClinicSettings();
   const { data: incentive } = useIncentiveSettings();
   const updateClinic = useUpdateClinicSettings();
@@ -99,6 +103,30 @@ function SettingsContent() {
   return (
     <div className="space-y-6 p-4 max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold">Settings</h1>
+
+      {canViewAuditLogs(user?.role) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Audit &amp; Monitoring</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <button
+              type="button"
+              onClick={() => setLocation("/audit")}
+              className="flex w-full items-center gap-3 rounded-lg border border-border/60 bg-background px-4 py-3 text-left transition-colors hover:bg-muted"
+            >
+              <ScrollText className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">Activity Log</div>
+                <div className="text-sm text-muted-foreground">
+                  System-wide audit trail — logins, edits, deletions and payments
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+            </button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

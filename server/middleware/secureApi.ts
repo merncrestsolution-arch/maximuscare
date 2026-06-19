@@ -4,6 +4,7 @@
 import { requirePermission } from "../auth";
 
 export const requireStaffManage = requirePermission("staff.manage");
+export const requireStaffView = requirePermission("staff.view");
 export const requirePatientsManage = requirePermission("patients.manage");
 export const requirePatientsViewAll = requirePermission("patients.view_all");
 export const requireVisitsManage = requirePermission("visits.manage");

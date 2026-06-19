@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useAuth } from "@/context/auth-context";
-import { useVisit, useUpdateVisit, useDeleteVisit, usePatient, useStaff } from "@/hooks/useData";
+import { useVisit, useUpdateVisit, useDeleteVisit, usePatient, useTreatingStaff } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +31,7 @@ export default function EditVisit() {
   const { user } = useAuth();
   const { data: visit, isLoading: loadingVisit, error: visitError } = useVisit(params?.id || "");
   const { data: patient } = usePatient(visit?.patientId || "");
-  const { data: staff = [] } = useStaff();
+  const { data: staff = [] } = useTreatingStaff();
   const updateVisitMutation = useUpdateVisit();
   const deleteVisitMutation = useDeleteVisit();
   const { toast } = useToast();
@@ -39,11 +39,15 @@ export default function EditVisit() {
   const [formData, setFormData] = useState<any>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
+  // Re-populate whenever the loaded visit changes (incl. navigating directly
+  // from one visit's edit page to another), keyed on the record id so a
+  // background refetch of the same record doesn't clobber in-progress edits.
   useEffect(() => {
-    if (visit && !formData) {
+    if (visit) {
       setFormData({ ...visit });
     }
-  }, [visit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visit?.id]);
 
   const isManagement = ['Admin', 'MD'].includes(user?.role || '');
 

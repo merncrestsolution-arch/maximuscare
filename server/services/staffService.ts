@@ -1,6 +1,7 @@
 import type { IStorage } from "../storage";
-import type { Staff } from "@shared/schema";
+import type { Staff, Branch } from "@shared/schema";
 import { normalizeBranchName } from "@shared/branches";
+import { isClinicalRole } from "@shared/roles";
 import { clinicDateString } from "../clinicTime";
 import { computePayrollReport } from "./payrollService";
 import { summarizeAttendance, inDateRange, computeExtraHolidayCount } from "./calculationEngine";
@@ -194,6 +195,99 @@ export function staffMatchesBranch(staff: Staff, branchName: string | null | und
     return target === "dehiwala" || target === "neuro rehabilitation";
   }
   return false;
+}
+
+/**
+ * Branch-aware staff filter that also honours explicit multi-branch assignments
+ * (stored in userBranchPermissions). The legacy `staff.branch` column collapses
+ * multi-branch staff to "Both", which only maps to Dehiwala/Neuro — so without
+ * this, a staff assigned to e.g. Bandaragama + Dehiwala would never appear under
+ * the Bandaragama filter. We union the column heuristic with the permission rows.
+ */
+export async function filterStaffByBranchAccess(
+  storage: IStorage,
+  list: Staff[],
+  branchName: string | null | undefined,
+): Promise<Staff[]> {
+  if (!branchName) return list;
+  let permittedIds = new Set<string>();
+  try {
+    const branches = await storage.getAllBranches();
+    const targetNorm = normalizeBranchName(branchName).toLowerCase();
+    const target = branches.find(
+      (b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase() === targetNorm,
+    );
+    if (target) {
+      permittedIds = new Set(await storage.getStaffIdsWithBranchPermission(target.id));
+    }
+  } catch {
+    // fall back to column heuristic only
+  }
+  return list.filter((s) => staffMatchesBranch(s, branchName) || permittedIds.has(s.id));
+}
+
+export interface TreatingStaffOption {
+  id: string;
+  name: string;
+  role: string;
+  branch: string | null;
+  isActive: boolean | number;
+}
+
+function toTreatingStaffOption(s: Staff): TreatingStaffOption {
+  return {
+    id: s.id,
+    name: s.name,
+    role: s.role,
+    branch: s.branch ?? null,
+    isActive: s.isActive,
+  };
+}
+
+/**
+ * Branch/organization-scoped list of clinical staff for the "Treating Staff" /
+ * "Treating Physiotherapist" dropdowns used by Add Visit, Add Session and
+ * Appointment forms.
+ *
+ * Scope rules:
+ *  - If a specific branch is selected, return clinical staff for that branch.
+ *  - Otherwise return clinical staff across every branch the user is allowed to
+ *    access (so a Nexus user only sees Nexus staff, a Maximus user only sees
+ *    Maximus staff, and Admin/MD — whose allowed set is every branch — see all).
+ *
+ * Accessible to any authenticated user who can record a visit/session, not just
+ * staff-directory viewers, because every clinician needs to pick the treating
+ * staff regardless of their own role.
+ */
+export async function getTreatingStaffOptions(
+  storage: IStorage,
+  ctx: { selectedBranchName: string | null; allowedBranches: Branch[] },
+): Promise<TreatingStaffOption[]> {
+  const active = await storage.getActiveStaff();
+  const clinical = active.filter((s) => isClinicalRole(s.role));
+
+  if (ctx.selectedBranchName) {
+    const scoped = await filterStaffByBranchAccess(storage, clinical, ctx.selectedBranchName);
+    return scoped.map(toTreatingStaffOption).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  if (ctx.allowedBranches.length > 0) {
+    const seen = new Set<string>();
+    const result: Staff[] = [];
+    for (const branch of ctx.allowedBranches) {
+      const branchName = branch.branchName ?? branch.name;
+      const scoped = await filterStaffByBranchAccess(storage, clinical, branchName);
+      for (const s of scoped) {
+        if (!seen.has(s.id)) {
+          seen.add(s.id);
+          result.push(s);
+        }
+      }
+    }
+    return result.map(toTreatingStaffOption).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  return clinical.map(toTreatingStaffOption).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function staffDirectoryRow(

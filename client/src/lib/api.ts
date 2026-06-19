@@ -1,7 +1,28 @@
 // API base: empty for same-origin (uses /api), or full URL for cross-origin (e.g. https://your-app.railway.app)
-const API_BASE = import.meta.env.VITE_API_URL
-  ? `${String(import.meta.env.VITE_API_URL).replace(/\/$/, "")}/api`
-  : "/api";
+const RAW_API_URL = import.meta.env.VITE_API_URL
+  ? String(import.meta.env.VITE_API_URL).trim().replace(/\/$/, "")
+  : "";
+const API_BASE = RAW_API_URL ? `${RAW_API_URL}/api` : "/api";
+
+// Production sanity check: a Vercel (static SPA) deployment has NO same-origin backend.
+// If VITE_API_URL is unset in production, every /api call hits the static host and returns
+// HTML (index.html / 404), which surfaces to the user as the generic "Request failed".
+if (import.meta.env.PROD && !RAW_API_URL) {
+  console.error(
+    "[api] VITE_API_URL is not set in this production build. " +
+      "API calls will be sent to the same origin as the frontend. " +
+      "If the backend is hosted separately (e.g. Render/Railway while the SPA is on Vercel), " +
+      "set VITE_API_URL=https://<your-backend-host> in the deployment environment and redeploy."
+  );
+}
+
+// Guard against the classic misconfiguration of pointing the frontend at localhost in production.
+if (import.meta.env.PROD && /localhost|127\.0\.0\.1/i.test(RAW_API_URL)) {
+  console.error(
+    `[api] VITE_API_URL points to a local address (${RAW_API_URL}) in a production build. ` +
+      "Browsers cannot reach your machine's localhost. Set VITE_API_URL to the public backend URL."
+  );
+}
 
 export const apiUrl = (path: string) => `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 
@@ -80,11 +101,31 @@ async function apiRequest<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(apiUrl(endpoint), {
-    ...options,
-    credentials: "include",
-    headers,
-  });
+  const fullUrl = apiUrl(endpoint);
+
+  let response: Response;
+  try {
+    response = await fetch(fullUrl, {
+      ...options,
+      credentials: "include",
+      headers,
+    });
+  } catch (networkError) {
+    // fetch() rejects ONLY on network-level failures: DNS failure, server
+    // unreachable, request blocked by CORS, or mixed-content (https page → http API).
+    console.error("[api] Network/CORS failure calling", fullUrl, networkError);
+    const hint = !RAW_API_URL
+      ? "The backend may not be reachable at this origin. Verify VITE_API_URL is set to your deployed backend."
+      : "The backend may be down, the URL may be wrong, or CORS is blocking the request. " +
+        "Ensure the backend is deployed and its CLIENT_ORIGIN includes this site's URL.";
+    throw new Error(`Cannot reach the server. ${hint}`);
+  }
+
+  // Detect responses that are not JSON (e.g. the static host returned index.html or a
+  // 404 page because there is no backend at this origin). This is the #1 cause of the
+  // generic "Request failed" message on Vercel-only deployments.
+  const contentType = response.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
 
   if (!response.ok) {
     if (response.status === 401 && !retried && !endpoint.includes("/auth/login")) {
@@ -99,11 +140,34 @@ async function apiRequest<T>(
       }
       throw new Error(error.message || "Login expired. Please re-login.");
     }
+
+    if (!isJson) {
+      // Non-JSON error body → almost certainly hitting the static frontend host, a
+      // proxy/CDN error page, or a crashed backend. Log the raw response for debugging.
+      const rawText = await response.text().catch(() => "");
+      console.error("[api] Non-JSON error response", {
+        url: fullUrl,
+        status: response.status,
+        contentType,
+        bodyPreview: rawText.slice(0, 300),
+      });
+      if (response.status === 404) {
+        throw new Error(
+          `API endpoint not found (404) at ${fullUrl}. The backend route is missing or the request reached the static frontend instead of the API. Check VITE_API_URL.`
+        );
+      }
+      if (response.status >= 500) {
+        throw new Error(`Server error (${response.status}). The backend failed to handle the request.`);
+      }
+      throw new Error(`Unexpected non-JSON response (HTTP ${response.status}) from ${fullUrl}.`);
+    }
+
     const error = (await response.json().catch(() => ({ message: "Request failed" }))) as {
       message?: string;
       code?: string;
       errors?: { fieldErrors?: Record<string, string[]>; formErrors?: string[] };
     };
+    console.error("[api] Request failed", { url: fullUrl, status: response.status, body: error });
     if (response.status === 403 && error.code === "BRANCH_REQUIRED") {
       notifyAuthEvent(AUTH_EVENTS.branchRequired);
     }
@@ -116,6 +180,23 @@ async function apiRequest<T>(
       if (parts.length) msg = `${msg} — ${parts.join("; ")}`;
     }
     throw new Error(msg);
+  }
+
+  // Successful status but non-JSON body (e.g. SPA index.html returned with 200 because
+  // the request hit the static host). Surface a clear, actionable error.
+  if (!isJson) {
+    const rawText = await response.text().catch(() => "");
+    console.error("[api] Expected JSON but received non-JSON success response", {
+      url: fullUrl,
+      status: response.status,
+      contentType,
+      bodyPreview: rawText.slice(0, 300),
+    });
+    throw new Error(
+      `The API returned a non-JSON response from ${fullUrl}. ` +
+        "The request likely reached the static frontend instead of the backend API. " +
+        "Set VITE_API_URL to your deployed backend URL and redeploy."
+    );
   }
 
   return response.json();
@@ -205,6 +286,7 @@ export const staffApi = {
     return apiRequest<any[]>(`/staff${queryString}`);
   },
   getOne: (id: string) => apiRequest<any>(`/staff/${id}`),
+  treatingOptions: () => apiRequest<any[]>(`/staff/treating-options`),
   create: (data: any) => apiRequest<any>('/staff', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -410,9 +492,11 @@ export const inPatientApi = {
     return apiRequest<any[]>(`/inpatients/sessions?${q.toString()}`);
   },
 
-  /** Admin/MD — all IP sessions in range (incentive reports) */
-  getAllSessionsInDateRange: (params: { startDate: string; endDate: string }) => {
-    const q = new URLSearchParams(params);
+  /** Admin/MD/Manager — all IP sessions in range (incentive reports / dashboard).
+   *  Pass `branch` to scope to a single branch (used by branch dashboards). */
+  getAllSessionsInDateRange: (params: { startDate: string; endDate: string; branch?: string }) => {
+    const q = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate });
+    if (params.branch) q.append('branch', params.branch);
     return apiRequest<any[]>(`/inpatients/sessions/all?${q.toString()}`);
   },
 
@@ -560,6 +644,15 @@ export const payrollApi = {
   getSnapshots: (staffId?: string) => {
     const q = staffId ? `?staffId=${staffId}` : "";
     return apiRequest<any>(`/payroll/snapshots${q}`).then(unwrapApiData);
+  },
+};
+
+export const auditApi = {
+  getAll: (params?: { entityType?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.entityType) q.append("entityType", params.entityType);
+    q.append("limit", String(params?.limit ?? 300));
+    return apiRequest<any[]>(`/audit-logs?${q.toString()}`).then(unwrapApiData);
   },
 };
 
@@ -731,6 +824,8 @@ export const notificationsApi = {
     apiRequest<any>(`/notifications/${id}`, { method: "DELETE" }).then(unwrapApiData),
   create: (data: any) =>
     apiRequest<any>("/notifications", { method: "POST", body: JSON.stringify(data) }).then(unwrapApiData),
+  broadcast: (data: { title: string; message: string; type?: string; branch?: string }) =>
+    apiRequest<any>("/notifications/broadcast", { method: "POST", body: JSON.stringify(data) }).then(unwrapApiData),
   history: (params?: { staffId?: string; limit?: number }) => {
     const q = new URLSearchParams(params as Record<string, string>);
     return apiRequest<any>(`/notifications/history?${q.toString()}`).then(unwrapApiData);

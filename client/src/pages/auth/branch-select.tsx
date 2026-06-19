@@ -10,6 +10,11 @@ import {
   Users,
   Activity,
   Loader2,
+  MoreVertical,
+  ScrollText,
+  Bell,
+  Settings,
+  Send,
 } from "lucide-react";
 import { useBranch } from "@/context/branch-context";
 import { useAuth } from "@/context/auth-context";
@@ -19,6 +24,16 @@ import { BRANCH_SELECTION_CARDS } from "@shared/branchAccess";
 import type { OverviewContext } from "@shared/branchAccess";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { canViewAuditLogs, canManageSettings } from "@/lib/permissions";
+import { SendNotificationDialog } from "@/components/notifications/send-notification-dialog";
 
 const BRANCH_HEADER: Record<string, string> = {
   DEHIWALA: "DEHIWALA",
@@ -94,6 +109,9 @@ export default function BranchSelectPage() {
   } = useBranch();
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const showAdminMenu = canViewAuditLogs(user?.role) || canManageSettings(user?.role);
+  const [openSend, setOpenSend] = useState(false);
 
   const branchCards = useMemo(() => {
     const allowedCodes = new Set(
@@ -171,6 +189,7 @@ export default function BranchSelectPage() {
 
   return (
     <div className="min-h-dvh bg-[#f0f0f0] flex flex-col">
+      <SendNotificationDialog open={openSend} onOpenChange={setOpenSend} />
       {/* Top header — matches dashboard chrome */}
       <header className="sticky top-0 z-10 border-b-2 border-black bg-white px-4 py-3 sm:px-6">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
@@ -191,6 +210,40 @@ export default function BranchSelectPage() {
                 <p className="text-sm font-semibold text-foreground">{user.name}</p>
                 <p className="text-xs text-muted-foreground">{user.role}</p>
               </div>
+            )}
+            {showAdminMenu && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-10 border-2 border-black rounded-xl font-medium">
+                    <MoreVertical className="h-4 w-4 sm:mr-1.5" />
+                    <span className="hidden sm:inline">More</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 border-2 border-black rounded-xl">
+                  <DropdownMenuLabel>Admin tools</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setOpenSend(true)}>
+                    <Send className="h-4 w-4" />
+                    Send Notification
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setLocation("/notifications")}>
+                    <Bell className="h-4 w-4" />
+                    Notifications
+                  </DropdownMenuItem>
+                  {canViewAuditLogs(user?.role) && (
+                    <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setLocation("/audit")}>
+                      <ScrollText className="h-4 w-4" />
+                      Activity Log
+                    </DropdownMenuItem>
+                  )}
+                  {canManageSettings(user?.role) && (
+                    <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setLocation("/settings")}>
+                      <Settings className="h-4 w-4" />
+                      Settings
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             <Button
               variant="outline"

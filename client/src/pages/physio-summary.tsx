@@ -34,7 +34,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canViewReports } from "@/lib/permissions";
+import { canViewSalaryReports } from "@/lib/permissions";
 
 function clampDate(dateStr: string, fromStr: string, toStr: string) {
   if (!dateStr) return false;
@@ -705,23 +705,35 @@ function PhysioSummaryContent() {
                   <div className="mt-0.5 text-xl font-bold text-blue-700" data-testid={`text-total-ot-${s.id}`}>{s.totalOt.toFixed(1)}</div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4" data-testid={`grid-visits-${s.id}`}>
-                  <div className="rounded-xl border border-border/60 bg-white p-3">
-                    <div className="text-[11px] text-muted-foreground">Colombo Home</div>
-                    <div className="mt-0.5 text-xl font-bold" data-testid={`text-colombo-home-${s.id}`}>{s.colomboHome}</div>
+                <div className="space-y-2" data-testid={`grid-visits-${s.id}`}>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Visits by branch
                   </div>
-                  <div className="rounded-xl border border-border/60 bg-white p-3">
-                    <div className="text-[11px] text-muted-foreground">Colombo Clinic</div>
-                    <div className="mt-0.5 text-xl font-bold" data-testid={`text-colombo-clinic-${s.id}`}>{s.colomboClinic}</div>
-                  </div>
-                  <div className="rounded-xl border border-border/60 bg-white p-3">
-                    <div className="text-[11px] text-muted-foreground">Bandaragama Home</div>
-                    <div className="mt-0.5 text-xl font-bold" data-testid={`text-bandaragama-home-${s.id}`}>{s.bandaragamaHome}</div>
-                  </div>
-                  <div className="rounded-xl border border-border/60 bg-white p-3">
-                    <div className="text-[11px] text-muted-foreground">Bandaragama Clinic</div>
-                    <div className="mt-0.5 text-xl font-bold" data-testid={`text-bandaragama-clinic-${s.id}`}>{s.bandaragamaClinic}</div>
-                  </div>
+                  {(s.visitsByBranch ?? []).length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border/60 bg-white p-3 text-sm text-muted-foreground">
+                      No visits recorded in this range.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+                      {(s.visitsByBranch ?? []).map((b: any) => (
+                        <div key={b.branch} className="rounded-xl border border-border/60 bg-white p-3" data-testid={`card-branch-${s.id}-${b.branch}`}>
+                          <div className="text-xs font-semibold text-foreground">{b.branch}</div>
+                          <div className="mt-1 flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">Clinic</span>
+                            <span className="font-bold tabular-nums">{b.clinic}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">Home</span>
+                            <span className="font-bold tabular-nums">{b.home}</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between border-t border-border/50 pt-1 text-sm">
+                            <span className="text-muted-foreground">Total</span>
+                            <span className="font-bold tabular-nums">{b.total}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {incEnabled && (
@@ -777,7 +789,7 @@ function PhysioSummaryContent() {
 
 export default function PhysioSummaryPage() {
   return (
-    <RoleProtectedRoute allowed={canViewReports}>
+    <RoleProtectedRoute allowed={canViewSalaryReports}>
       <PhysioSummaryContent />
     </RoleProtectedRoute>
   );

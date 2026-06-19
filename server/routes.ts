@@ -21,7 +21,8 @@ import {
   requireReportsView,
   requireSalaryManage,
 } from "./middleware/secureApi";
-import { filterByBranchName } from "./services/branchService";
+import { filterByBranchName, resolveBranchIdByName } from "./services/branchService";
+import { normalizeBranchName } from "@shared/branches";
 import { registerAutoFineJobs, startScheduledJobs } from "./jobs/scheduler";
 import { clinicDateString, clinicYesterdayString, clinicDateOffset } from "./clinicTime";
 import { registerHrmRoutes } from "./routes/hrm";
@@ -36,6 +37,8 @@ import {
   canViewAllPatients,
   canViewAllVisits,
   canEditVisit,
+  canViewStaff,
+  canViewStaffFinancials,
 } from "./permissions";
 import { registerExtendedRoutes } from "./routes/extended";
 import { registerSalaryRoutes } from "./routes/salary";
@@ -51,6 +54,16 @@ async function auditActor(req: Request) {
   const ipAddress =
     typeof fwd === "string" ? fwd.split(",")[0]?.trim() : req.socket.remoteAddress ?? "";
   return { userId: user?.staffId ?? "", userName: editor?.name ?? "", ipAddress };
+}
+
+function requestIp(req: Request): string {
+  const fwd = req.headers["x-forwarded-for"];
+  return typeof fwd === "string" ? fwd.split(",")[0]?.trim() ?? "" : req.socket.remoteAddress ?? "";
+}
+
+function requestDevice(req: Request): string {
+  const ua = req.headers["user-agent"];
+  return typeof ua === "string" ? ua : "";
 }
 
 const {
@@ -227,8 +240,13 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  const { initWebSocketServer } = await import("./realtime/wsHub");
-  initWebSocketServer(httpServer);
+  // WebSockets require a persistent server process. Vercel's serverless functions
+  // don't keep one alive, so skip the WS hub there (realtime updates degrade to polling).
+  const isServerless = !!process.env.VERCEL;
+  if (!isServerless) {
+    const { initWebSocketServer } = await import("./realtime/wsHub");
+    initWebSocketServer(httpServer);
+  }
 
   // Health check (for Render, Railway, etc.)
   app.get("/api/health", (_req, res) =>
@@ -256,15 +274,41 @@ export async function registerRoutes(
       const staff = await storage.getStaffByEmail(email);
       
       if (!staff || !staff.password) {
+        await logAudit(storage, {
+          userId: "",
+          userName: email,
+          module: "auth",
+          action: "login_failed",
+          ipAddress: requestIp(req),
+          newValue: { email, reason: "unknown_account", device: requestDevice(req) },
+        });
         return res.status(401).json({ message: "Invalid credentials" });
       }
       if ((staff as any).isActive === 0 || (staff as any).isActive === false) {
+        await logAudit(storage, {
+          userId: staff.id,
+          userName: staff.name,
+          module: "auth",
+          action: "login_failed",
+          recordId: staff.id,
+          ipAddress: requestIp(req),
+          newValue: { email, reason: "deactivated", device: requestDevice(req) },
+        });
         return res.status(403).json({ message: "Staff account is deactivated. Contact Admin/MD." });
       }
 
       const isValidPassword = await bcrypt.compare(password, staff.password);
       
       if (!isValidPassword) {
+        await logAudit(storage, {
+          userId: staff.id,
+          userName: staff.name,
+          module: "auth",
+          action: "login_failed",
+          recordId: staff.id,
+          ipAddress: requestIp(req),
+          newValue: { email, reason: "bad_password", device: requestDevice(req) },
+        });
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
@@ -272,6 +316,16 @@ export async function registerRoutes(
       const tokens = await issueAuthTokens(staff.id, staff.email, staff.role);
       const { getAllowedBranchesForStaff } = await import("./services/branchService");
       const allowedBranches = await getAllowedBranchesForStaff(storage, staff.id, staff.role);
+
+      await logAudit(storage, {
+        userId: staff.id,
+        userName: staff.name,
+        module: "auth",
+        action: "login",
+        recordId: staff.id,
+        ipAddress: requestIp(req),
+        newValue: { email: staff.email, role: staff.role, device: requestDevice(req) },
+      });
 
       const { password: _, ...userWithoutPassword } = staff;
       setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
@@ -454,6 +508,16 @@ export async function registerRoutes(
   // Logout
   app.post("/api/auth/logout", requireAuth, async (req: Request, res: Response) => {
     const sessionId = (req as any).sessionId;
+    const actor = await auditActor(req);
+    if (actor.userId) {
+      await logAudit(storage, {
+        ...actor,
+        module: "auth",
+        action: "logout",
+        recordId: actor.userId,
+        newValue: { device: requestDevice(req) },
+      });
+    }
     if (sessionId) {
       await destroySession(sessionId);
     }
@@ -464,35 +528,64 @@ export async function registerRoutes(
   // ========== Staff Routes ==========
   registerHrmRoutes(app);
 
-  // Get all staff (Admin/MD get branch-scoped list, others get only themselves)
+  // Get all staff. Management, operational leads, and receptionists get a
+  // branch-scoped list (used for treating-staff/task dropdowns); other roles
+  // only see themselves. Salary fields are stripped for non-financial roles.
   app.get("/api/staff", requireAuth, async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
-      const isAdmin = ["Admin", "MD"].includes(currentUser.role);
+      const canSeeAll = canViewStaff(currentUser.role) || currentUser.role === "Receptionist";
       const { loadBranchContext, getSelectedBranchName } = await import("./middleware/branchContext");
       await loadBranchContext(req as any);
       const branchFilter = getSelectedBranchName(req as any);
 
-      if (isAdmin) {
+      const sanitize = (staff: any) => {
+        const { password, ...rest } = staff;
+        if (!canViewStaffFinancials(currentUser.role)) {
+          delete (rest as any).basicSalary;
+          delete (rest as any).otherAdjustments;
+          delete (rest as any).salaryDate;
+        }
+        return rest;
+      };
+
+      if (canSeeAll) {
         const includeInactive = String(req.query.includeInactive || "").toLowerCase() === "true";
         const allStaff = await storage.getAllStaff();
         let filtered = includeInactive
           ? allStaff
           : allStaff.filter((s: any) => !(s.isActive === 0 || s.isActive === false));
         if (branchFilter) {
-          const { staffMatchesBranch } = await import("./services/staffService");
-          filtered = filtered.filter((s) => staffMatchesBranch(s, branchFilter));
+          const { filterStaffByBranchAccess } = await import("./services/staffService");
+          filtered = await filterStaffByBranchAccess(storage, filtered, branchFilter);
         }
-        const staffWithoutPasswords = filtered.map(({ password, ...staff }) => staff);
-        return res.json(staffWithoutPasswords);
+        return res.json(filtered.map(sanitize));
       } else {
         const selfStaff = await storage.getStaff(currentUser.staffId);
         if (!selfStaff) {
           return res.json([]);
         }
-        const { password, ...staffWithoutPassword } = selfStaff;
-        return res.json([staffWithoutPassword]);
+        return res.json([sanitize(selfStaff)]);
       }
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Branch/organization-scoped clinical staff for treating-staff dropdowns
+  // (Add Visit, Add Session, Appointment). Available to any authenticated user
+  // who records visits/sessions — not just staff-directory viewers — because
+  // every clinician needs to pick the treating staff for their branch.
+  app.get("/api/staff/treating-options", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { loadBranchContext } = await import("./middleware/branchContext");
+      const ctx = await loadBranchContext(req as any);
+      const { getTreatingStaffOptions } = await import("./services/staffService");
+      const options = await getTreatingStaffOptions(storage, {
+        selectedBranchName: ctx?.selectedBranchName ?? null,
+        allowedBranches: ctx?.allowedBranches ?? [],
+      });
+      return res.json(options);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -504,8 +597,8 @@ export async function registerRoutes(
       const id = param(req, "id");
       const currentUser = (req as any).user;
       
-      // Allow user to view own profile, or Admin/MD to view any profile
-      if (currentUser.staffId !== id && !["Admin", "MD"].includes(currentUser.role)) {
+      // Allow user to view own profile, or staff-viewers (management/leads) to view any profile
+      if (currentUser.staffId !== id && !canViewStaff(currentUser.role)) {
         return res.status(403).json({ message: "Forbidden" });
       }
 
@@ -749,7 +842,14 @@ export async function registerRoutes(
   app.get("/api/patients", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
-      const branch = await resolveBranchFilter(req as any, req.query.branch as string | undefined);
+      const branchParam = req.query.branch as string | undefined;
+      // `branch=all` lets pickers (e.g. Book Appointment) list patients across
+      // every branch the user is allowed to see, instead of just the selected one.
+      const allBranches =
+        typeof branchParam === "string" && branchParam.trim().toLowerCase() === "all";
+      const branch = allBranches
+        ? undefined
+        : await resolveBranchFilter(req as any, branchParam);
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
       const page = req.query.page ? Number(req.query.page) : undefined;
@@ -1185,7 +1285,22 @@ export async function registerRoutes(
       const page = req.query.page ? Number(req.query.page) : undefined;
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
       const currentUser = (req as any).user;
-      const isAdmin = ["Admin", "MD"].includes(currentUser.role);
+      // Management and operational leads (Manager/Branch Manager/Nexus MD) may view team attendance.
+      const isAdmin = canViewStaff(currentUser.role);
+
+      // Attendance records historically were created without a branch, so we scope
+      // by the *staff member's* branch (the reliable source) rather than the
+      // attendance.branch column. Build the set of staff IDs in the active branch.
+      let branchStaffIds: Set<string> | null = null;
+      if (branch && isAdmin) {
+        const target = normalizeBranchName(branch).toLowerCase();
+        const allStaff = await storage.getAllStaff();
+        branchStaffIds = new Set(
+          allStaff
+            .filter((s: any) => normalizeBranchName(s.branch).toLowerCase() === target)
+            .map((s: any) => s.id)
+        );
+      }
 
       if (page && limit) {
         const { parsePagination } = await import("./helpers/pagination");
@@ -1194,10 +1309,10 @@ export async function registerRoutes(
           staffId && (isAdmin || currentUser.staffId === staffId) ? staffId : isAdmin ? staffId : currentUser.staffId;
         const result = await storage.getAttendancePaginated({
           staffId: effectiveStaffId,
+          staffIds: branchStaffIds && !effectiveStaffId ? Array.from(branchStaffIds) : undefined,
           startDate,
           endDate,
           month,
-          branch,
           page: p,
           limit: l,
         });
@@ -1248,6 +1363,11 @@ export async function registerRoutes(
         }
       }
 
+      // Strictly scope admin/management cross-staff results to the active branch.
+      if (branchStaffIds) {
+        attendance = attendance.filter((a: any) => branchStaffIds!.has(a.staffId));
+      }
+
       return res.json(attendance);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1272,6 +1392,7 @@ export async function registerRoutes(
       let targetStaffId: string;
       let targetStaffName: string;
       let targetRole: string;
+      let targetBranch: string | null;
       let attendanceDate: string;
 
       if (canManageOthers && body.staffId && body.staffId !== currentUser.staffId) {
@@ -1282,6 +1403,7 @@ export async function registerRoutes(
         targetStaffId = targetStaff.id;
         targetStaffName = targetStaff.name;
         targetRole = targetStaff.role;
+        targetBranch = targetStaff.branch ?? null;
         attendanceDate = body.date ? String(body.date).split('T')[0] : todayStr;
       } else {
         const currentStaff = await storage.getStaff(currentUser.staffId);
@@ -1294,6 +1416,7 @@ export async function registerRoutes(
         targetStaffId = currentStaff.id;
         targetStaffName = currentStaff.name;
         targetRole = currentStaff.role;
+        targetBranch = currentStaff.branch ?? null;
 
         if (!canManageOthers) {
           attendanceDate = todayStr;
@@ -1322,6 +1445,7 @@ export async function registerRoutes(
         staffId: targetStaffId,
         staffName: targetStaffName,
         role: targetRole,
+        branch: targetBranch ? normalizeBranchName(targetBranch) : null,
         date: attendanceDate,
         status,
         checkInTime: checkInTime || undefined,
@@ -1573,7 +1697,9 @@ export async function registerRoutes(
     }
   });
 
-  // All in-patient sessions in range (reports / incentives — Admin & MD)
+  // All in-patient sessions in range (reports / incentives — Admin, MD, Manager).
+  // Optional ?branch= scopes results to one branch (branch dashboards); omitted =
+  // all branches (Maximus-wide payroll/incentive reports).
   app.get("/api/inpatients/sessions/all", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const startDate = req.query.startDate as string | undefined;
@@ -1581,7 +1707,32 @@ export async function registerRoutes(
       if (!startDate || !endDate) {
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
-      const sessions = await storage.getAllInPatientSessionsInDateRange(startDate, endDate);
+      let sessions = await storage.getAllInPatientSessionsInDateRange(startDate, endDate);
+
+      const branchParam = (req.query.branch as string | undefined) || undefined;
+      if (branchParam) {
+        const target = normalizeBranchName(branchParam).toLowerCase();
+        const branches = await storage.getAllBranches();
+        const branchIdToShort = new Map<string, string>();
+        for (const b of branches) {
+          const short = normalizeBranchName((b as any).branchName ?? b.name).toLowerCase();
+          if (short) branchIdToShort.set(b.id, short);
+        }
+        // Resolve each session's branch from its branch text, branchId, or
+        // (legacy fallback) the treating staff member's branch.
+        const staffList = await storage.getAllStaff();
+        const staffBranchById = new Map(
+          staffList.map((s) => [s.id, normalizeBranchName(s.branch).toLowerCase()])
+        );
+        sessions = sessions.filter((s) => {
+          const fromText = normalizeBranchName((s as any).branch).toLowerCase();
+          const fromId = (s as any).branchId ? branchIdToShort.get((s as any).branchId) ?? "" : "";
+          const fromStaff = staffBranchById.get(s.treatingStaffId) ?? "";
+          const short = fromText || fromId || fromStaff;
+          return short === target;
+        });
+      }
+
       return res.json(sessions);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1736,13 +1887,30 @@ export async function registerRoutes(
 
       const sd = parsed.data;
       const treatingStaff = await storage.getStaff(sd.treatingStaffId);
+      // Persist branch attribution so the session can be scoped/filtered by
+      // organisation & branch. Admissions carry no branch, so the reliable
+      // source is the treating staff member's branch (falling back to any
+      // branchId explicitly supplied by the client).
+      const resolvedBranchId =
+        ((sd as any).branchId as string | undefined) ??
+        (await resolveBranchIdByName(storage, treatingStaff?.branch)) ??
+        null;
       const session = await storage.createInPatientSession({
         ...sd,
         treatingStaffName: treatingStaff?.name ?? sd.treatingStaffName,
         sessionNumber,
+        branchId: resolvedBranchId,
         attachments: (sd as any).attachments ?? null,
       } as any);
       await syncAutoFineForStaffDate(storage, session.treatingStaffId, session.sessionDate);
+      const sessionActor = await auditActor(req);
+      await logAudit(storage, {
+        ...sessionActor,
+        module: "session",
+        action: "create",
+        recordId: session.id,
+        newValue: session,
+      });
       return res.status(201).json(session);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -2146,16 +2314,17 @@ export async function registerRoutes(
   app.get("/api/revenue-summary", requireAuth, requireBranchContext(), requireReportsView, async (req: Request, res: Response) => {
     try {
       const { startDate, endDate } = req.query;
-      
+      const branchFilter = getBranchFilter(req as any);
+
       let totalIncome: number;
       let totalExpenses: number;
-      
+
       if (startDate && endDate) {
-        totalIncome = await storage.getTotalIncome(startDate as string, endDate as string);
-        totalExpenses = await storage.getExpenseTotal(startDate as string, endDate as string);
+        totalIncome = await storage.getTotalIncome(startDate as string, endDate as string, branchFilter);
+        totalExpenses = await storage.getExpenseTotal(startDate as string, endDate as string, branchFilter);
       } else {
-        totalIncome = await storage.getTotalIncome();
-        totalExpenses = await storage.getExpenseTotal();
+        totalIncome = await storage.getTotalIncome(undefined, undefined, branchFilter);
+        totalExpenses = await storage.getExpenseTotal(undefined, undefined, branchFilter);
       }
       
       const netRevenue = totalIncome - totalExpenses;
@@ -2239,6 +2408,14 @@ export async function registerRoutes(
       }
 
       const appt = await storage.createAppointment(parsed.data);
+      const apptActor = await auditActor(req);
+      await logAudit(storage, {
+        ...apptActor,
+        module: "appointment",
+        action: "create",
+        recordId: appt.id,
+        newValue: appt,
+      });
       const { sendNotification } = await import("./services/notificationService");
       void sendNotification(storage, {
         staffId: appt.treatingStaffId,
@@ -2262,8 +2439,18 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
       }
 
+      const beforeAppt = await storage.getAppointment(param(req, "id"));
       const appt = await storage.updateAppointment(param(req, "id"), parsed.data);
       if (!appt) return res.status(404).json({ message: "Appointment not found" });
+      const apptUpdActor = await auditActor(req);
+      await logAudit(storage, {
+        ...apptUpdActor,
+        module: "appointment",
+        action: parsed.data.status === "Cancelled" ? "cancel" : "update",
+        recordId: appt.id,
+        oldValue: beforeAppt,
+        newValue: appt,
+      });
       return res.json(appt);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -2272,8 +2459,17 @@ export async function registerRoutes(
 
   app.delete("/api/appointments/:id", requireAuth, requireBranchContext(), requireAppointmentsManage, async (req: Request, res: Response) => {
     try {
+      const beforeAppt = await storage.getAppointment(param(req, "id"));
       const deleted = await storage.deleteAppointment(param(req, "id"));
       if (!deleted) return res.status(404).json({ message: "Appointment not found" });
+      const apptDelActor = await auditActor(req);
+      await logAudit(storage, {
+        ...apptDelActor,
+        module: "appointment",
+        action: "delete",
+        recordId: param(req, "id"),
+        oldValue: beforeAppt,
+      });
       return res.json({ message: "Appointment deleted" });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -2403,11 +2599,13 @@ export async function registerRoutes(
   registerSalaryRoutes(app);
   registerExtendedRoutes(app);
 
-  void runAutoFineSweepForRecentDays().catch((e) =>
-    console.error("[auto-fine] initial sweep failed:", e)
-  );
   registerAutoFineJobs(runAutoFineSweepForToday, runAutoFineSweepForRecentDays);
-  if (process.env.NODE_ENV !== "test") {
+  // setInterval/cron timers and the startup sweep need a persistent process.
+  // They never fire reliably on serverless (Vercel) and would slow cold starts, so skip them.
+  if (process.env.NODE_ENV !== "test" && !isServerless) {
+    void runAutoFineSweepForRecentDays().catch((e) =>
+      console.error("[auto-fine] initial sweep failed:", e)
+    );
     startScheduledJobs();
   }
 

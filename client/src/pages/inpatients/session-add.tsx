@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useNextSessionNumber, useCreateInPatientSession, useStaff } from "@/hooks/useData";
+import { useInPatient, useNextSessionNumber, useCreateInPatientSession, useTreatingStaff } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
 
 interface FormData {
   sessionDate: string;
@@ -29,7 +30,7 @@ export default function AddInPatientSessionPage() {
   const admissionId = params?.id || "";
 
   const { data: patient, isLoading: patientLoading } = useInPatient(admissionId);
-  const { data: allStaff } = useStaff();
+  const { data: allStaff } = useTreatingStaff();
   const createSession = useCreateInPatientSession();
 
   const [formData, setFormData] = useState<FormData>({
@@ -44,8 +45,10 @@ export default function AddInPatientSessionPage() {
 
   const { data: nextSessionData } = useNextSessionNumber(admissionId, formData.sessionDate);
 
-  const treatingStaffList =
-    allStaff?.filter((s: any) => ["Physiotherapist", "MD", "Admin"].includes(s.role)) || [];
+  // Use the same clinical-staff resolver as the outpatient flow so physiotherapists
+  // (which in this clinic are often stored under the "Staff" role) are listed, with a
+  // safe fallback that never leaves the picker empty.
+  const treatingStaffList = getClinicalStaff((allStaff as any[]) || []);
 
   useEffect(() => {
     if (user && !formData.treatingStaffId) {

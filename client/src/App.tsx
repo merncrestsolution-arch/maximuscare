@@ -47,6 +47,7 @@ import ExpenseReportPage from "@/pages/reports/expense-report";
 import UnpaidVisitsPage from "@/pages/reports/unpaid-visits";
 import StaffReportPage from "@/pages/reports/staff-report";
 import SettingsPage from "@/pages/settings/index";
+import AuditLogPage from "@/pages/audit/index";
 import ExpensesListPage from "@/pages/expenses/list";
 import TasksPage from "@/pages/tasks/index";
 import SalaryHubPage from "@/pages/salary/index";
@@ -64,7 +65,7 @@ import NotificationsPage from "@/pages/notifications/index";
 import MaximusOverviewPage from "@/pages/overview/maximus-overview";
 import NexusOverviewPage from "@/pages/overview/nexus-overview";
 
-function ProtectedRoute({ component: Component, requireBranch = true, ...rest }: any) {
+function ProtectedRoute({ component: Component, requireBranch = true, allowWithoutBranch = false, ...rest }: any) {
   const { user } = useAuth();
   const { requiresBranchSelection, selectedBranchId, selectedContext, isLoading: branchLoading } = useBranch();
 
@@ -72,11 +73,11 @@ function ProtectedRoute({ component: Component, requireBranch = true, ...rest }:
     return <Redirect to="/auth/login" />;
   }
 
-  if (!branchLoading && requiresBranchSelection) {
+  if (!allowWithoutBranch && !branchLoading && requiresBranchSelection) {
     return <Redirect to="/auth/branch-select" />;
   }
 
-  if (!branchLoading && requireBranch && !selectedBranchId) {
+  if (!allowWithoutBranch && !branchLoading && requireBranch && !selectedBranchId) {
     return <Redirect to="/auth/branch-select" />;
   }
 
@@ -216,13 +217,16 @@ function Router() {
         <OverviewRoute component={NexusOverviewPage} context="nexus-overview" />
       </Route>
       <Route path="/settings">
-        <ProtectedRoute component={SettingsPage} />
+        <ProtectedRoute component={SettingsPage} allowWithoutBranch />
+      </Route>
+      <Route path="/audit">
+        <ProtectedRoute component={AuditLogPage} allowWithoutBranch />
       </Route>
       <Route path="/tasks">
         <ProtectedRoute component={TasksPage} />
       </Route>
       <Route path="/notifications">
-        <ProtectedRoute component={NotificationsPage} />
+        <ProtectedRoute component={NotificationsPage} allowWithoutBranch />
       </Route>
       <Route path="/salary/history">
         <ProtectedRoute component={SalaryHistoryPage} />

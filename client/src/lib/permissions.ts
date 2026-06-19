@@ -58,14 +58,26 @@ export function canManageSettings(role: string | undefined): boolean {
 }
 
 export function canManageTasks(role: string | undefined): boolean {
-  return isManagementRole(role);
+  return isManagementRole(role) || isOperationalLead(role);
 }
 
+/** Read access to the staff directory, profiles, and attendance history. */
 export function canViewStaffList(role: string | undefined): boolean {
+  return isManagementRole(role) || isOperationalLead(role);
+}
+
+/** Create / edit / delete staff accounts (sensitive: logins, salary). */
+export function canManageStaff(role: string | undefined): boolean {
   return isManagementRole(role);
 }
 
-export function canManageStaff(role: string | undefined): boolean {
+/** View team attendance and mark attendance for other staff. */
+export function canManageAttendance(role: string | undefined): boolean {
+  return isManagementRole(role) || isOperationalLead(role);
+}
+
+/** View the system-wide activity / audit log dashboard (Admin & MD only). */
+export function canViewAuditLogs(role: string | undefined): boolean {
   return isManagementRole(role);
 }
 
@@ -76,6 +88,15 @@ export function canManageSalary(role: string | undefined): boolean {
 export function canViewSalary(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
   return isManagementRole(r) || r === "Physiotherapist" || r === "Staff";
+}
+
+/**
+ * Salary & incentive reports contain financial figures. Visible to financial
+ * roles (Admin/MD/Nexus MD) and to physiotherapists/staff for their own
+ * earnings. Managers/Branch Managers are intentionally excluded.
+ */
+export function canViewSalaryReports(role: string | undefined): boolean {
+  return canViewFinancialSummary(role) || canViewSalary(role);
 }
 
 /** Branch managers and Nexus MD should not see cross-branch overview nav items. */

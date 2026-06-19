@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useStaff, useUpdateInPatientSession } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
+import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
 import { useBranding } from "@/context/branding-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,7 +55,7 @@ export default function InPatientProfilePage() {
   const createExtraExpense = useCreateInPatientExtraExpense();
   const updateExtraExpense = useUpdateInPatientExtraExpense();
   const deleteExtraExpense = useDeleteInPatientExtraExpense();
-  const { data: staffList = [] } = useStaff();
+  const { data: staffList = [] } = useTreatingStaff();
   const updateInPatientSession = useUpdateInPatientSession();
 
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
@@ -1103,10 +1104,7 @@ export default function InPatientProfilePage() {
                   <SelectValue placeholder="Select staff" />
                 </SelectTrigger>
                 <SelectContent>
-                  {staffList
-                    .filter((s: { role?: string }) =>
-                      ["Physiotherapist", "MD", "Staff", "Receptionist"].includes(s.role || "")
-                    )
+                  {getClinicalStaff(staffList as any[])
                     .map((s: { id: string; name: string }) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.name}

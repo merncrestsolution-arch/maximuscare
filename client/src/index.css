@@ -6,43 +6,47 @@
    ============================================ */
 
 @theme inline {
-  /* Core palette - warm slate & sage */
-  --color-background: 40 20% 98%;           /* Warm off-white #FAFAF8 */
-  --color-foreground: 220 25% 12%;          /* Deep slate #1A2332 */
+  /* Core palette - warm slate & sage.
+     NOTE: Tailwind v4 uses these --color-* tokens directly as color values
+     (and wraps them in color-mix() for opacity modifiers like text-foreground/70).
+     They MUST be complete colors — a bare HSL triple is invalid CSS and makes
+     opacity-modified text collapse to transparent ("ghost text"). Keep hsl(). */
+  --color-background: hsl(40 20% 98%);           /* Warm off-white #FAFAF8 */
+  --color-foreground: hsl(220 25% 12%);          /* Deep slate #1A2332 */
   
-  --color-card: 0 0% 100%;                  /* Pure white cards */
-  --color-card-foreground: 220 25% 12%;
+  --color-card: hsl(0 0% 100%);                  /* Pure white cards */
+  --color-card-foreground: hsl(220 25% 12%);
   
-  --color-popover: 0 0% 100%;
-  --color-popover-foreground: 220 25% 12%;
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(220 25% 12%);
   
   /* Primary - trusted teal (healthcare) */
-  --color-primary: 174 58% 39%;             /* #2D9D8B - Calm teal */
-  --color-primary-foreground: 0 0% 100%;
+  --color-primary: hsl(174 58% 39%);             /* #2D9D8B - Calm teal */
+  --color-primary-foreground: hsl(0 0% 100%);
   
   /* Secondary - warm coral accent */
-  --color-secondary: 12 76% 61%;            /* #E07B5B - Warm coral */
-  --color-secondary-foreground: 0 0% 100%;
+  --color-secondary: hsl(12 76% 61%);            /* #E07B5B - Warm coral */
+  --color-secondary-foreground: hsl(0 0% 100%);
   
   /* Muted - soft sage gray */
-  --color-muted: 40 15% 92%;               /* #EBE9E4 */
-  --color-muted-foreground: 220 15% 45%;    /* #5C6B7A */
+  --color-muted: hsl(40 15% 92%);               /* #EBE9E4 */
+  --color-muted-foreground: hsl(220 15% 45%);    /* #5C6B7A */
   
   /* Accent - soft teal tint */
-  --color-accent: 174 40% 94%;              /* #E8F5F3 */
-  --color-accent-foreground: 174 58% 29%;
+  --color-accent: hsl(174 40% 94%);              /* #E8F5F3 */
+  --color-accent-foreground: hsl(174 58% 29%);
   
   /* Semantic */
-  --color-destructive: 0 72% 51%;           /* #E53935 */
-  --color-destructive-foreground: 0 0% 100%;
+  --color-destructive: hsl(0 72% 51%);           /* #E53935 */
+  --color-destructive-foreground: hsl(0 0% 100%);
   
-  --color-success: 152 69% 40%;             /* #22C55E */
-  --color-warning: 38 92% 50%;             /* #F59E0B */
+  --color-success: hsl(152 69% 40%);             /* #22C55E */
+  --color-warning: hsl(38 92% 50%);             /* #F59E0B */
 
   /* Borders & inputs */
-  --color-border: 40 15% 88%;               /* #E2DFD9 */
-  --color-input: 40 15% 88%;
-  --color-ring: 174 58% 39%;
+  --color-border: hsl(40 15% 88%);               /* #E2DFD9 */
+  --color-input: hsl(40 15% 88%);
+  --color-ring: hsl(174 58% 39%);
   
   /* Radius scale - softer, friendlier */
   --radius-sm: 0.5rem;
@@ -52,12 +56,12 @@
   --radius-2xl: 1.5rem;
   
   /* Sidebar */
-  --color-sidebar: 0 0% 100%;
-  --color-sidebar-foreground: 220 25% 12%;
-  --color-sidebar-accent: 174 40% 94%;
-  --color-sidebar-accent-foreground: 174 58% 29%;
-  --color-sidebar-border: 40 15% 90%;
-  --color-sidebar-ring: 174 58% 39%;
+  --color-sidebar: hsl(0 0% 100%);
+  --color-sidebar-foreground: hsl(220 25% 12%);
+  --color-sidebar-accent: hsl(174 40% 94%);
+  --color-sidebar-accent-foreground: hsl(174 58% 29%);
+  --color-sidebar-border: hsl(40 15% 90%);
+  --color-sidebar-ring: hsl(174 58% 39%);
   
   /* Component-specific */
   --button-outline: 40 15% 80%;
@@ -91,12 +95,23 @@
     overflow-x: hidden;
   }
 
-  /* iOS Safari zooms focused fields when font-size < 16px */
+  /* iOS Safari zooms focused fields when font-size < 16px. Force 16px on all
+     text-entry controls on mobile to prevent the jarring auto-zoom. */
   @media (max-width: 767.98px) {
     input[type="date"],
     input[type="time"],
     input[type="datetime-local"],
-    input[type="month"] {
+    input[type="month"],
+    input[type="text"],
+    input[type="search"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="number"],
+    input[type="password"],
+    input[type="url"],
+    input:not([type]),
+    textarea,
+    select {
       font-size: 1rem !important;
     }
   }
@@ -143,14 +158,14 @@
 /* Dark mode preparation — toggle via class on <html> */
 .dark {
   color-scheme: dark;
-  --color-background: 220 25% 8%;
-  --color-foreground: 40 20% 96%;
-  --color-card: 220 22% 12%;
-  --color-card-foreground: 40 20% 96%;
-  --color-muted: 220 18% 18%;
-  --color-muted-foreground: 220 10% 65%;
-  --color-border: 220 15% 22%;
-  --color-input: 220 15% 22%;
+  --color-background: hsl(220 25% 8%);
+  --color-foreground: hsl(40 20% 96%);
+  --color-card: hsl(220 22% 12%);
+  --color-card-foreground: hsl(40 20% 96%);
+  --color-muted: hsl(220 18% 18%);
+  --color-muted-foreground: hsl(220 10% 65%);
+  --color-border: hsl(220 15% 22%);
+  --color-input: hsl(220 15% 22%);
 }
 
 /* Sidebar + main content — prevent overlap / clipped KPI cards */

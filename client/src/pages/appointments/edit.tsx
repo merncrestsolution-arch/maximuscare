@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useAppointment, useUpdateAppointment, usePatients, useStaff } from "@/hooks/useData";
+import { useAppointment, useUpdateAppointment, usePatients, useTreatingStaff } from "@/hooks/useData";
+import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,11 +25,9 @@ export default function EditAppointment() {
   const { data: patients = [], isLoading: loadingPatients } = usePatients();
   const updateAppointment = useUpdateAppointment();
 
-  const { data: allStaff = [], isLoading: loadingStaff } = useStaff();
+  const { data: allStaff = [], isLoading: loadingStaff } = useTreatingStaff();
 
-  const treatingStaff = allStaff.filter(
-    (s: any) => s.role === "Physiotherapist" || s.role === "MD"
-  );
+  const treatingStaff = getClinicalStaff((allStaff as any[]) || []);
 
   const [formData, setFormData] = useState<{
     appointmentDate: string;
@@ -39,8 +38,10 @@ export default function EditAppointment() {
     notes: string;
   } | null>(null);
 
+  // Re-populate whenever the loaded appointment changes (keyed on id so a
+  // background refetch of the same record doesn't discard in-progress edits).
   useEffect(() => {
-    if (appointment && !formData) {
+    if (appointment) {
       setFormData({
         appointmentDate: appointment.appointmentDate,
         appointmentTime: appointment.appointmentTime,
@@ -50,7 +51,8 @@ export default function EditAppointment() {
         notes: appointment.notes || "",
       });
     }
-  }, [appointment]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointment?.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

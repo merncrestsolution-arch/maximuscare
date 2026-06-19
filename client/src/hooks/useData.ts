@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { patientApi, visitApi, attendanceApi, attendanceApiExtended, staffApi, reportsApi, inPatientApi, expenseApi, revenueApi, incentiveSettingsApi, appointmentApi, staffFinesApi, payrollApi, salaryApi, patientsApiExtended, visitPaymentsApi, homeVisitsApi, clinicSettingsApi, branchesApi, notificationsApi, tasksApi, reportsApiExtended, unwrapPaginatedList } from '@/lib/api';
+import { patientApi, visitApi, attendanceApi, attendanceApiExtended, staffApi, reportsApi, inPatientApi, expenseApi, revenueApi, incentiveSettingsApi, appointmentApi, staffFinesApi, payrollApi, salaryApi, patientsApiExtended, visitPaymentsApi, homeVisitsApi, clinicSettingsApi, branchesApi, notificationsApi, tasksApi, reportsApiExtended, auditApi, unwrapPaginatedList } from '@/lib/api';
 import { useAuth } from '@/context/auth-context';
+import { useBranch } from '@/context/branch-context';
 
 // Patient hooks
 export function usePatients(params?: {
@@ -172,6 +173,23 @@ export function useStaff(params?: { includeInactive?: boolean }) {
   });
 }
 
+/**
+ * Branch/organization-scoped clinical staff for "Treating Staff" / "Treating
+ * Physiotherapist" dropdowns (Add Visit, Add Session, Appointment). Unlike
+ * `useStaff` (which returns only [self] for non-management roles), this returns
+ * the full clinical roster for the active branch context so any clinician can
+ * pick the treating staff. Re-fetches automatically when the branch changes.
+ */
+export function useTreatingStaff() {
+  const { user } = useAuth();
+  const { selectedBranchId, selectedBranchName } = useBranch();
+  return useQuery({
+    queryKey: ['treating-staff', selectedBranchId, selectedBranchName],
+    queryFn: () => staffApi.treatingOptions(),
+    enabled: !!user,
+  });
+}
+
 export function useStaffMember(id: string) {
   return useQuery({
     queryKey: ['staff', id],
@@ -270,7 +288,10 @@ export function useInPatientSessionsForStaffRange(
   });
 }
 
-export function useAllInPatientSessionsInRange(params: { startDate: string; endDate: string }, enabled: boolean) {
+export function useAllInPatientSessionsInRange(
+  params: { startDate: string; endDate: string; branch?: string },
+  enabled: boolean
+) {
   return useQuery({
     queryKey: ['inpatients', 'sessions-all', params],
     queryFn: () => inPatientApi.getAllSessionsInDateRange(params),
@@ -676,6 +697,15 @@ export function useNotifications(opts?: { unreadOnly?: boolean; archived?: boole
   });
 }
 
+export function useAuditLogs(params?: { entityType?: string; limit?: number }, enabled = true) {
+  return useQuery({
+    queryKey: ['audit-logs', params],
+    queryFn: () => auditApi.getAll(params),
+    enabled,
+    refetchInterval: 30000,
+  });
+}
+
 export function useStaffDirectory(params?: Record<string, string | boolean>, enabled = true) {
   return useQuery({
     queryKey: ['staff-directory', params],
@@ -718,6 +748,18 @@ export function useDeleteNotification() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => notificationsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
+    },
+  });
+}
+
+export function useBroadcastNotification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { title: string; message: string; type?: string; branch?: string }) =>
+      notificationsApi.broadcast(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
       queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });

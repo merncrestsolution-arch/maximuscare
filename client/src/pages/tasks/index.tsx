@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/context/auth-context";
 import { useTasks, useCreateTask, useUpdateTask, useDeleteTask, useStaff, useTaskDashboard } from "@/hooks/useData";
-import { isManagementRole } from "@/lib/permissions";
+import { canManageTasks } from "@/lib/permissions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,7 +28,7 @@ const PRIORITY_CLASS: Record<string, string> = {
 function TasksContent() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const isMgmt = isManagementRole(user?.role);
+  const isMgmt = canManageTasks(user?.role);
   const { data: tasks = [], isLoading } = useTasks({ all: isMgmt });
   const { data: dash } = useTaskDashboard(isMgmt);
   const { data: staff = [] } = useStaff({ includeInactive: false });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canViewReports } from "@/lib/permissions";
+import { canViewSalaryReports } from "@/lib/permissions";
 import { useIncentiveReport } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
@@ -87,7 +87,7 @@ function IncentiveReportContent() {
 
 export default function IncentiveReportPage() {
   return (
-    <RoleProtectedRoute allowed={canViewReports}>
+    <RoleProtectedRoute allowed={canViewSalaryReports}>
       <IncentiveReportContent />
     </RoleProtectedRoute>
   );

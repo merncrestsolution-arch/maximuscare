@@ -168,6 +168,7 @@ export interface IStorage {
   }): Promise<{ data: Visit[]; total: number }>;
   getAttendancePaginated(filters: {
     staffId?: string;
+    staffIds?: string[];
     startDate?: string;
     endDate?: string;
     month?: string;
@@ -268,10 +269,10 @@ export interface IStorage {
   createExpense(data: InsertExpense): Promise<Expense>;
   updateExpense(id: string, data: UpdateExpense): Promise<Expense | undefined>;
   deleteExpense(id: string, deletedBy?: string): Promise<boolean>;
-  getExpenseTotal(startDate?: string, endDate?: string): Promise<number>;
+  getExpenseTotal(startDate?: string, endDate?: string, branchName?: string | null): Promise<number>;
 
   // Revenue calculation methods
-  getTotalIncome(startDate?: string, endDate?: string): Promise<number>;
+  getTotalIncome(startDate?: string, endDate?: string, branchName?: string | null): Promise<number>;
 
   // Incentive Settings methods
   getIncentiveSettings(): Promise<IncentiveSettings | undefined>;
@@ -312,6 +313,7 @@ export interface IStorage {
   seedEnterpriseBranches(): Promise<void>;
   getUserBranchAccess(staffId: string): Promise<{ branchId: string; isDefault: boolean }[]>;
   getUserBranchPermissions(staffId: string): Promise<{ branchId: string }[]>;
+  getStaffIdsWithBranchPermission(branchId: string): Promise<string[]>;
   setUserBranchPermissions(staffId: string, branchIds: string[]): Promise<void>;
   syncStaffBranchAccess(staffId: string, branchIds: string[]): Promise<void>;
   setUserDefaultBranch(staffId: string, branchId: string): Promise<void>;
@@ -563,6 +565,7 @@ export class DatabaseStorage implements IStorage {
 
   async getAttendancePaginated(filters: {
     staffId?: string;
+    staffIds?: string[];
     startDate?: string;
     endDate?: string;
     month?: string;
@@ -572,6 +575,11 @@ export class DatabaseStorage implements IStorage {
   }): Promise<{ data: Attendance[]; total: number }> {
     const conditions: SQL[] = [isNull(attendance.deletedAt)];
     if (filters.staffId) conditions.push(eq(attendance.staffId, filters.staffId));
+    // Branch scoping is done via the staff IDs that belong to the branch, because
+    // legacy attendance rows may not have the branch column populated.
+    if (filters.staffIds) {
+      conditions.push(filters.staffIds.length ? inArray(attendance.staffId, filters.staffIds) : sql`1 = 0`);
+    }
     if (filters.branch) conditions.push(eq(attendance.branch, filters.branch));
     if (filters.month) conditions.push(like(attendance.date, `${filters.month}%`));
     if (filters.startDate && filters.endDate) {
@@ -1158,7 +1166,25 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
-  async getExpenseTotal(startDate?: string, endDate?: string): Promise<number> {
+  async getExpenseTotal(startDate?: string, endDate?: string, branchName?: string | null): Promise<number> {
+    // When a branch is selected we filter in JS via normalizeBranchName so that
+    // legacy branch aliases (e.g. "Colombo" -> "Dehiwala") are matched correctly,
+    // which a raw SQL equality on the stored text column would miss.
+    if (branchName) {
+      const { normalizeBranchName } = await import("@shared/branches");
+      const target = normalizeBranchName(branchName).toLowerCase();
+      const rows = await db
+        .select()
+        .from(expenses)
+        .where(
+          startDate && endDate
+            ? and(isNull(expenses.deletedAt), gte(expenses.expenseDate, startDate), lte(expenses.expenseDate, endDate))
+            : isNull(expenses.deletedAt)
+        );
+      return rows
+        .filter((e: any) => normalizeBranchName(e.branch).toLowerCase() === target)
+        .reduce((sum: number, e: any) => sum + (parseFloat(e.amount) || 0), 0);
+    }
     const conditions = [isNull(expenses.deletedAt)];
     if (startDate && endDate) {
       conditions.push(gte(expenses.expenseDate, startDate), lte(expenses.expenseDate, endDate));
@@ -1171,7 +1197,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Revenue calculation methods
-  async getTotalIncome(startDate?: string, endDate?: string): Promise<number> {
+  async getTotalIncome(startDate?: string, endDate?: string, branchName?: string | null): Promise<number> {
+    if (branchName) {
+      return this.getBranchScopedIncome(startDate, endDate, branchName);
+    }
     let visitsTotal = 0;
     let inPatientPaymentsTotal = 0;
 
@@ -1242,6 +1271,55 @@ export class DatabaseStorage implements IStorage {
     }
 
     return visitsTotal + inPatientPaymentsTotal + dischargeTotal;
+  }
+
+  /**
+   * Branch-scoped income. Outpatient (visits) and expenses carry a branch on the
+   * record, so they are filtered by normalized branch name. In-patient payments /
+   * discharges are attributed via their admission's branch; admission branch
+   * attribution is populated separately (see Part 16 inpatient branch migration),
+   * so admissions without a branch are excluded from a single-branch total.
+   */
+  private async getBranchScopedIncome(
+    startDate: string | undefined,
+    endDate: string | undefined,
+    branchName: string
+  ): Promise<number> {
+    const { normalizeBranchName } = await import("@shared/branches");
+    const target = normalizeBranchName(branchName).toLowerCase();
+    const inRange = (d?: string | null) =>
+      !startDate || !endDate || (!!d && d >= startDate && d <= endDate);
+
+    const allVisits = startDate && endDate
+      ? await this.getVisitsByDateRange(startDate, endDate)
+      : await this.getAllVisits();
+    const visitsTotal = allVisits
+      .filter((v: any) => !v.deletedAt && normalizeBranchName(v.branch).toLowerCase() === target)
+      .reduce((sum: number, v: any) => {
+        const status = String(v.paymentStatus ?? "").toLowerCase();
+        if (status === "paid") return sum + (parseFloat(v.paymentAmount) || 0);
+        if (status === "partially paid") return sum + (parseFloat(v.amountPaid) || 0);
+        return sum;
+      }, 0);
+
+    const admissions = await this.getAllInPatientAdmissions();
+    const branchAdmissionIds = admissions
+      .filter((a: any) => a.branch && normalizeBranchName(a.branch).toLowerCase() === target)
+      .map((a: any) => a.id);
+
+    let inPatientTotal = 0;
+    for (const admissionId of branchAdmissionIds) {
+      const payments = await this.getInPatientPaymentsByAdmission(admissionId);
+      inPatientTotal += payments
+        .filter((p: any) => inRange(p.paymentDate))
+        .reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0);
+      const discharge = await this.getInPatientDischargeByAdmission(admissionId);
+      if (discharge && inRange((discharge as any).dischargeDate)) {
+        inPatientTotal += parseFloat((discharge as any).amountPaid) || 0;
+      }
+    }
+
+    return visitsTotal + inPatientTotal;
   }
 
   async getIncentiveSettings(): Promise<IncentiveSettings | undefined> {
@@ -1674,6 +1752,14 @@ export class DatabaseStorage implements IStorage {
       .from(userBranchPermissions)
       .where(eq(userBranchPermissions.userId, staffId));
     return rows;
+  }
+
+  async getStaffIdsWithBranchPermission(branchId: string): Promise<string[]> {
+    const rows = await db
+      .select({ userId: userBranchPermissions.userId })
+      .from(userBranchPermissions)
+      .where(eq(userBranchPermissions.branchId, branchId));
+    return rows.map((r: { userId: string }) => r.userId);
   }
 
   async setUserBranchPermissions(staffId: string, branchIds: string[]): Promise<void> {

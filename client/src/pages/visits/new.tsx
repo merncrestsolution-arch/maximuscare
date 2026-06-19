@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/context/auth-context";
+import { useBranch } from "@/context/branch-context";
 import { usePatients, useCreateVisit, useVisits } from "@/hooks/useData";
-import { useStaff } from "@/hooks/useData";
+import { useTreatingStaff } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BranchSelectField } from "@/components/branch/branch-select-field";
+import { TreatingStaffCombobox, getClinicalStaff } from "@/components/staff/treating-staff-combobox";
 
 export default function NewVisit() {
   const [location, setLocation] = useLocation();
@@ -21,8 +23,9 @@ export default function NewVisit() {
   const preselectedPatientId = searchParams.get("patientId");
 
   const { user } = useAuth();
+  const { selectedBranchName } = useBranch();
   const { data: patients = [], isLoading: loadingPatients, error: patientsError } = usePatients();
-  const { data: staff = [], isLoading: loadingStaff } = useStaff();
+  const { data: staff = [], isLoading: loadingStaff } = useTreatingStaff();
   const createVisit = useCreateVisit();
   const { toast } = useToast();
 
@@ -36,7 +39,7 @@ export default function NewVisit() {
     visitDate: format(new Date(), "yyyy-MM-dd"),
     startTime: format(new Date(), "HH:mm"),
     endTime: format(new Date(new Date().setHours(new Date().getHours() + 1)), "HH:mm"),
-    branch: user?.branch === "Both" ? "" : (user?.branch || ""),
+    branch: selectedBranchName ?? (user?.branch === "Both" ? "" : (user?.branch || "")),
     visitType: "Clinic",
     status: "Follow-up",
     paymentAmount: "0",
@@ -48,6 +51,16 @@ export default function NewVisit() {
   });
 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  // Keep the branch field aligned with the active branch context until the user
+  // changes it manually (the active branch can load after this form mounts).
+  const branchTouchedRef = useRef(false);
+  useEffect(() => {
+    if (!branchTouchedRef.current && selectedBranchName) {
+      setFormData((prev) =>
+        prev.branch === selectedBranchName ? prev : { ...prev, branch: selectedBranchName }
+      );
+    }
+  }, [selectedBranchName]);
   const { data: patientVisits = [] } = useVisits({ patientId: formData.patientId || undefined });
 
   useEffect(() => {
@@ -55,14 +68,18 @@ export default function NewVisit() {
     setFormData((prev) => ({ ...prev, sessionNumber: String(patientVisits.length + 1) }));
   }, [formData.patientId, patientVisits.length]);
 
+  const clinicalStaff = useMemo(() => getClinicalStaff(staff as any[]), [staff]);
+
   useEffect(() => {
     if (!staff.length || !user) return;
     setFormData((prev) => {
       if (staff.some((s) => s.id === prev.treatingStaffId)) return prev;
-      const fallback = staff.some((s) => s.id === user.id) ? user.id : staff[0].id;
+      // Prefer the current user if they're a clinician, else the first clinical staff.
+      const userIsClinical = clinicalStaff.some((s) => s.id === user.id);
+      const fallback = userIsClinical ? user.id : clinicalStaff[0]?.id ?? staff[0].id;
       return { ...prev, treatingStaffId: fallback };
     });
-  }, [staff, user]);
+  }, [staff, user, clinicalStaff]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -186,19 +203,14 @@ export default function NewVisit() {
 
             <div className="space-y-3">
               <Label className="text-base font-semibold">Treating Staff</Label>
-              <Select 
-                value={formData.treatingStaffId} 
-                onValueChange={(v) => setFormData({...formData, treatingStaffId: v})}
-              >
-                <SelectTrigger className="h-14 text-base bg-card border-input">
-                  <SelectValue placeholder="Select Staff" />
-                </SelectTrigger>
-                <SelectContent>
-                  {staff.map(s => (
-                    <SelectItem key={s.id} value={s.id} className="py-3 text-base">{s.name} ({s.role})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <TreatingStaffCombobox
+                staff={staff as any[]}
+                value={formData.treatingStaffId}
+                onChange={(v) => setFormData({ ...formData, treatingStaffId: v })}
+                placeholder="Select treating staff"
+                className="h-14 text-base bg-card border-input"
+                data-testid="select-treating-staff"
+              />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -329,7 +341,10 @@ export default function NewVisit() {
                 <BranchSelectField
                   className="h-14 text-base bg-card"
                   value={formData.branch}
-                  onChange={(v) => setFormData({ ...formData, branch: v as typeof formData.branch })}
+                  onChange={(v) => {
+                    branchTouchedRef.current = true;
+                    setFormData({ ...formData, branch: v as typeof formData.branch });
+                  }}
                 />
               </div>
             </div>

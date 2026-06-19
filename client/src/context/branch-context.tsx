@@ -79,6 +79,14 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
         void queryClient.invalidateQueries({ queryKey: ["nexus-overview"] });
         void queryClient.invalidateQueries({ queryKey: ["staff"] });
         void queryClient.invalidateQueries({ queryKey: ["staff-directory"] });
+        void queryClient.invalidateQueries({ queryKey: ["treating-staff"] });
+        void queryClient.invalidateQueries({ queryKey: ["attendance"] });
+        void queryClient.invalidateQueries({ queryKey: ["attendance-dashboard"] });
+        void queryClient.invalidateQueries({ queryKey: ["revenue-summary"] });
+        void queryClient.invalidateQueries({ queryKey: ["revenue-report"] });
+        void queryClient.invalidateQueries({ queryKey: ["expenses"] });
+        void queryClient.invalidateQueries({ queryKey: ["appointments"] });
+        void queryClient.invalidateQueries({ queryKey: ["inpatients"] });
       } finally {
         setOptimisticBranchId(null);
       }

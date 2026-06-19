@@ -18,14 +18,15 @@ import {
 } from "../middleware/secureApi";
 import { attachBranchContext, requireBranchContext, getBranchFilter } from "../middleware/branchContext";
 import { assertOverviewAccess } from "../services/branchService";
-import { computeOverviewKpis, computeMaximusComparison, computeNexusComparison } from "../services/overviewService";
+import { computeOverviewKpis, computeMaximusComparison, computeNexusComparison, computeOverviewExpenseBreakdown } from "../services/overviewService";
 import { successResponse, errorResponse } from "../response";
-import { isManagementRole } from "../permissions";
+import { isManagementRole, isOperationalLead } from "../permissions";
 import { computePayrollReport, persistPayrollSnapshotRecords } from "../services/payrollService";
 import { logAudit } from "../services/auditService";
 import { handleCreateTask } from "./hrm";
 import { normalizeStatus } from "../services/taskService";
 import { computeDashboardKpis, computeBranchDashboardStats, assignPatientsToFirstVisitTherapist } from "../services/dashboardService";
+import { broadcastToActiveStaff } from "../services/notificationService";
 import {
   computeRevenueReport,
   computeIncentiveReport,
@@ -259,6 +260,28 @@ export function registerExtendedRoutes(app: Express) {
     }
   });
 
+  app.post("/api/notifications/broadcast", requireAuth, requireNotificationsManage, async (req, res) => {
+    try {
+      const { title, message, type, branch } = req.body ?? {};
+      if (!title || !message) {
+        return errorResponse(res, "Title and message are required", 400);
+      }
+      let allowed: Set<string> | undefined;
+      if (branch && branch !== "all") {
+        const active = await storage.getActiveStaff();
+        allowed = new Set(active.filter((s) => s.branch === branch).map((s) => s.id));
+      }
+      const count = await broadcastToActiveStaff(
+        storage,
+        { title: String(title), message: String(message), type: type || "announcement" } as any,
+        allowed ? (id: string) => allowed!.has(id) : undefined,
+      );
+      return successResponse(res, { count }, "Notification sent", 201);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
   app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;
@@ -286,7 +309,7 @@ export function registerExtendedRoutes(app: Express) {
       const user = (req as any).user;
       const status = req.query.status as string | undefined;
       let list;
-      if (isManagementRole(user.role) && req.query.all === "true") {
+      if ((isManagementRole(user.role) || isOperationalLead(user.role)) && req.query.all === "true") {
         list = await storage.getAllTasks(status);
       } else {
         list = await storage.getTasksForStaff(user.staffId, status);
@@ -388,8 +411,10 @@ export function registerExtendedRoutes(app: Express) {
       if (!startDate || !endDate) {
         return errorResponse(res, "startDate and endDate required", 400);
       }
+      // Managers/branch managers (operational leads) see branch-wide KPIs, not
+      // just their own records — scoping to the selected branch handles isolation.
       const staffFilter =
-        isManagementRole(user.role) ? undefined : [user.staffId];
+        isManagementRole(user.role) || isOperationalLead(user.role) ? undefined : [user.staffId];
       const { cacheGetOrSet } = await import("../services/cacheService");
       const branchFilter = (req as any).branchContext?.selectedBranchName;
       const cacheKey = `dashboard:${startDate}:${endDate}:${user.staffId}:${branchFilter ?? "none"}`;
@@ -416,7 +441,8 @@ export function registerExtendedRoutes(app: Express) {
       }
       const kpis = await computeOverviewKpis(storage, startDate, endDate, "maximus");
       const comparison = await computeMaximusComparison(storage, startDate, endDate);
-      return successResponse(res, { startDate, endDate, kpis, comparison });
+      const expenseBreakdown = await computeOverviewExpenseBreakdown(storage, startDate, endDate, "maximus");
+      return successResponse(res, { startDate, endDate, kpis, comparison, expenseBreakdown });
     } catch (error: any) {
       return errorResponse(res, error.message, error.message?.includes("Unauthorized") ? 403 : 500);
     }
@@ -436,7 +462,8 @@ export function registerExtendedRoutes(app: Express) {
       }
       const kpis = await computeOverviewKpis(storage, startDate, endDate, "nexus");
       const comparison = await computeNexusComparison(storage, startDate, endDate);
-      return successResponse(res, { startDate, endDate, kpis, comparison });
+      const expenseBreakdown = await computeOverviewExpenseBreakdown(storage, startDate, endDate, "nexus");
+      return successResponse(res, { startDate, endDate, kpis, comparison, expenseBreakdown });
     } catch (error: any) {
       return errorResponse(res, error.message, error.message?.includes("Unauthorized") ? 403 : 500);
     }

@@ -4,6 +4,7 @@ import { LayoutDashboard, Users, CalendarCheck, CalendarDays, Plus, UserCircle, 
 import { useAuth } from "@/context/auth-context";
 import { QuickAddSheet } from "@/components/layout/quick-add-sheet";
 import { useNavigateHome } from "@/hooks/use-navigate-home";
+import { canViewStaffList } from "@/lib/permissions";
 
 const navIconProps = { className: "h-5 w-5 shrink-0", strokeWidth: 2.25 as const };
 
@@ -69,8 +70,8 @@ export default function BottomNav() {
 
   if (isEditOrNew) return null;
 
-  const staffHref = ["Admin", "MD"].includes(user.role) ? "/staff" : "/profile";
-  const staffLabel = "Staff";
+  const staffHref = canViewStaffList(user.role) ? "/staff" : "/profile";
+  const staffLabel = canViewStaffList(user.role) ? "Staff" : "Profile";
   const staffActive = isActive("/staff") || isActive("/profile");
 
   return (
@@ -120,7 +121,7 @@ export default function BottomNav() {
 
           {user.role !== "Receptionist" && (
             <NavItem
-              href={["Admin", "MD"].includes(user.role) ? "/reports" : "/salary"}
+              href={["Physiotherapist", "Staff"].includes(user.role) ? "/salary" : "/reports"}
               active={
                 location.startsWith("/reports") ||
                 location.startsWith("/salary") ||

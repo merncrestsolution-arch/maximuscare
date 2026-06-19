@@ -12,6 +12,7 @@ import { Link } from "wouter";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
+import { canViewStaffList, canManageStaff } from "@/lib/permissions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,7 +57,8 @@ export default function StaffListPage() {
     return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
   };
 
-  if (!user || !['Admin', 'MD'].includes(user.role)) return <div className="p-4">Unauthorized</div>;
+  if (!user || !canViewStaffList(user.role)) return <div className="p-4">Unauthorized</div>;
+  const canEditStaff = canManageStaff(user.role);
 
   if (isLoading) {
     return (
@@ -145,12 +147,14 @@ export default function StaffListPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Link href="/staff/new" className="shrink-0">
-          <Button className="w-full sm:w-auto h-11 gap-2 shadow-sm" data-testid="button-add-staff">
-            <UserPlus className="h-5 w-5" />
-            Add Staff
-          </Button>
-        </Link>
+        {canEditStaff && (
+          <Link href="/staff/new" className="shrink-0">
+            <Button className="w-full sm:w-auto h-11 gap-2 shadow-sm" data-testid="button-add-staff">
+              <UserPlus className="h-5 w-5" />
+              Add Staff
+            </Button>
+          </Link>
+        )}
       </div>
 
       <div className="space-y-3 pb-24">
@@ -185,7 +189,7 @@ export default function StaffListPage() {
                       </>
                     )}
                   </div>
-                  {(formatJoinDate((member as any).joinDate || (member as any).createdAt) && ['Admin', 'MD'].includes(user.role)) && (
+                  {(formatJoinDate((member as any).joinDate || (member as any).createdAt) && canViewStaffList(user.role)) && (
                     <div className="text-xs text-muted-foreground mt-1" data-testid={`text-staff-join-date-${member.id}`}>
                       Joined: {formatJoinDate((member as any).joinDate || (member as any).createdAt)}
                     </div>
@@ -193,30 +197,32 @@ export default function StaffListPage() {
                 </div>
               </Link>
               
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setLocation(`/staff/${member.id}/edit`)}>
-                    Edit Details
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => toggleActive(member, !Boolean(member.isActive ?? 1))}>
-                    {Boolean(member.isActive ?? 1) ? "Deactivate" : "Activate"}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-destructive focus:text-destructive"
-                    disabled={member.id === user?.id}
-                    onClick={() => setDeleteId(member.id)}
-                    data-testid={`menu-delete-staff-${member.id}`}
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {canEditStaff ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setLocation(`/staff/${member.id}/edit`)}>
+                      Edit Details
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => toggleActive(member, !Boolean(member.isActive ?? 1))}>
+                      {Boolean(member.isActive ?? 1) ? "Deactivate" : "Activate"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      disabled={member.id === user?.id}
+                      onClick={() => setDeleteId(member.id)}
+                      data-testid={`menu-delete-staff-${member.id}`}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
             </CardContent>
           </Card>
         ))}

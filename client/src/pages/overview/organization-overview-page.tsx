@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from "react";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { format, startOfMonth, endOfMonth } from "date-fns";
-import { Building2, Loader2, Sparkles } from "lucide-react";
+import { Building2, Loader2, Sparkles, Receipt } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { reportsApiExtended } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,6 +56,102 @@ function chartTooltipFormatter(value: number, name: string) {
     return formatCurrency(value);
   }
   return value.toLocaleString();
+}
+
+type ExpenseCategory = { category: string; amount: number };
+
+// Distinct, accessible palette cycled across expense categories.
+const EXPENSE_COLORS = [
+  "#ef4444", "#f59e0b", "#8b5cf6", "#0ea5e9", "#10b981",
+  "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16",
+];
+
+function ExpenseBreakdownCard({
+  data,
+  total,
+}: {
+  data: ExpenseCategory[];
+  total: number;
+}) {
+  const chartData = useMemo(
+    () => data.filter((d) => d.amount > 0).map((d, i) => ({ ...d, color: EXPENSE_COLORS[i % EXPENSE_COLORS.length] })),
+    [data]
+  );
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Receipt className="h-5 w-5 text-[#ef4444]" />
+          Expense Breakdown by Category
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {chartData.length === 0 ? (
+          <p className="py-12 text-center text-sm text-muted-foreground">
+            No expenses recorded for this period.
+          </p>
+        ) : (
+          <div className="grid items-center gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
+            <div className="relative">
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie
+                    data={chartData}
+                    dataKey="amount"
+                    nameKey="category"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={70}
+                    outerRadius={110}
+                    paddingAngle={2}
+                    stroke="none"
+                  >
+                    {chartData.map((entry) => (
+                      <Cell key={entry.category} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: number, _name, item: any) => {
+                      const pct = total > 0 ? ((value / total) * 100).toFixed(1) : "0";
+                      return [`${formatCurrency(value)} (${pct}%)`, item?.payload?.category];
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total</span>
+                <span className="text-lg font-bold text-foreground">{formatCurrency(total)}</span>
+              </div>
+            </div>
+
+            <ul className="space-y-2.5">
+              {chartData.map((entry) => {
+                const pct = total > 0 ? (entry.amount / total) * 100 : 0;
+                return (
+                  <li key={entry.category} className="flex items-center gap-3">
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full"
+                      style={{ backgroundColor: entry.color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                      {entry.category}
+                    </span>
+                    <span className="text-sm font-semibold text-foreground">
+                      {formatCurrency(entry.amount)}
+                    </span>
+                    <span className="w-12 text-right text-xs text-muted-foreground">
+                      {pct.toFixed(1)}%
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 const ORG_CONFIG = {
@@ -116,6 +212,8 @@ export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
 
   const kpis = data?.kpis;
   const comparison = data?.comparison ?? [];
+  const expenseBreakdown: ExpenseCategory[] = data?.expenseBreakdown?.byCategory ?? [];
+  const expenseTotal: number = data?.expenseBreakdown?.total ?? kpis?.totalExpenses ?? 0;
   const chartData = buildChartData(org, comparison, kpis);
   const incomeColor = isMaximus ? "#2563eb" : "#f59e0b";
   const patientsColor = isMaximus ? "#9333ea" : "#d97706";
@@ -207,6 +305,8 @@ export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
               </ResponsiveContainer>
             </CardContent>
           </Card>
+
+          <ExpenseBreakdownCard data={expenseBreakdown} total={expenseTotal} />
         </div>
       )}
     </PageShell>

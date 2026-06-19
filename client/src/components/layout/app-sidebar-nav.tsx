@@ -16,6 +16,7 @@ import {
   Banknote,
   LayoutGrid,
   Sparkles,
+  ScrollText,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { useBranch } from "@/context/branch-context";
@@ -23,6 +24,8 @@ import {
   canAccessMaximusOverview,
   canAccessNexusOverview,
   canViewReports,
+  canViewAuditLogs,
+  canViewStaffList,
 } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { useNavigateHome } from "@/hooks/use-navigate-home";
@@ -62,7 +65,7 @@ export function AppSidebarNav() {
   };
 
   const isActive = (path: string) => location === path;
-  const staffHref = ["Admin", "MD"].includes(user.role) ? "/staff" : "/profile";
+  const staffHref = canViewStaffList(user.role) ? "/staff" : "/profile";
   const staffActive = isActive("/staff") || isActive("/profile");
   const inBranchMode = !!selectedBranchId && !selectedContext;
   const showOperationalNav = inBranchMode;
@@ -233,6 +236,16 @@ export function AppSidebarNav() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )}
+                  {canViewAuditLogs(user.role) && (
+                    <SidebarMenuItem>
+                      <SidebarMenuButton asChild isActive={isActive("/audit")} className="min-h-11">
+                        <Link href="/audit" onClick={closeMobile}>
+                          <ScrollText className="h-5 w-5" />
+                          <span>Activity Log</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )}
                   {["Admin", "MD"].includes(user.role) && (
                     <SidebarMenuItem>
                       <SidebarMenuButton asChild isActive={isActive("/settings")} className="min-h-11">
@@ -247,7 +260,7 @@ export function AppSidebarNav() {
                     <SidebarMenuButton asChild isActive={staffActive} className="min-h-11">
                       <Link href={staffHref} onClick={closeMobile}>
                         <UserCircle className="h-5 w-5" />
-                        <span>{["Admin", "MD"].includes(user.role) ? "Staff" : "Profile"}</span>
+                        <span>{canViewStaffList(user.role) ? "Staff" : "Profile"}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

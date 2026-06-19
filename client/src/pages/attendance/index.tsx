@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { format } from "date-fns";
-import { CheckCircle2, XCircle, Clock, Loader2, UserPlus, Trash2, Pencil, Calendar as CalendarIcon } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Loader2, UserPlus, Trash2, Pencil, Calendar as CalendarIcon, Search } from "lucide-react";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { MonthlyAttendanceSummary } from "@/components/attendance/monthly-summary";
@@ -18,6 +18,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
+import { canManageAttendance } from "@/lib/permissions";
 
 function isoToDatetimeLocal(iso: string | undefined): string {
   if (!iso) return "";
@@ -26,23 +27,84 @@ function isoToDatetimeLocal(iso: string | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Approx row height (px) used to cap the scroll area at ~15 visible rows. */
+const ATTENDANCE_ROW_HEIGHT = 44;
+const ATTENDANCE_MAX_VISIBLE_ROWS = 15;
+
 function AttendanceReportTable({
   records,
   title,
+  scrollable,
+  searchable,
+  showActions,
+  isManagement,
+  onEdit,
+  onDelete,
 }: {
   records: Array<any>;
   title: string;
+  scrollable?: boolean;
+  searchable?: boolean;
+  showActions?: boolean;
+  isManagement?: boolean;
+  onEdit?: (record: any) => void;
+  onDelete?: (id: string) => void;
 }) {
+  const [search, setSearch] = useState("");
+
+  const filteredRecords = useMemo(() => {
+    if (!searchable) return records;
+    const q = search.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter((r) => {
+      const name = String(r.staffName ?? "").toLowerCase();
+      const branch = String(r.branch ?? "").toLowerCase();
+      const status = String(r.status ?? "").toLowerCase();
+      const date = format(new Date(r.date), "dd MMM yyyy").toLowerCase();
+      return name.includes(q) || branch.includes(q) || status.includes(q) || date.includes(q);
+    });
+  }, [records, search, searchable]);
+
+  const canActOnRows = Boolean(showActions && isManagement && onEdit && onDelete);
+
+  // Cap the scroll area so roughly 15 rows are visible, then scroll for the rest.
+  const cappedScroll = scrollable || (filteredRecords.length > ATTENDANCE_MAX_VISIBLE_ROWS);
+  const maxHeightStyle = cappedScroll
+    ? { maxHeight: `${ATTENDANCE_ROW_HEIGHT * (ATTENDANCE_MAX_VISIBLE_ROWS + 1)}px` }
+    : undefined;
+
+  const headerCols = canActOnRows ? "grid-cols-7" : "grid-cols-6";
+  const rowCols = canActOnRows ? "grid-cols-7" : "grid-cols-6";
+
   return (
     <div className="space-y-3">
-      <div className="text-sm font-semibold text-foreground">{title}</div>
-      {records.length === 0 ? (
-        <div className="text-sm text-muted-foreground">No records found for this report.</div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        {searchable && (
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search staff, status, date…"
+              className="h-9 pl-8"
+              data-testid="input-attendance-search"
+            />
+          </div>
+        )}
+      </div>
+      {filteredRecords.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          {searchable && search.trim() ? "No matching records." : "No records found for this report."}
+        </div>
       ) : (
         <>
           {/* Mobile: card layout */}
-          <div className="space-y-3 md:hidden">
-            {records.map((r) => (
+          <div
+            className={`space-y-3 md:hidden ${cappedScroll ? "overflow-y-auto overscroll-contain pr-1" : ""}`}
+            style={cappedScroll ? { maxHeight: "26rem" } : undefined}
+          >
+            {filteredRecords.map((r) => (
               <div key={r.id} className="rounded-xl border border-border/60 bg-card p-4 shadow-sm space-y-2">
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -53,28 +115,45 @@ function AttendanceReportTable({
                     {r.status}
                   </span>
                 </div>
+                {r.role && <div className="text-xs text-muted-foreground">Role: {r.role}</div>}
                 <div className="text-sm text-muted-foreground">
-                  {r.checkInTime ? format(new Date(r.checkInTime), "hh:mm a") : "—"}
-                  {r.checkOutTime ? ` → ${format(new Date(r.checkOutTime), "hh:mm a")}` : ""}
+                  In: {r.checkInTime ? format(new Date(r.checkInTime), "hh:mm a") : "—"}
+                  {r.checkOutTime ? ` · Out: ${format(new Date(r.checkOutTime), "hh:mm a")}` : ""}
                 </div>
                 {r.branch && <div className="text-xs text-muted-foreground">Branch: {r.branch}</div>}
                 <div className="text-sm">OT: <strong>{Number(r.overtimeHours || 0).toFixed(1)}h</strong></div>
+                {canActOnRows && (
+                  <div className="flex justify-end gap-1 border-t pt-2">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit!(r)} data-testid={`button-edit-report-attendance-${r.id}`}>
+                      <Pencil className="h-4 w-4 mr-1" /> Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete!(r.id)} data-testid={`button-delete-report-attendance-${r.id}`}>
+                      <Trash2 className="h-4 w-4 mr-1" /> Delete
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
           {/* Desktop: table */}
-          <div className="hidden md:block rounded-lg border border-border/60 overflow-x-auto">
-          <div className="grid grid-cols-5 gap-2 bg-muted/20 px-3 py-2 text-xs font-semibold text-muted-foreground uppercase min-w-[640px]">
+          <div
+            className="hidden md:block rounded-lg border border-border/60 overflow-x-auto overflow-y-auto overscroll-contain"
+            style={maxHeightStyle}
+          >
+          <div className={`grid ${headerCols} gap-2 px-3 py-2 text-xs font-semibold text-muted-foreground uppercase min-w-[760px] sticky top-0 z-10 bg-muted shadow-sm`}>
             <div>Date</div>
             <div>Staff</div>
+            <div>Role</div>
             <div>Status</div>
             <div>Check In/Out</div>
             <div className="text-right">OT</div>
+            {canActOnRows && <div className="text-right">Actions</div>}
           </div>
-          {records.map((r) => (
-            <div key={r.id} className="grid grid-cols-5 gap-2 px-3 py-2.5 text-sm border-t border-border/40 min-w-[640px]">
+          {filteredRecords.map((r) => (
+            <div key={r.id} className={`grid ${rowCols} gap-2 px-3 py-2.5 text-sm border-t border-border/40 min-w-[760px] items-center`}>
               <div>{format(new Date(r.date), "dd MMM yyyy")}</div>
               <div className="truncate">{r.staffName}</div>
+              <div className="truncate text-xs text-muted-foreground">{r.role || "—"}</div>
               <div className={r.status === "Present" ? "text-emerald-700 font-medium" : "text-red-700 font-medium"}>
                 {r.status}
               </div>
@@ -83,9 +162,113 @@ function AttendanceReportTable({
                 {r.checkOutTime ? ` / ${format(new Date(r.checkOutTime), "hh:mm a")}` : ""}
               </div>
               <div className="text-right">{Number(r.overtimeHours || 0).toFixed(1)}</div>
+              {canActOnRows && (
+                <div className="flex justify-end gap-1">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit!(r)} data-testid={`button-edit-report-attendance-${r.id}`}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700" onClick={() => onDelete!(r.id)} data-testid={`button-delete-report-attendance-${r.id}`}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
           </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const ATTENDANCE_PAGE_SIZE = 50;
+
+function moduleFormatOt(val: any): number | null {
+  const num = Number(val);
+  return Number.isFinite(num) ? num : null;
+}
+
+/**
+ * History list with client-side pagination so very large attendance datasets
+ * (team history / intern history) render smoothly without breaking layout.
+ */
+function PaginatedAttendanceList({
+  records,
+  showActions,
+  isManagement,
+  onEdit,
+  onDelete,
+}: {
+  records: Array<any>;
+  showActions?: boolean;
+  isManagement: boolean;
+  onEdit: (record: any) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [visible, setVisible] = useState(ATTENDANCE_PAGE_SIZE);
+  const shown = records.slice(0, visible);
+  const remaining = records.length - visible;
+
+  return (
+    <div className="space-y-3 pt-4">
+      {records.length === 0 ? (
+        <div className="text-center text-muted-foreground py-8">No records found.</div>
+      ) : (
+        <>
+          {shown.map((record) => (
+            <Card key={record.id} data-testid={`card-attendance-${record.id}`}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm text-muted-foreground">{format(new Date(record.date), 'EEE, dd MMM yyyy')}</div>
+                    <div className="font-semibold text-base mt-0.5">{record.staffName}</div>
+                    {record.checkInTime && (
+                      <div className="text-xs text-muted-foreground mt-1 flex flex-col gap-1">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          <span>
+                            In: {format(new Date(record.checkInTime), 'hh:mm a')}
+                            {record.checkOutTime && ` | Out: ${format(new Date(record.checkOutTime), 'hh:mm a')}`}
+                          </span>
+                        </div>
+                        {moduleFormatOt(record.overtimeHours) !== null && (
+                          <div className="text-xs text-muted-foreground" data-testid={`text-attendance-ot-${record.id}`}>
+                            OT: {moduleFormatOt(record.overtimeHours)} hours
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className={`px-3 py-1.5 rounded-full text-sm font-semibold flex items-center gap-1.5 ${record.status === 'Present' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                      {record.status === 'Present' ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                      {record.status}
+                    </div>
+                  </div>
+                </div>
+                {showActions && isManagement && (
+                  <div className="flex justify-end flex-wrap gap-1 mt-2 border-t pt-2">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(record)} data-testid={`button-edit-attendance-${record.id}`}>
+                      <Pencil className="h-4 w-4 mr-1" /> Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(record.id)} data-testid={`button-delete-attendance-${record.id}`}>
+                      <Trash2 className="h-4 w-4 mr-1" /> Delete
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+          {remaining > 0 && (
+            <Button
+              variant="outline"
+              className="w-full h-11"
+              onClick={() => setVisible((v) => v + ATTENDANCE_PAGE_SIZE)}
+              data-testid="button-attendance-load-more"
+            >
+              Load more ({remaining} remaining)
+            </Button>
+          )}
         </>
       )}
     </div>
@@ -104,7 +287,7 @@ export default function AttendancePage() {
 
   const today = format(new Date(), 'yyyy-MM-dd');
   const userId = user?.id ?? "";
-  const isManagement = user ? ['Admin', 'MD'].includes(user.role) : false;
+  const isManagement = canManageAttendance(user?.role);
 
   const [otInput, setOtInput] = useState("");
   const [markingStatus, setMarkingStatus] = useState<string | null>(null);
@@ -399,64 +582,6 @@ export default function AttendancePage() {
       setEditSaving(false);
     }
   };
-
-  const AttendanceList = ({ records, showActions }: { records: typeof attendance; showActions?: boolean }) => (
-    <div className="space-y-3 pt-4">
-      {records.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">No records found.</div>
-      ) : (
-        records.map(record => (
-          <Card key={record.id} data-testid={`card-attendance-${record.id}`}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-sm text-muted-foreground">{format(new Date(record.date), 'EEE, dd MMM yyyy')}</div>
-                  <div className="font-semibold text-base mt-0.5">{record.staffName}</div>
-                  {record.checkInTime && (
-                    <div className="text-xs text-muted-foreground mt-1 flex flex-col gap-1">
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        <span>
-                          In: {format(new Date(record.checkInTime), 'hh:mm a')}
-                          {record.checkOutTime && ` | Out: ${format(new Date(record.checkOutTime), 'hh:mm a')}`}
-                        </span>
-                      </div>
-                      {formatOt(record.overtimeHours) !== null && (
-                        <div className="text-xs text-muted-foreground" data-testid={`text-attendance-ot-${record.id}`}>
-                          OT: {formatOt(record.overtimeHours)} hours
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className={`px-3 py-1.5 rounded-full text-sm font-semibold flex items-center gap-1.5 ${record.status === 'Present' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                    {record.status === 'Present' ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                    {record.status}
-                  </div>
-                </div>
-              </div>
-              {showActions && isManagement && (
-                <div className="flex justify-end flex-wrap gap-1 mt-2 border-t pt-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setEditRecord(record)}
-                    data-testid={`button-edit-attendance-${record.id}`}
-                  >
-                    <Pencil className="h-4 w-4 mr-1" /> Edit
-                  </Button>
-                  <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => { setDeletingRecordId(record.id); setDeleteConfirmOpen(true); }} data-testid={`button-delete-attendance-${record.id}`}>
-                    <Trash2 className="h-4 w-4 mr-1" /> Delete
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))
-      )}
-    </div>
-  );
 
   const savedOt = formatOt(todayRecord?.overtimeHours);
   const reportGeneratedAt = format(new Date(), "dd MMM yyyy hh:mm a");
@@ -824,9 +949,17 @@ export default function AttendancePage() {
                 <div>Prepared by: {user.name}</div>
               </div>
             </div>
-            <AttendanceReportTable records={myHistory} title="My Attendance Records" />
+            <AttendanceReportTable records={myHistory} title="My Attendance Records" scrollable />
           </div>
-          <AttendanceList records={myHistory} showActions={isManagement} />
+          <div className="max-h-[60vh] overflow-y-auto overscroll-contain rounded-xl border border-border/60 bg-white px-3 pb-3">
+            <PaginatedAttendanceList
+              records={myHistory}
+              showActions={isManagement}
+              isManagement={isManagement}
+              onEdit={setEditRecord}
+              onDelete={(id) => { setDeletingRecordId(id); setDeleteConfirmOpen(true); }}
+            />
+          </div>
         </TabsContent>
 
         {isManagement && (
@@ -858,9 +991,26 @@ export default function AttendancePage() {
                   <div>Prepared by: {user.name}</div>
                 </div>
               </div>
-              <AttendanceReportTable records={allHistory} title="All Staff Attendance Records" />
+              <AttendanceReportTable
+                records={allHistory}
+                title="All Staff Attendance Records"
+                scrollable
+                searchable
+                showActions
+                isManagement={isManagement}
+                onEdit={setEditRecord}
+                onDelete={(id) => { setDeletingRecordId(id); setDeleteConfirmOpen(true); }}
+              />
             </div>
-            <AttendanceList records={allHistory} showActions={true} />
+            <div className="max-h-[60vh] overflow-y-auto overscroll-contain rounded-xl border border-border/60 bg-white px-3 pb-3">
+              <PaginatedAttendanceList
+                records={allHistory}
+                showActions={true}
+                isManagement={isManagement}
+                onEdit={setEditRecord}
+                onDelete={(id) => { setDeletingRecordId(id); setDeleteConfirmOpen(true); }}
+              />
+            </div>
           </TabsContent>
         )}
 

@@ -12,6 +12,8 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build",
     "build:server": "npx tsx script/build.ts --server-only",
+    "build:vercel": "npx tsx script/build-vercel.ts",
+    "vercel-build": "vite build && npx tsx script/build-vercel.ts",
     "build:legacy": "npx tsx script/build.ts",
     "start": "node dist/index.cjs",
     "start:prod": "drizzle-kit push && node dist/index.cjs",

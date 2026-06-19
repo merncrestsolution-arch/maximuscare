@@ -155,6 +155,35 @@ function applyBranchFilter<T extends { branch?: string | null }>(items: T[], bra
   return items.filter((item) => normalizeBranchName(item.branch).toLowerCase() === target);
 }
 
+/**
+ * Branch-scopes in-patient sessions. Sessions carry a `branchId` (no branch
+ * text), so resolve each session's branch via its branchId, then fall back to
+ * the treating staff member's branch for legacy rows that predate attribution.
+ */
+async function filterSessionsByBranch(
+  storage: IStorage,
+  sessions: InPatientSession[],
+  branchFilter?: string | null
+): Promise<InPatientSession[]> {
+  if (!branchFilter) return sessions;
+  const target = normalizeBranchName(branchFilter).toLowerCase();
+  const branches = await storage.getAllBranches();
+  const branchIdToShort = new Map<string, string>();
+  for (const b of branches) {
+    const short = normalizeBranchName((b as any).branchName ?? b.name).toLowerCase();
+    if (short) branchIdToShort.set(b.id, short);
+  }
+  const staffList = await storage.getAllStaff();
+  const staffBranchById = new Map(
+    staffList.map((s) => [s.id, normalizeBranchName(s.branch).toLowerCase()])
+  );
+  return sessions.filter((s) => {
+    const fromId = (s as any).branchId ? branchIdToShort.get((s as any).branchId) ?? "" : "";
+    const fromStaff = staffBranchById.get(s.treatingStaffId) ?? "";
+    return (fromId || fromStaff) === target;
+  });
+}
+
 export async function computeIncentiveReport(
   storage: IStorage,
   rangeFrom: string,
@@ -465,7 +494,8 @@ export async function computeExtendedDashboardKpis(
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
   if (branchFilter) visits = filterVisitsByBranch(visits, branchFilter);
   const todayVisitsList = visits.filter((v) => v.visitDate === today);
-  const ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
+  let ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
+  if (branchFilter) ipSessions = await filterSessionsByBranch(storage, ipSessions, branchFilter);
   const todaySessions = ipSessions.filter((s) => s.sessionDate === today).length;
   const todayHomeVisits = todayVisitsList.filter((v) => v.visitType === "Home").length;
   const todayClinicVisits = todayVisitsList.filter((v) => v.visitType === "Clinic").length;

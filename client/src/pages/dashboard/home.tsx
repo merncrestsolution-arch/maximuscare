@@ -93,16 +93,20 @@ export default function Dashboard() {
   const deleteExpense = useDeleteExpense();
   const deleteVisit = useDeleteVisit();
 
+  // Managers (and branch managers) see all in-patient sessions for their branch,
+  // not just sessions they personally treated. Scope to the active branch so
+  // other branches/orgs don't leak in.
+  const canViewAllSessions = isManagement || showManagerDashboard;
   const ipDayEnd = useMemo(() => format(addDays(parseISO(ipSessionDate), 1), "yyyy-MM-dd"), [ipSessionDate]);
   const { data: ipSessionsAll = [] } = useAllInPatientSessionsInRange(
-    { startDate: ipSessionDate, endDate: ipDayEnd },
-    isManagement
+    { startDate: ipSessionDate, endDate: ipDayEnd, branch: selectedBranchName ?? undefined },
+    canViewAllSessions
   );
   const { data: ipSessionsMine = [] } = useInPatientSessionsForStaffRange(
     { startDate: ipSessionDate, endDate: ipDayEnd, staffId: user?.id || "" },
-    !isManagement && !!user?.id
+    !canViewAllSessions && !!user?.id
   );
-  const ipSessionsForDash = isManagement ? ipSessionsAll : ipSessionsMine;
+  const ipSessionsForDash = canViewAllSessions ? ipSessionsAll : ipSessionsMine;
 
   const patientNameById = useMemo(
     () => new Map(patients.map((p) => [p.id, p.name])),
@@ -162,8 +166,11 @@ export default function Dashboard() {
     );
   }
   
+  // Managers/branch managers have visits.view_all, so they see every visit for
+  // their branch (the list is already branch-scoped server-side), not just their own.
+  const canViewAllVisitsClient = isManagement || isManagerRole || isBranchManagerRole;
   const allMyVisits = visits.filter((v) =>
-    isManagement ? true : isVisitForStaff(v, user, { includeCreator: true })
+    canViewAllVisitsClient ? true : isVisitForStaff(v, user, { includeCreator: true })
   );
   const myVisits = allMyVisits.filter(v => v.visitDate >= monthStart && v.visitDate < monthEnd);
   const visitsForStats =

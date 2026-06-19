@@ -8,6 +8,7 @@ import {
   summarizeAttendance,
   isPaidPaymentStatus,
   visitMatchesStaff,
+  getVisitCollectedRevenue,
 } from "./calculationEngine";
 import { computeExtendedDashboardKpis, computeDashboardCharts, type DashboardCharts } from "./reportService";
 
@@ -68,8 +69,11 @@ export async function computeDashboardKpis(
   const ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
   const todaySessions = ipSessions.filter((s) => s.sessionDate === today).length;
 
+  // Collected revenue only (paid in full + partial amount paid) — matches the
+  // revenue summary / revenue report. Branch-scoped uses the branch's visits;
+  // unscoped falls back to the global income aggregate (visits + inpatient).
   const totalRevenue = branchFilter
-    ? visits.reduce((sum, v) => sum + (Number(v.paymentAmount) || 0), 0)
+    ? visits.reduce((sum, v) => sum + getVisitCollectedRevenue(v), 0)
     : await storage.getTotalIncome(rangeFrom, rangeTo);
   let attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
   if (branchFilter) attendance = filterByBranchName(attendance, branchFilter);
@@ -121,11 +125,11 @@ export async function computeDashboardKpis(
   }
 
   let expensesList = await storage.getExpensesByDateRange(rangeFrom, rangeTo);
+  // Scope by the expense's own branch column (consistent with /api/expenses and
+  // getExpenseTotal). Previously this filtered by the creator's branch, which
+  // misattributed expenses logged for a different branch.
   if (branchFilter) {
-    const branchStaff = allStaff
-      .filter((s) => normalizeBranchName(s.branch).toLowerCase() === normalizeBranchName(branchFilter).toLowerCase())
-      .map((s) => s.id);
-    expensesList = expensesList.filter((e) => e.createdByStaffId && branchStaff.includes(e.createdByStaffId));
+    expensesList = filterByBranchName(expensesList, branchFilter);
   }
   const expenses = computeExpenseBreakdown(expensesList);
 

@@ -1,9 +1,9 @@
 import type { Express, Request, Response } from "express";
 import { storage } from "../storage";
 import { requireAuth } from "../auth";
-import { requireStaffManage, requireStaffDeactivate, requireNotificationsManage } from "../middleware/secureApi";
+import { requireStaffManage, requireStaffView, requireStaffDeactivate, requireNotificationsManage } from "../middleware/secureApi";
 import { successResponse, errorResponse } from "../response";
-import { isManagementRole } from "../permissions";
+import { canViewStaff } from "../permissions";
 import { logAudit } from "../services/auditService";
 import { clinicDateString } from "../clinicTime";
 import {
@@ -14,7 +14,7 @@ import {
   deactivateStaffMember,
   activateStaffMember,
   staffDirectoryRow,
-  staffMatchesBranch,
+  filterStaffByBranchAccess,
 } from "../services/staffService";
 import { computeAttendanceDashboard } from "../services/attendanceService";
 import {
@@ -42,8 +42,8 @@ async function editorName(staffId: string) {
 }
 
 export function registerHrmRoutes(app: Express) {
-  // Staff directory (Admin/MD)
-  app.get("/api/staff/directory", requireAuth, requireStaffManage, async (req, res) => {
+  // Staff directory (management + operational leads)
+  app.get("/api/staff/directory", requireAuth, requireStaffView, async (req, res) => {
     try {
       const { loadBranchContext, getSelectedBranchName } = await import("../middleware/branchContext");
       await loadBranchContext(req as any);
@@ -57,7 +57,7 @@ export function registerHrmRoutes(app: Express) {
 
       let list = includeInactive ? await storage.getAllStaff() : await storage.getActiveStaff();
       if (branch) {
-        list = list.filter((s) => staffMatchesBranch(s, branch));
+        list = await filterStaffByBranchAccess(storage, list, branch);
       }
       if (role) list = list.filter((s) => s.role === role);
       if (status === "Active") list = list.filter((s) => s.isActive !== false && (s.isActive as unknown) !== 0);
@@ -94,7 +94,7 @@ export function registerHrmRoutes(app: Express) {
     try {
       const id = param(req, "id");
       const user = (req as any).user;
-      if (!isManagementRole(user.role) && user.staffId !== id) {
+      if (!canViewStaff(user.role) && user.staffId !== id) {
         return errorResponse(res, "Forbidden", 403);
       }
       const today = clinicDateString();
@@ -235,7 +235,7 @@ export function registerHrmRoutes(app: Express) {
   app.get("/api/tasks/dashboard", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;
-      const staffId = isManagementRole(user.role) && req.query.all === "true" ? undefined : user.staffId;
+      const staffId = canViewStaff(user.role) && req.query.all === "true" ? undefined : user.staffId;
       const dash = await computeTaskDashboard(storage, staffId);
       return successResponse(res, dash);
     } catch (error: any) {

@@ -14,6 +14,7 @@ export type RbacRole =
 
 export type Permission =
   | "staff.manage"
+  | "staff.view"
   | "staff.deactivate"
   | "patients.manage"
   | "patients.view_all"
@@ -42,6 +43,7 @@ export type Permission =
 const ROLE_PERMISSIONS: Record<RbacRole, Permission[]> = {
   Admin: [
     "staff.manage",
+    "staff.view",
     "staff.deactivate",
     "patients.manage",
     "patients.view_all",
@@ -69,6 +71,7 @@ const ROLE_PERMISSIONS: Record<RbacRole, Permission[]> = {
   ],
   MD: [
     "staff.manage",
+    "staff.view",
     "staff.deactivate",
     "patients.manage",
     "patients.view_all",
@@ -119,6 +122,7 @@ const ROLE_PERMISSIONS: Record<RbacRole, Permission[]> = {
     "notifications.view_own",
   ],
   "Branch Manager": [
+    "staff.view",
     "patients.manage",
     "patients.view_all",
     "visits.manage",
@@ -137,6 +141,7 @@ const ROLE_PERMISSIONS: Record<RbacRole, Permission[]> = {
     "inpatients.manage",
   ],
   Manager: [
+    "staff.view",
     "patients.manage",
     "patients.view_all",
     "visits.manage",
@@ -154,6 +159,7 @@ const ROLE_PERMISSIONS: Record<RbacRole, Permission[]> = {
   ],
   "Nexus MD": [
     "staff.manage",
+    "staff.view",
     "patients.manage",
     "patients.view_all",
     "visits.manage",
@@ -169,7 +175,6 @@ const ROLE_PERMISSIONS: Record<RbacRole, Permission[]> = {
     "reports.export",
     "notifications.manage",
     "notifications.view_own",
-    "audit.view",
     "appointments.manage",
     "appointments.view",
     "expenses.manage",

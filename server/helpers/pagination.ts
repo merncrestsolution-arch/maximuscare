@@ -10,7 +10,10 @@ export interface PaginationMeta {
   totalPages: number;
 }
 
-export function parsePagination(query: Record<string, unknown>, maxLimit = 100): PaginationParams {
+export function parsePagination(
+  query: Record<string, unknown>,
+  maxLimit = 100,
+): { page: number; limit: number } {
   const page = Math.max(1, Number(query.page) || 1);
   const limit = Math.min(maxLimit, Math.max(1, Number(query.limit) || 20));
   return { page, limit };

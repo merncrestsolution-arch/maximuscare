@@ -137,3 +137,23 @@ export function filterByBranchName<T extends { branch?: string | null }>(
 export function hasCompletedBranchSelection(ctx: BranchAccessContext): boolean {
   return !!ctx.selectedBranchId || !!ctx.selectedContext;
 }
+
+/**
+ * Resolves a branch row id from a branch name/alias (normalized). When several
+ * branch rows share the same normalized name, the canonical enterprise row
+ * (one carrying a non-null `code`) is preferred. Returns null when no match.
+ */
+export async function resolveBranchIdByName(
+  storage: IStorage,
+  branchName: string | null | undefined
+): Promise<string | null> {
+  const normalized = normalizeBranchName(branchName ?? "");
+  if (!normalized) return null;
+  const all = await storage.getAllBranches();
+  const matches = all.filter(
+    (b) => normalizeBranchName(b.branchName ?? b.name) === normalized
+  );
+  if (matches.length === 0) return null;
+  const canonical = matches.find((b) => !!b.code);
+  return (canonical ?? matches[0]).id;
+}

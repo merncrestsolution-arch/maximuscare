@@ -1,5 +1,6 @@
 import type { IStorage } from "../storage";
 import type { Staff, Visit, Attendance, InPatientSession, StaffFine } from "@shared/schema";
+import { normalizeBranchName } from "@shared/branches";
 import {
   DEFAULT_RATES,
   type CalculationRates,
@@ -33,6 +34,13 @@ export interface IncentiveDay {
   incentive: number;
 }
 
+export interface BranchVisitBreakdown {
+  branch: string;
+  clinic: number;
+  home: number;
+  total: number;
+}
+
 export interface PayrollSummary {
   staffId: string;
   name: string;
@@ -42,6 +50,10 @@ export interface PayrollSummary {
   colomboClinic: number;
   bandaragamaHome: number;
   bandaragamaClinic: number;
+  /** Per-branch visit counts across every branch the therapist worked in (incl. Neuro, Nexus). */
+  visitsByBranch: BranchVisitBreakdown[];
+  totalClinicVisits: number;
+  totalHomeVisits: number;
   presentDays: number;
   absentDays: number;
   totalOt: number;
@@ -98,8 +110,31 @@ export function computePayrollForStaff(
     (v) => visitMatchesStaff(v, staff.id, staff.name) && inDateRange(v.visitDate, rangeFrom, rangeTo)
   );
 
-  const colomboClinic = physioVisits.filter((v) => v.branch === "Colombo" && v.visitType === "Clinic").length;
-  const bandaragamaClinic = physioVisits.filter((v) => v.branch === "Bandaragama" && v.visitType === "Clinic").length;
+  // Compare on normalized branch names so legacy labels (e.g. "Colombo" -> "Dehiwala")
+  // match the stored value.
+  const colomboClinic = physioVisits.filter(
+    (v) => normalizeBranchName(v.branch) === "Dehiwala" && v.visitType === "Clinic"
+  ).length;
+  const bandaragamaClinic = physioVisits.filter(
+    (v) => normalizeBranchName(v.branch) === "Bandaragama" && v.visitType === "Clinic"
+  ).length;
+
+  // Dynamic per-branch breakdown so cases from EVERY branch the therapist
+  // worked in (Dehiwala, Bandaragama, Neuro, Nexus, …) are represented, not
+  // just the four hardcoded Colombo/Bandaragama buckets.
+  const branchMap = new Map<string, { clinic: number; home: number }>();
+  for (const v of physioVisits) {
+    const branch = normalizeBranchName(v.branch) || "Unknown";
+    const entry = branchMap.get(branch) ?? { clinic: 0, home: 0 };
+    if (v.visitType === "Home") entry.home += 1;
+    else entry.clinic += 1;
+    branchMap.set(branch, entry);
+  }
+  const visitsByBranch: BranchVisitBreakdown[] = Array.from(branchMap.entries())
+    .map(([branch, c]) => ({ branch, clinic: c.clinic, home: c.home, total: c.clinic + c.home }))
+    .sort((a, b) => a.branch.localeCompare(b.branch));
+  const totalClinicVisits = visitsByBranch.reduce((sum, b) => sum + b.clinic, 0);
+  const totalHomeVisits = visitsByBranch.reduce((sum, b) => sum + b.home, 0);
 
   const rangeAttendance = attendance.filter(
     (a) => a.staffId === staff.id && inDateRange(a.date, rangeFrom, rangeTo)
@@ -183,6 +218,9 @@ export function computePayrollForStaff(
     colomboClinic,
     bandaragamaHome: homeBreakdown.bandaragamaVisits,
     bandaragamaClinic,
+    visitsByBranch,
+    totalClinicVisits,
+    totalHomeVisits,
     presentDays,
     absentDays,
     totalOt,

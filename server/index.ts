@@ -19,6 +19,36 @@ declare module "http" {
   }
 }
 
+// --- CORS: only enabled for split deployments (e.g. SPA on Vercel, API here) ---
+// Set CLIENT_ORIGIN (comma-separated list) to the frontend origin(s), e.g.
+//   CLIENT_ORIGIN=https://your-app.vercel.app,https://your-domain.com
+// Left unset for same-origin deployments (Docker/Render) where the API serves the SPA.
+const allowedOrigins = (process.env.CLIENT_ORIGIN || process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+if (allowedOrigins.length > 0) {
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+      res.header("Access-Control-Allow-Credentials", "true");
+      res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+      res.header(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, X-Requested-With",
+      );
+    }
+    if (req.method === "OPTIONS") {
+      res.sendStatus(204);
+      return;
+    }
+    next();
+  });
+}
+
 // --- Firewall: Security headers ---
 const isProduction = process.env.NODE_ENV === "production";
 app.use(
@@ -149,7 +179,11 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
-  const host = process.env.NODE_ENV === "production" ? "0.0.0.0" : (process.env.HOST || "127.0.0.1");
+  // Bind to all interfaces by default so the SPA + API are reachable as
+  // localhost, 127.0.0.1, AND the machine's LAN IP (phones/tablets on the same
+  // network). A 127.0.0.1-only bind makes /api unreachable from other devices,
+  // which surfaces as a 404 on /api/auth/login. Override with HOST if needed.
+  const host = process.env.HOST || "0.0.0.0";
   httpServer.listen(port, host, () => {
     log(`serving on http://${host}:${port}`);
   });

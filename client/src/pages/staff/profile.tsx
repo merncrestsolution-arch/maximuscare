@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Edit2, CalendarCheck, Stethoscope, Pencil } from "lucide-react";
 import { isVisitForStaff } from "@/lib/visitAccess";
+import { canViewStaffList, canManageStaff } from "@/lib/permissions";
 import { VisitStatsCards } from "@/components/dashboard/visit-stats-cards";
 import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
 
@@ -36,9 +37,10 @@ export default function StaffProfilePage() {
 
   if (!match || !params || !currentUser) return null;
 
-  const role = (currentUser.role || "").toLowerCase();
-  const isManagement = role === "admin" || role === "md";
-  if (!isManagement && currentUser.id !== params.id) {
+  const canViewAnyStaff = canViewStaffList(currentUser.role);
+  // Edit/photo/financial affordances stay limited to roles that manage staff accounts.
+  const isManagement = canManageStaff(currentUser.role);
+  if (!canViewAnyStaff && currentUser.id !== params.id) {
     return <div>Unauthorized</div>;
   }
 
@@ -72,7 +74,7 @@ export default function StaffProfilePage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
-        <Link href={isManagement ? "/staff" : "/profile"}>
+        <Link href={canViewAnyStaff ? "/staff" : "/profile"}>
           <Button variant="ghost" size="icon" className="-ml-2" data-testid="button-back-staff-profile">
             <ArrowLeft className="h-5 w-5" />
           </Button>
