@@ -15,7 +15,7 @@ export interface AppRelease {
 }
 
 export const APP_RELEASE: AppRelease = {
-  version: "1.1.1",
+  version: "1.1.2",
   title: "App Updated — What's New",
   highlights: [
     "Multi-branch support with quick branch switching.",
