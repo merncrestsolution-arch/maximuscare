@@ -13,7 +13,7 @@
     "build:client": "vite build",
     "build:server": "npx tsx script/build.ts --server-only",
     "build:vercel": "npx tsx script/build-vercel.ts",
-    "vercel-build": "vite build && npx tsx script/build-vercel.ts",
+    "vercel-build": "vite build && npx tsx script/build-vercel.ts && drizzle-kit push --force",
     "build:legacy": "npx tsx script/build.ts",
     "start": "node dist/index.cjs",
     "start:prod": "drizzle-kit push && node dist/index.cjs",
@@ -21,6 +21,7 @@
     "check": "tsc",
     "test": "vitest run",
     "db:push": "drizzle-kit push",
+    "db:push:ci": "drizzle-kit push --force",
     "db:migrate": "drizzle-kit migrate",
     "db:migrate-part2": "tsx script/migrate-part2.ts"
   },

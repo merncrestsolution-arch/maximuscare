@@ -11,3 +11,5 @@ devserver.log
 devserver.err.log
 .idea/
 *.iml
+
+.vercel
