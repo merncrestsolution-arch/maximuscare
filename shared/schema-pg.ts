@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, timestamp, decimal, date } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp, decimal, date, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -19,7 +19,7 @@ export const staff = pgTable("staff", {
   profilePhoto: text("profile_photo"),
   employeeCode: text("employee_code"),
   designation: text("designation"),
-  isActive: integer("is_active").notNull().default(1),
+  isActive: boolean("is_active").notNull().default(true),
   basicSalary: decimal("basic_salary", { precision: 12, scale: 2 }).notNull().default("0"),
   salaryDate: date("salary_date"),
   joiningDate: date("joining_date"),
@@ -427,7 +427,7 @@ export const appointments = pgTable("appointments", {
   status: text("status").notNull().default("Scheduled"),
   branch: text("branch"),
   branchId: varchar("branch_id"),
-  reminderSent: integer("reminder_sent").notNull().default(0),
+  reminderSent: boolean("reminder_sent").notNull().default(false),
   deletedAt: timestamp("deleted_at"),
   deletedBy: varchar("deleted_by"),
   notes: text("notes"),
@@ -482,7 +482,7 @@ export const branches = pgTable("branches", {
   branchName: text("branch_name"),
   code: text("code"),
   address: text("address"),
-  isActive: integer("is_active").notNull().default(1),
+  isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -491,7 +491,7 @@ export const userBranchAccess = pgTable("user_branch_access", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   staffId: varchar("staff_id").notNull().references(() => staff.id),
   branchId: varchar("branch_id").notNull().references(() => branches.id),
-  isDefault: integer("is_default").notNull().default(0),
+  isDefault: boolean("is_default").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -536,8 +536,8 @@ export const notifications = pgTable("notifications", {
   title: text("title").notNull(),
   message: text("message").notNull(),
   type: text("type").notNull().default("info"),
-  isRead: integer("is_read").notNull().default(0),
-  isArchived: integer("is_archived").notNull().default(0),
+  isRead: boolean("is_read").notNull().default(false),
+  isArchived: boolean("is_archived").notNull().default(false),
   readAt: timestamp("read_at"),
   sentAt: timestamp("sent_at"),
   deletedAt: timestamp("deleted_at"),

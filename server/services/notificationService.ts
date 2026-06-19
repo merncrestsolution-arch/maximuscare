@@ -67,7 +67,7 @@ export async function runAppointmentReminders(storage: IStorage): Promise<number
       message: `${appt.patientName} at ${appt.appointmentTime}${appt.branch ? ` (${appt.branch})` : ""}`,
       type: "appointment_reminder",
     });
-    await storage.updateAppointment(appt.id, { reminderSent: 1 });
+    await storage.updateAppointment(appt.id, { reminderSent: true as unknown as number });
     count++;
   }
   return count;
