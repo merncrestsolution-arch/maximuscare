@@ -146,12 +146,14 @@ app.use((req, res, next) => {
   await seedDefaultUsers();
   await storage.seedEnterpriseBranches();
   await purgeExpiredSessions();
-  void (async () => {
+  try {
     const { announceAppUpdateIfNeeded } = await import(
       "./services/appUpdateService"
     );
     await announceAppUpdateIfNeeded(storage);
-  })().catch((err) => console.error("[appUpdate] boot announcement failed:", err));
+  } catch (err) {
+    console.error("[appUpdate] boot announcement failed:", err);
+  }
   setInterval(() => {
     void purgeExpiredSessions();
   }, 60 * 60 * 1000);

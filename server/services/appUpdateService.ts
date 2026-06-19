@@ -17,18 +17,22 @@ function versionTag(version: string): string {
  */
 export async function announceAppUpdateIfNeeded(
   storage: IStorage,
+  options: { force?: boolean } = {},
 ): Promise<number> {
   const tag = versionTag(APP_RELEASE.version);
 
-  // Idempotency guard: bail out if this version was already announced.
-  try {
-    const alreadySent = await storage.hasAppUpdateAnnouncement(tag);
-    if (alreadySent) return 0;
-  } catch (err) {
-    // If the lookup fails (e.g. table not yet migrated), skip rather than risk
-    // spamming users on every cold start.
-    console.error("[appUpdate] announcement lookup failed:", err);
-    return 0;
+  // Idempotency guard: bail out if this version was already announced (unless
+  // an admin explicitly forces a re-send).
+  if (!options.force) {
+    try {
+      const alreadySent = await storage.hasAppUpdateAnnouncement(tag);
+      if (alreadySent) return 0;
+    } catch (err) {
+      // If the lookup fails (e.g. table not yet migrated), skip rather than risk
+      // spamming users on every cold start.
+      console.error("[appUpdate] announcement lookup failed:", err);
+      return 0;
+    }
   }
 
   try {

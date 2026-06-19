@@ -282,6 +282,34 @@ export function registerExtendedRoutes(app: Express) {
     }
   });
 
+  // Manually (re)send the current release's "What's New" notification to all
+  // active staff. Useful if the automatic post-deploy broadcast didn't reach
+  // everyone. Pass { force: true } to re-send even if already announced.
+  app.post(
+    "/api/notifications/announce-update",
+    requireAuth,
+    requireNotificationsManage,
+    async (req, res) => {
+      try {
+        const force = req.body?.force === true || req.query.force === "true";
+        const { announceAppUpdateIfNeeded } = await import(
+          "../services/appUpdateService"
+        );
+        const count = await announceAppUpdateIfNeeded(storage, { force });
+        return successResponse(
+          res,
+          { count },
+          count > 0
+            ? `Update notification sent to ${count} staff`
+            : "Already announced for this release (use force to re-send)",
+          201,
+        );
+      } catch (error: any) {
+        return errorResponse(res, error.message, 500);
+      }
+    },
+  );
+
   app.patch("/api/notifications/:id/read", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;

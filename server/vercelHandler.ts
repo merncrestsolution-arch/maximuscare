@@ -27,17 +27,18 @@ async function getApp(): Promise<ExpressApp> {
       await seedDefaultUsers();
       await storage.seedEnterpriseBranches();
 
-      // Fire the one-time "What's New" broadcast for the current release. Runs
-      // in the background so it never blocks the first request; it's idempotent
-      // and only sends once per release version.
-      void (async () => {
+      // One-time "What's New" broadcast for the current release. Must be awaited
+      // here: Vercel freezes the function once a response is sent, so a
+      // fire-and-forget task is not guaranteed to finish. It's idempotent and
+      // only sends once per release version, so awaiting on cold start is safe.
+      try {
         const { announceAppUpdateIfNeeded } = await import(
           "./services/appUpdateService"
         );
         await announceAppUpdateIfNeeded(storage);
-      })().catch((err) =>
-        console.error("[appUpdate] serverless announcement failed:", err),
-      );
+      } catch (err) {
+        console.error("[appUpdate] serverless announcement failed:", err);
+      }
 
       const { app, httpServer } = createBaseApp();
       await setupApiRoutes(app, httpServer);
