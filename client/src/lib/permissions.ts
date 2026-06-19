@@ -31,6 +31,37 @@ export function isOperationalLead(role: string | undefined): boolean {
   return isManagementRole(role) || isBranchManager(role) || isManager(role);
 }
 
+/**
+ * Roles allowed to create/edit patients — mirrors the server RBAC `patients.manage`
+ * permission (Admin, MD, Receptionist, Physiotherapist, Manager, Branch Manager,
+ * Nexus MD) so the UI doesn't hide the Add/Edit Patient actions the API allows.
+ */
+export function canManagePatients(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return (
+    isManagementRole(r) ||
+    isOperationalLead(r) ||
+    isNexusManagingDirector(r) ||
+    r === "Receptionist" ||
+    r === "Physiotherapist"
+  );
+}
+
+/**
+ * Roles that see every visit (not just their own) — mirrors the server RBAC
+ * `visits.view_all` permission (Admin, MD, Receptionist, Manager, Branch Manager,
+ * Nexus MD). Physiotherapists/Staff are scoped to their own visits.
+ */
+export function canViewAllVisits(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return (
+    isManagementRole(r) ||
+    isOperationalLead(r) ||
+    isNexusManagingDirector(r) ||
+    r === "Receptionist"
+  );
+}
+
 export function canAccessMaximusOverview(role: string | undefined): boolean {
   return isManagementRole(role);
 }

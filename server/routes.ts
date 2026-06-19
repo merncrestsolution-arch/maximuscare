@@ -40,6 +40,7 @@ import {
   canViewStaff,
   canViewStaffFinancials,
 } from "./permissions";
+import { hasPermission } from "./rbac/permissions";
 import { registerExtendedRoutes } from "./routes/extended";
 import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
@@ -1313,6 +1314,11 @@ export async function registerRoutes(
             .filter((s: any) => normalizeBranchName(s.branch).toLowerCase() === target)
             .map((s: any) => s.id)
         );
+        // Always include the requesting user's own records, even if their staff
+        // branch is unset or differs from the selected branch — otherwise a
+        // manager's own attendance (and check-out / OT) silently disappears from
+        // history despite being marked.
+        if (currentUser.staffId) branchStaffIds.add(currentUser.staffId);
       }
 
       if (page && limit) {
@@ -1400,7 +1406,10 @@ export async function registerRoutes(
       }
       const status = statusCheck.status;
 
-      const canManageOthers = ["Admin", "MD"].includes(currentUser.role);
+      // Admin, MD and operational leads (Manager/Branch Manager/Nexus MD) may mark
+      // attendance for other staff — mirrors the `attendance.manage` permission and
+      // the UI, which exposes "Mark Staff Attendance" to those roles.
+      const canManageOthers = hasPermission(currentUser.role, "attendance.manage");
 
       let targetStaffId: string;
       let targetStaffName: string;
@@ -1519,9 +1528,10 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Attendance record not found" });
       }
       
-      // Admin, MD can update attendance for anyone on any date
-      // All other staff can only update their own attendance for today only
-      const canManageOthers = ["Admin", "MD"].includes(currentUser.role);
+      // Admin, MD and operational leads (with attendance.manage) can update
+      // attendance for anyone on any date. All other staff can only update their
+      // own attendance for today only.
+      const canManageOthers = hasPermission(currentUser.role, "attendance.manage");
       
       if (!canManageOthers) {
         if (existingAttendance.staffId !== currentUser.staffId) {

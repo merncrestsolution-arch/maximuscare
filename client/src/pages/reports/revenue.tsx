@@ -88,7 +88,7 @@ function RevenueReportContent() {
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} />
                   <Tooltip formatter={(v: number) => formatLkr(v)} />
-                  <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ r: 2 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

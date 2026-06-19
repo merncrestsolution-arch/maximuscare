@@ -37,6 +37,16 @@ export function canViewStaffFinancials(role: string | undefined): boolean {
   return hasPermission(role, "salary.manage");
 }
 
+/**
+ * Roles that can mark/edit/delete attendance for OTHER staff (not just their own).
+ * Mirrors the `attendance.manage` permission so the API matches the UI, which
+ * exposes the "Mark Staff Attendance" and edit/delete controls to operational
+ * leads (Manager, Branch Manager, Nexus MD) as well as Admin/MD.
+ */
+export function canManageOthersAttendance(role: string | undefined): boolean {
+  return hasPermission(role, "attendance.manage");
+}
+
 export function canViewAllPatients(role: string | undefined): boolean {
   return hasPermission(role, "patients.view_all");
 }

@@ -275,14 +275,19 @@ export function computeOtAmount(hours: number, ratePerHour: number): number {
 }
 
 export function dedupeAttendanceByDate(records: Attendance[]): Attendance[] {
-  const uniqueDates = new Map<string, Attendance>();
+  // Key by staff + date so multi-staff datasets (e.g. dashboard charts that group
+  // every staff member's records for a day) keep one record *per staff per day*
+  // instead of collapsing the whole day to a single record. For single-staff data
+  // the staffId is constant, so this is equivalent to deduping by date.
+  const unique = new Map<string, Attendance>();
   for (const a of records) {
-    const existing = uniqueDates.get(a.date);
+    const key = `${a.staffId ?? ""}|${a.date}`;
+    const existing = unique.get(key);
     if (!existing || (a.id && existing.id && a.id > existing.id)) {
-      uniqueDates.set(a.date, a);
+      unique.set(key, a);
     }
   }
-  return Array.from(uniqueDates.values());
+  return Array.from(unique.values());
 }
 
 export function summarizeAttendance(records: Attendance[]): AttendanceSummary {
@@ -391,10 +396,17 @@ export function computeRevenueBreakdown(
 
 /** Next session number from existing numbers (safe after soft-deletes). */
 export function computeNextSessionNumber(existing: number | number[]): number {
-  if (typeof existing === "number") return Math.max(1, existing + 1);
-  if (!existing.length) return 1;
-  const max = Math.max(...existing.map((n) => Math.max(0, Math.floor(n))));
-  return max + 1;
+  if (typeof existing === "number") {
+    return Number.isFinite(existing) ? Math.max(1, Math.floor(existing) + 1) : 1;
+  }
+  // Ignore null/NaN/non-finite rows so a single corrupt session number can't
+  // propagate NaN and break visit creation (Zod rejects NaN on insert).
+  const valid = existing
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n))
+    .map((n) => Math.max(0, Math.floor(n)));
+  if (!valid.length) return 1;
+  return Math.max(...valid) + 1;
 }
 
 export function visitMatchesStaff(

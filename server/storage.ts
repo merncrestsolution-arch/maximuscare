@@ -337,6 +337,7 @@ export interface IStorage {
     opts?: { unreadOnly?: boolean; archived?: boolean; includeDeleted?: boolean },
   ): Promise<Notification[]>;
   getUnreadNotificationCount(staffId: string): Promise<number>;
+  hasAppUpdateAnnouncement(versionTag: string): Promise<boolean>;
   createNotification(data: InsertNotification): Promise<Notification>;
   markNotificationRead(id: string, staffId: string): Promise<Notification | undefined>;
   markAllNotificationsRead(staffId: string): Promise<void>;
@@ -1232,128 +1233,63 @@ export class DatabaseStorage implements IStorage {
 
   // Revenue calculation methods
   async getTotalIncome(startDate?: string, endDate?: string, branchName?: string | null): Promise<number> {
-    if (branchName) {
-      return this.getBranchScopedIncome(startDate, endDate, branchName);
-    }
-    let visitsTotal = 0;
-    let inPatientPaymentsTotal = 0;
+    const visitsTotal = await this.getVisitIncome(startDate, endDate, branchName ?? null);
+    // In-patient cash collected (in-stay payments + the incremental amount settled
+    // at discharge). getInPatientRevenueByDay de-duplicates the cumulative discharge
+    // amount against the prior payments, so it's the single source of truth for
+    // in-patient income and prevents the historical double-counting bug.
+    const inPatientDaily = await this.getInPatientRevenueByDay(startDate, endDate, branchName ?? null);
+    const inPatientTotal = inPatientDaily.reduce((sum, d) => sum + (d.revenue || 0), 0);
+    return visitsTotal + inPatientTotal;
+  }
 
-    if (startDate && endDate) {
-      const visitsResult = await db
-        .select({
-          total: sql<string>`COALESCE(SUM(
-            CASE
-              WHEN LOWER(${visits.paymentStatus}) = 'paid' THEN ${visits.paymentAmount}
-              WHEN LOWER(${visits.paymentStatus}) = 'partially paid' THEN ${visits.amountPaid}
-              ELSE 0
-            END
-          ), 0)`,
-        })
-        .from(visits)
-        .where(and(
+  /**
+   * Collected outpatient (visit) revenue: full amount for paid visits, amount
+   * paid for partially-paid visits. Branch-scoped by the visit's branch column
+   * when a branch is supplied, otherwise aggregated in SQL across all branches.
+   */
+  private async getVisitIncome(
+    startDate?: string,
+    endDate?: string,
+    branchName?: string | null
+  ): Promise<number> {
+    if (branchName) {
+      const { normalizeBranchName } = await import("@shared/branches");
+      const target = normalizeBranchName(branchName).toLowerCase();
+      const allVisits = startDate && endDate
+        ? await this.getVisitsByDateRange(startDate, endDate)
+        : await this.getAllVisits();
+      return allVisits
+        .filter((v: any) => !v.deletedAt && normalizeBranchName(v.branch).toLowerCase() === target)
+        .reduce((sum: number, v: any) => {
+          const status = String(v.paymentStatus ?? "").toLowerCase();
+          if (status === "paid") return sum + (parseFloat(v.paymentAmount) || 0);
+          if (status === "partially paid") return sum + (parseFloat(v.amountPaid) || 0);
+          return sum;
+        }, 0);
+    }
+
+    const whereClause = startDate && endDate
+      ? and(
           sql`LOWER(${visits.paymentStatus}) IN ('paid', 'partially paid')`,
           gte(visits.visitDate, startDate),
           lte(visits.visitDate, endDate),
           isNull(visits.deletedAt)
-        ));
-      visitsTotal = parseFloat(visitsResult[0]?.total || '0');
-
-      const paymentsResult = await db
-        .select({ total: sql<string>`COALESCE(SUM(amount), 0)` })
-        .from(inPatientPayments)
-        .where(and(
-          gte(inPatientPayments.paymentDate, startDate),
-          lte(inPatientPayments.paymentDate, endDate)
-        ));
-      inPatientPaymentsTotal = parseFloat(paymentsResult[0]?.total || '0');
-    } else {
-      const visitsResult = await db
-        .select({
-          total: sql<string>`COALESCE(SUM(
-            CASE
-              WHEN LOWER(${visits.paymentStatus}) = 'paid' THEN ${visits.paymentAmount}
-              WHEN LOWER(${visits.paymentStatus}) = 'partially paid' THEN ${visits.amountPaid}
-              ELSE 0
-            END
-          ), 0)`,
-        })
-        .from(visits)
-        .where(and(sql`LOWER(${visits.paymentStatus}) IN ('paid', 'partially paid')`, isNull(visits.deletedAt)));
-      visitsTotal = parseFloat(visitsResult[0]?.total || '0');
-
-      const paymentsResult = await db
-        .select({ total: sql<string>`COALESCE(SUM(amount), 0)` })
-        .from(inPatientPayments);
-      inPatientPaymentsTotal = parseFloat(paymentsResult[0]?.total || '0');
-    }
-
-    let dischargeTotal = 0;
-    if (startDate && endDate) {
-      const dischargeResult = await db
-        .select({ total: sql<string>`COALESCE(SUM(amount_paid), 0)` })
-        .from(inPatientDischarges)
-        .where(and(
-          gte(inPatientDischarges.dischargeDate, startDate),
-          lte(inPatientDischarges.dischargeDate, endDate)
-        ));
-      dischargeTotal = parseFloat(dischargeResult[0]?.total || "0");
-    } else {
-      const dischargeResult = await db
-        .select({ total: sql<string>`COALESCE(SUM(amount_paid), 0)` })
-        .from(inPatientDischarges);
-      dischargeTotal = parseFloat(dischargeResult[0]?.total || "0");
-    }
-
-    return visitsTotal + inPatientPaymentsTotal + dischargeTotal;
-  }
-
-  /**
-   * Branch-scoped income. Outpatient (visits) and expenses carry a branch on the
-   * record, so they are filtered by normalized branch name. In-patient payments /
-   * discharges are attributed via their admission's branch; admission branch
-   * attribution is populated separately (see Part 16 inpatient branch migration),
-   * so admissions without a branch are excluded from a single-branch total.
-   */
-  private async getBranchScopedIncome(
-    startDate: string | undefined,
-    endDate: string | undefined,
-    branchName: string
-  ): Promise<number> {
-    const { normalizeBranchName } = await import("@shared/branches");
-    const target = normalizeBranchName(branchName).toLowerCase();
-    const inRange = (d?: string | null) =>
-      !startDate || !endDate || (!!d && d >= startDate && d <= endDate);
-
-    const allVisits = startDate && endDate
-      ? await this.getVisitsByDateRange(startDate, endDate)
-      : await this.getAllVisits();
-    const visitsTotal = allVisits
-      .filter((v: any) => !v.deletedAt && normalizeBranchName(v.branch).toLowerCase() === target)
-      .reduce((sum: number, v: any) => {
-        const status = String(v.paymentStatus ?? "").toLowerCase();
-        if (status === "paid") return sum + (parseFloat(v.paymentAmount) || 0);
-        if (status === "partially paid") return sum + (parseFloat(v.amountPaid) || 0);
-        return sum;
-      }, 0);
-
-    const admissions = await this.getAllInPatientAdmissions();
-    const branchAdmissionIds = admissions
-      .filter((a: any) => a.branch && normalizeBranchName(a.branch).toLowerCase() === target)
-      .map((a: any) => a.id);
-
-    let inPatientTotal = 0;
-    for (const admissionId of branchAdmissionIds) {
-      const payments = await this.getInPatientPaymentsByAdmission(admissionId);
-      inPatientTotal += payments
-        .filter((p: any) => inRange(p.paymentDate))
-        .reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0);
-      const discharge = await this.getInPatientDischargeByAdmission(admissionId);
-      if (discharge && inRange((discharge as any).dischargeDate)) {
-        inPatientTotal += parseFloat((discharge as any).amountPaid) || 0;
-      }
-    }
-
-    return visitsTotal + inPatientTotal;
+        )
+      : and(sql`LOWER(${visits.paymentStatus}) IN ('paid', 'partially paid')`, isNull(visits.deletedAt));
+    const visitsResult = await db
+      .select({
+        total: sql<string>`COALESCE(SUM(
+          CASE
+            WHEN LOWER(${visits.paymentStatus}) = 'paid' THEN ${visits.paymentAmount}
+            WHEN LOWER(${visits.paymentStatus}) = 'partially paid' THEN ${visits.amountPaid}
+            ELSE 0
+          END
+        ), 0)`,
+      })
+      .from(visits)
+      .where(whereClause);
+    return parseFloat(visitsResult[0]?.total || "0");
   }
 
   /**
@@ -1374,15 +1310,36 @@ export class DatabaseStorage implements IStorage {
       const { normalizeBranchName } = await import("@shared/branches");
       const target = normalizeBranchName(branchName).toLowerCase();
       const admissions = await this.getAllInPatientAdmissions();
+      // Attribute by branch when present, but keep unbranched admissions (the
+      // common case — admissions carry no branch column) so in-patient income
+      // still shows up on the branch-scoped revenue trend.
       allowedAdmissionIds = new Set(
         admissions
-          .filter((a: any) => a.branch && normalizeBranchName(a.branch).toLowerCase() === target)
+          .filter((a: any) => {
+            const b = normalizeBranchName(a.branch).toLowerCase();
+            return !b || b === target;
+          })
           .map((a: any) => a.id)
       );
     }
 
     const byDay = new Map<string, number>();
     const payments = await db.select().from(inPatientPayments);
+
+    // The discharge's `amountPaid` is CUMULATIVE — the discharge form pre-fills
+    // it with the sum of all prior in-stay payments (see discharge.tsx), then the
+    // admin tops it up to the final settled amount. So the in-stay payments are
+    // already baked into the discharge total. To avoid double-counting in-patient
+    // income, a discharge only contributes the *extra* amount settled beyond the
+    // payments already recorded for that admission.
+    const paidByAdmission = new Map<string, number>();
+    for (const p of payments as any[]) {
+      paidByAdmission.set(
+        p.admissionId,
+        (paidByAdmission.get(p.admissionId) ?? 0) + (parseFloat(p.amount) || 0)
+      );
+    }
+
     for (const p of payments as any[]) {
       if (!inRange(p.paymentDate)) continue;
       if (allowedAdmissionIds && !allowedAdmissionIds.has(p.admissionId)) continue;
@@ -1392,7 +1349,10 @@ export class DatabaseStorage implements IStorage {
     for (const d of discharges as any[]) {
       if (!inRange(d.dischargeDate)) continue;
       if (allowedAdmissionIds && !allowedAdmissionIds.has(d.admissionId)) continue;
-      byDay.set(d.dischargeDate, (byDay.get(d.dischargeDate) ?? 0) + (parseFloat(d.amountPaid) || 0));
+      const priorPaid = paidByAdmission.get(d.admissionId) ?? 0;
+      const dischargeIncrement = Math.max(0, (parseFloat(d.amountPaid) || 0) - priorPaid);
+      if (dischargeIncrement <= 0) continue;
+      byDay.set(d.dischargeDate, (byDay.get(d.dischargeDate) ?? 0) + dischargeIncrement);
     }
 
     return Array.from(byDay.entries())
@@ -1914,6 +1874,20 @@ export class DatabaseStorage implements IStorage {
         ),
       );
     return Number(rows[0]?.count ?? 0);
+  }
+
+  async hasAppUpdateAnnouncement(versionTag: string): Promise<boolean> {
+    const rows = await db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.type, "app_update"),
+          like(notifications.title, `%${versionTag}%`),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
   }
 
   async createNotification(data: InsertNotification): Promise<Notification> {

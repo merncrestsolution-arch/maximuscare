@@ -23,7 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { SiteCreditFooter } from "@/components/site-credit-footer";
 import { StaffHomeWidgets } from "@/components/dashboard/staff-home-widgets";
 import { computeOutstanding } from "@/lib/paymentStatus";
-import { isManagementRole, canViewFinancialSummary, isManager, isBranchManager } from "@/lib/permissions";
+import { isManagementRole, canViewFinancialSummary, isManager, isBranchManager, canViewAllVisits } from "@/lib/permissions";
 import { StatCard, KpiGrid } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/layout/page-shell";
 
@@ -166,9 +166,10 @@ export default function Dashboard() {
     );
   }
   
-  // Managers/branch managers have visits.view_all, so they see every visit for
-  // their branch (the list is already branch-scoped server-side), not just their own.
-  const canViewAllVisitsClient = isManagement || isManagerRole || isBranchManagerRole;
+  // Roles with visits.view_all (Admin, MD, Receptionist, Manager, Branch Manager,
+  // Nexus MD) see every visit for their branch (the list is already branch-scoped
+  // server-side), not just their own. Physiotherapists/Staff stay scoped to theirs.
+  const canViewAllVisitsClient = canViewAllVisits(user?.role);
   const allMyVisits = visits.filter((v) =>
     canViewAllVisitsClient ? true : isVisitForStaff(v, user, { includeCreator: true })
   );
@@ -182,12 +183,12 @@ export default function Dashboard() {
         )
       : myVisits;
 
-  const totalPatients = (isManagement || isManagerRole) ? patients.length : patients.filter(p => myVisits.some(v => v.patientId === p.id)).length;
+  const totalPatients = (isManagement || isManagerRole || canViewAllVisitsClient) ? patients.length : patients.filter(p => myVisits.some(v => v.patientId === p.id)).length;
   const todayVisits = (isManagement || isManagerRole)
     ? (dashboardKpis?.todayVisits ?? myVisits.filter((v) => v.visitDate === format(new Date(), "yyyy-MM-dd")).length)
     : myVisits.filter((v) => v.visitDate === format(new Date(), "yyyy-MM-dd")).length;
   const paidVisits = myVisits.filter(v => v.paymentStatus?.toLowerCase() === 'paid').length;
-  const scopedUnpaid = (isManagement || isManagerRole)
+  const scopedUnpaid = canViewAllVisitsClient
     ? unpaidVisitsData
     : unpaidVisitsData.filter((v) => isVisitForStaff(v, user, { includeCreator: true }));
   const unpaidVisits = scopedUnpaid.length;
@@ -329,7 +330,7 @@ export default function Dashboard() {
                       <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                       <YAxis tick={{ fontSize: 11 }} width={48} />
                       <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                      <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" dot={false} />
+                      <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" dot={{ r: 2 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </CardContent>

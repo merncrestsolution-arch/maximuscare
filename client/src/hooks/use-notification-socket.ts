@@ -26,7 +26,7 @@ export function useNotificationSocket() {
         const data = JSON.parse(event.data);
         if (data.type === "notification") {
           queryClient.invalidateQueries({ queryKey: ["notifications"] });
-          queryClient.invalidateQueries({ queryKey: ["notification-unread-count"] });
+          queryClient.invalidateQueries({ queryKey: ["notifications-unread-count"] });
           toast({
             title: data.notification?.title || "New notification",
             description: data.notification?.message,

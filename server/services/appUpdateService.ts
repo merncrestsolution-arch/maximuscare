@@ -1,0 +1,50 @@
+import type { IStorage } from "../storage";
+import { APP_RELEASE, buildReleaseMessage } from "@shared/release";
+import { broadcastToActiveStaff } from "./notificationService";
+
+const APP_UPDATE_TYPE = "app_update";
+
+/** Marker embedded in the notification title so we can detect prior announcements. */
+function versionTag(version: string): string {
+  return `v${version}`;
+}
+
+/**
+ * Broadcast a one-time "What's New" notification to every active staff member
+ * after a new release is deployed. Safe to call on every server boot / Vercel
+ * cold start: it checks whether the current release version has already been
+ * announced and no-ops if so, so each version is only ever announced once.
+ */
+export async function announceAppUpdateIfNeeded(
+  storage: IStorage,
+): Promise<number> {
+  const tag = versionTag(APP_RELEASE.version);
+
+  // Idempotency guard: bail out if this version was already announced.
+  try {
+    const alreadySent = await storage.hasAppUpdateAnnouncement(tag);
+    if (alreadySent) return 0;
+  } catch (err) {
+    // If the lookup fails (e.g. table not yet migrated), skip rather than risk
+    // spamming users on every cold start.
+    console.error("[appUpdate] announcement lookup failed:", err);
+    return 0;
+  }
+
+  try {
+    const count = await broadcastToActiveStaff(storage, {
+      title: `${APP_RELEASE.title} (${tag})`,
+      message: buildReleaseMessage(),
+      type: APP_UPDATE_TYPE,
+    });
+    if (count > 0) {
+      console.log(
+        `[appUpdate] announced release ${tag} to ${count} active staff`,
+      );
+    }
+    return count;
+  } catch (err) {
+    console.error("[appUpdate] failed to broadcast release notification:", err);
+    return 0;
+  }
+}

@@ -106,6 +106,7 @@ const ROLE_PERMISSIONS: Record<RbacRole, Permission[]> = {
     "appointments.view",
   ],
   Physiotherapist: [
+    "patients.manage",
     "patients.view_all",
     "visits.manage",
     "attendance.mark_own",
