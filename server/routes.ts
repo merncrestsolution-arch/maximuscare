@@ -910,6 +910,19 @@ export async function registerRoutes(
 
   registerPatientRoutes(app);
 
+  // Next out-patient session number for a patient. Computed as max+1 over ALL of
+  // the patient's (non-deleted) visits so the New Visit form shows the same value
+  // the server will store — independent of the requesting staff member's scope.
+  app.get("/api/patients/:id/next-session-number", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const existing = await storage.getVisitsByPatient(param(req, "id"));
+      const nextSessionNumber = computeNextSessionNumber(existing.map((v) => v.sessionNumber));
+      return res.json({ nextSessionNumber });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get single patient
   app.get("/api/patients/:id", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -1846,11 +1859,9 @@ export async function registerRoutes(
   // Get next session number for a date
   app.get("/api/inpatients/:admissionId/sessions/next-number", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { date } = req.query;
-      if (!date || typeof date !== 'string') {
-        return res.status(400).json({ message: "Date is required" });
-      }
-      const count = await storage.getSessionCountForDate(param(req, "admissionId"), date);
+      // Session number is cumulative across the whole admission (not reset per
+      // day), so it reflects the patient's overall treatment progress.
+      const count = await storage.getSessionCountForAdmission(param(req, "admissionId"));
       return res.json({ nextSessionNumber: count + 1 });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1868,9 +1879,10 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Cannot add session to discharged patient" });
       }
 
-      // Auto-calculate session number
-      const sessionDate = req.body.sessionDate || new Date().toISOString().split('T')[0];
-      const existingCount = await storage.getSessionCountForDate(param(req, "admissionId"), sessionDate);
+      // Auto-calculate session number — cumulative across the admission so it
+      // reflects the patient's overall treatment progress rather than resetting
+      // to 1 each calendar day.
+      const existingCount = await storage.getSessionCountForAdmission(param(req, "admissionId"));
       const sessionNumber = existingCount + 1;
 
       const data = {
@@ -2013,6 +2025,38 @@ export async function registerRoutes(
       await storage.updateInPatientAdmission(param(req, "admissionId"), { status: 'Discharged' });
 
       return res.status(201).json(discharge);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Re-admit a discharged patient (Admin, MD only). Sets the admission back to
+  // "Admitted" and removes the prior discharge record so sessions can resume and
+  // a fresh discharge can be recorded later.
+  app.post("/api/inpatients/:admissionId/readmit", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
+    try {
+      const admissionId = param(req, "admissionId");
+      const admission = await storage.getInPatientAdmission(admissionId);
+      if (!admission) {
+        return res.status(404).json({ message: "Admission not found" });
+      }
+      if (admission.status !== 'Discharged') {
+        return res.status(400).json({ message: "Only discharged patients can be re-admitted" });
+      }
+
+      await storage.deleteInPatientDischargeByAdmission(admissionId);
+      const updated = await storage.updateInPatientAdmission(admissionId, { status: 'Admitted' });
+
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "inpatient",
+        action: "update",
+        recordId: admissionId,
+        newValue: { status: 'Admitted', readmitted: true },
+      });
+
+      return res.json(updated);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

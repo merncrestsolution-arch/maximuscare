@@ -4,6 +4,7 @@ import type { OverviewContext } from "@shared/branchAccess";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./lib/queryClient";
 import { Toaster } from "@/components/ui/toaster";
+import { UpdateAvailableNotification } from "@/components/update-available-notification";
 import { AuthProvider, useAuth } from "@/context/auth-context";
 import { BranchProvider, useBranch } from "@/context/branch-context";
 import { DataProvider } from "@/context/data-context";
@@ -135,6 +136,7 @@ function AppRoutes() {
     <>
       {isLoading ? <LoginStyleSplash message="Loading…" /> : <Router />}
       <Toaster />
+      <UpdateAvailableNotification />
     </>
   );
 }

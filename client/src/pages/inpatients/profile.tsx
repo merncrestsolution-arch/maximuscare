@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
 import { useBranding } from "@/context/branding-context";
@@ -50,6 +50,7 @@ export default function InPatientProfilePage() {
   const { data: extraExpenses } = useInPatientExtraExpenses(patientId);
   const { data: extraExpenseTotalData } = useInPatientExtraExpenseTotal(patientId);
   const deleteInPatient = useDeleteInPatient();
+  const readmitInPatient = useReadmitInPatient();
   const createPayment = useCreateInPatientPayment();
   const updateInPatient = useUpdateInPatient();
   const createExtraExpense = useCreateInPatientExtraExpense();
@@ -104,6 +105,7 @@ export default function InPatientProfilePage() {
   const canAddPayment = canViewPayments;
   const canAddSession = patient?.status === "Admitted";
   const canDischarge = isAdminMD && patient?.status === "Admitted";
+  const canReadmit = isAdminMD && patient?.status === "Discharged";
 
   const paymentTotal = paymentTotalData?.total || 0;
   const extraExpenseTotal = extraExpenseTotalData?.total || 0;
@@ -151,6 +153,19 @@ export default function InPatientProfilePage() {
         title: "Error", 
         description: error instanceof Error ? error.message : "Failed to delete",
         variant: "destructive"
+      });
+    }
+  };
+
+  const handleReadmit = async () => {
+    try {
+      await readmitInPatient.mutateAsync(patientId);
+      toast({ title: "Success", description: "Patient re-admitted" });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to re-admit",
+        variant: "destructive",
       });
     }
   };
@@ -833,6 +848,39 @@ export default function InPatientProfilePage() {
           >
             Discharge Patient
           </Button>
+        )}
+
+        {canReadmit && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                className="w-full h-12"
+                variant="outline"
+                disabled={readmitInPatient.isPending}
+                data-testid="button-readmit"
+              >
+                {readmitInPatient.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Re-admit Patient"
+                )}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Re-admit this patient?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will set the patient back to Admitted and remove the existing
+                  discharge record so new sessions can be added. You can discharge
+                  them again later.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleReadmit}>Re-admit</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
       </div>
 

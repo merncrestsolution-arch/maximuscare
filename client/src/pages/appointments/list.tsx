@@ -9,7 +9,7 @@ import { Link } from "wouter";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDay, addMonths, subMonths, isSameDay, isToday } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { Appointment } from "@/lib/types";
-import { isManagementRole } from "@/lib/permissions";
+import { canManageAppointments } from "@/lib/permissions";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
@@ -32,7 +32,7 @@ export default function AppointmentsList() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  const canManage = isManagementRole(user?.role);
+  const canManage = canManageAppointments(user?.role);
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);

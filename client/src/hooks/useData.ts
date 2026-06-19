@@ -363,6 +363,16 @@ export function useDeleteInPatient() {
   });
 }
 
+export function useReadmitInPatient() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (admissionId: string) => inPatientApi.readmit(admissionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
+    },
+  });
+}
+
 // In-Patient Session hooks
 export function useInPatientSessions(admissionId: string) {
   return useQuery({

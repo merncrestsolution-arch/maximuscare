@@ -88,12 +88,22 @@ export interface DashboardCharts {
   topIncentiveStaff: { staffName: string; incentiveCount: number; incentiveAmount: number }[];
 }
 
-function groupRevenueByDay(visits: Visit[]): { date: string; revenue: number }[] {
+function groupRevenueByDay(
+  visits: Visit[],
+  inPatientDaily: { date: string; revenue: number }[] = []
+): { date: string; revenue: number }[] {
   const byDay = new Map<string, number>();
+  // Collected revenue (fully paid + partial amount paid) so the trend reconciles
+  // with the Total Revenue card instead of only counting fully-"paid" visits.
   for (const v of visits) {
-    if (!isPaidPaymentStatus(v.paymentStatus)) continue;
-    const amt = Number(v.paymentAmount) || 0;
+    const amt = getVisitCollectedRevenue(v);
+    if (amt <= 0) continue;
     byDay.set(v.visitDate, (byDay.get(v.visitDate) ?? 0) + amt);
+  }
+  // Fold in in-patient payments / discharge amounts for the same day.
+  for (const d of inPatientDaily) {
+    if (!d.date) continue;
+    byDay.set(d.date, (byDay.get(d.date) ?? 0) + (d.revenue || 0));
   }
   return Array.from(byDay.entries())
     .map(([date, revenue]) => ({ date, revenue }))
@@ -111,16 +121,20 @@ export async function computeRevenueReport(
   let unpaidVisits = await storage.getUnpaidVisits();
   if (branchFilter) unpaidVisits = applyBranchFilter(unpaidVisits, branchFilter);
 
-  const paidVisits = visits.filter((v) => isPaidPaymentStatus(v.paymentStatus));
   const unpaidInRange = visits.filter((v) => !isPaidPaymentStatus(v.paymentStatus));
-  const paidRevenue = visits.reduce((a, v) => a + getVisitCollectedRevenue(v), 0);
   const unpaidRevenue = unpaidInRange.reduce((a, v) => a + getVisitOutstandingBalance(v), 0);
   const outstandingBalance = unpaidVisits.reduce((a, v) => a + getVisitOutstandingBalance(v), 0);
-  const totalRevenue = branchFilter
-    ? visits.reduce((a, v) => a + getVisitCollectedRevenue(v), 0)
-    : await storage.getTotalIncome(rangeFrom, rangeTo);
 
-  const breakdown = computeRevenueBreakdown(visits, [], []);
+  // In-patient revenue (payments + discharges), branch-scoped when filtered.
+  const inPatientDaily = await storage.getInPatientRevenueByDay(rangeFrom, rangeTo, branchFilter ?? null);
+  const inPatientRevenue = inPatientDaily.reduce((a, d) => a + (d.revenue || 0), 0);
+  const visitsRevenue = visits.reduce((a, v) => a + getVisitCollectedRevenue(v), 0);
+  // Collected revenue from visits + in-patient income. getTotalIncome already
+  // includes in-patient (and branch-scopes it) so we use it directly.
+  const paidRevenue = visitsRevenue + inPatientRevenue;
+  const totalRevenue = await storage.getTotalIncome(rangeFrom, rangeTo, branchFilter ?? null);
+
+  const breakdown = computeRevenueBreakdown(visits, [inPatientRevenue], []);
   const branchNames = branchFilter
     ? [branchFilter]
     : ENTERPRISE_BRANCHES.map((b) => b.shortName);
@@ -140,7 +154,7 @@ export async function computeRevenueReport(
     outstandingBalance,
     breakdown: { clinic: breakdown.clinicVisits, home: breakdown.homeVisits, sessions: breakdown.inpatientSessions },
     byBranch,
-    dailyTrend: groupRevenueByDay(visits),
+    dailyTrend: groupRevenueByDay(visits, inPatientDaily),
   };
 }
 
@@ -431,7 +445,8 @@ export async function computeDashboardCharts(
   }
   const incentiveRows = await computeIncentiveReport(storage, rangeFrom, rangeTo);
 
-  const revenueTrend = groupRevenueByDay(visits);
+  const inPatientDaily = await storage.getInPatientRevenueByDay(rangeFrom, rangeTo, branchFilter ?? null);
+  const revenueTrend = groupRevenueByDay(visits, inPatientDaily);
 
   const attByDay = new Map<string, Attendance[]>();
   for (const a of attendance) {

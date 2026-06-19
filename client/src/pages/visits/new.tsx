@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/context/auth-context";
 import { useBranch } from "@/context/branch-context";
-import { usePatients, useCreateVisit, useVisits } from "@/hooks/useData";
+import { usePatients, useCreateVisit } from "@/hooks/useData";
 import { useTreatingStaff } from "@/hooks/useData";
+import { patientApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -61,12 +62,32 @@ export default function NewVisit() {
       );
     }
   }, [selectedBranchName]);
-  const { data: patientVisits = [] } = useVisits({ patientId: formData.patientId || undefined });
-
+  // Fetch the authoritative next session number from the server (max+1 over ALL
+  // of the patient's visits). Computing it client-side from the visit list is
+  // unreliable: non-admins only receive visits they treated, and counting can
+  // diverge from the stored value after deletions.
   useEffect(() => {
-    if (!formData.patientId) return;
-    setFormData((prev) => ({ ...prev, sessionNumber: String(patientVisits.length + 1) }));
-  }, [formData.patientId, patientVisits.length]);
+    const patientId = formData.patientId;
+    if (!patientId) return;
+    let cancelled = false;
+    patientApi
+      .nextSessionNumber(patientId)
+      .then((res) => {
+        if (!cancelled) {
+          setFormData((prev) =>
+            prev.patientId === patientId
+              ? { ...prev, sessionNumber: String(res.nextSessionNumber) }
+              : prev
+          );
+        }
+      })
+      .catch(() => {
+        /* leave the existing value; server recomputes on submit */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.patientId]);
 
   const clinicalStaff = useMemo(() => getClinicalStaff(staff as any[]), [staff]);
 
@@ -106,7 +127,7 @@ export default function NewVisit() {
 
       await createVisit.mutateAsync({
         patientId: formData.patientId,
-        sessionNumber: patientVisits.length + 1,
+        sessionNumber: Number(formData.sessionNumber) || 1,
         condition: formData.condition,
         treatment: formData.treatment,
         visitDate: formData.visitDate,

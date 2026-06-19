@@ -61,6 +61,16 @@ export function canManageTasks(role: string | undefined): boolean {
   return isManagementRole(role) || isOperationalLead(role);
 }
 
+/**
+ * Create / edit / delete appointments. Mirrors the server RBAC `appointments.manage`
+ * permission (Admin, MD, Nexus MD, Manager, Branch Manager, Receptionist) so the UI
+ * doesn't hide actions the API actually allows.
+ */
+export function canManageAppointments(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return isOperationalLead(r) || isNexusManagingDirector(r) || r === "Receptionist";
+}
+
 /** Read access to the staff directory, profiles, and attendance history. */
 export function canViewStaffList(role: string | undefined): boolean {
   return isManagementRole(role) || isOperationalLead(role);

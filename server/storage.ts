@@ -249,6 +249,7 @@ export interface IStorage {
   getAllInPatientSessions(): Promise<InPatientSession[]>;
   getInPatientSessionsByAdmission(admissionId: string): Promise<InPatientSession[]>;
   getSessionCountForDate(admissionId: string, date: string): Promise<number>;
+  getSessionCountForAdmission(admissionId: string): Promise<number>;
   createInPatientSession(data: InsertInPatientSession): Promise<InPatientSession>;
   updateInPatientSession(id: string, data: UpdateInPatientSession): Promise<InPatientSession | undefined>;
   deleteInPatientSession(id: string): Promise<boolean>;
@@ -258,6 +259,7 @@ export interface IStorage {
   getInPatientDischargeByAdmission(admissionId: string): Promise<InPatientDischarge | undefined>;
   createInPatientDischarge(data: InsertInPatientDischarge): Promise<InPatientDischarge>;
   updateInPatientDischarge(id: string, data: UpdateInPatientDischarge): Promise<InPatientDischarge | undefined>;
+  deleteInPatientDischargeByAdmission(admissionId: string): Promise<boolean>;
 
   // In-Patient Payment methods
   getInPatientPaymentsByAdmission(admissionId: string): Promise<InPatientPayment[]>;
@@ -284,6 +286,7 @@ export interface IStorage {
 
   // Revenue calculation methods
   getTotalIncome(startDate?: string, endDate?: string, branchName?: string | null): Promise<number>;
+  getInPatientRevenueByDay(startDate?: string, endDate?: string, branchName?: string | null): Promise<{ date: string; revenue: number }[]>;
 
   // Incentive Settings methods
   getIncentiveSettings(): Promise<IncentiveSettings | undefined>;
@@ -1021,6 +1024,15 @@ export class DatabaseStorage implements IStorage {
     return Number(result[0]?.count ?? 0) || 0;
   }
 
+  /** Total sessions logged for an admission (cumulative across all dates). */
+  async getSessionCountForAdmission(admissionId: string): Promise<number> {
+    const result = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(inPatientSessions)
+      .where(eq(inPatientSessions.admissionId, admissionId));
+    return Number(result[0]?.count ?? 0) || 0;
+  }
+
   async createInPatientSession(data: InsertInPatientSession): Promise<InPatientSession> {
     const result = await db.insert(inPatientSessions).values(data).returning();
     return parseJsonArrays(result[0] as any, ["attachments"]) as InPatientSession;
@@ -1063,6 +1075,15 @@ export class DatabaseStorage implements IStorage {
       .where(eq(inPatientDischarges.id, id))
       .returning();
     return result[0];
+  }
+
+  /** Removes a discharge record (used when re-admitting a discharged patient). */
+  async deleteInPatientDischargeByAdmission(admissionId: string): Promise<boolean> {
+    const result = await db
+      .delete(inPatientDischarges)
+      .where(eq(inPatientDischarges.admissionId, admissionId))
+      .returning();
+    return result.length > 0;
   }
 
   // In-Patient Payment methods
@@ -1333,6 +1354,50 @@ export class DatabaseStorage implements IStorage {
     }
 
     return visitsTotal + inPatientTotal;
+  }
+
+  /**
+   * Daily in-patient revenue (payments + discharge amounts) within a range.
+   * Used by the revenue trend chart so in-patient income shows up alongside
+   * outpatient visits. Optionally branch-scoped via the admission's branch.
+   */
+  async getInPatientRevenueByDay(
+    startDate?: string,
+    endDate?: string,
+    branchName?: string | null
+  ): Promise<{ date: string; revenue: number }[]> {
+    const inRange = (d?: string | null) =>
+      !startDate || !endDate || (!!d && d >= startDate && d <= endDate);
+
+    let allowedAdmissionIds: Set<string> | null = null;
+    if (branchName) {
+      const { normalizeBranchName } = await import("@shared/branches");
+      const target = normalizeBranchName(branchName).toLowerCase();
+      const admissions = await this.getAllInPatientAdmissions();
+      allowedAdmissionIds = new Set(
+        admissions
+          .filter((a: any) => a.branch && normalizeBranchName(a.branch).toLowerCase() === target)
+          .map((a: any) => a.id)
+      );
+    }
+
+    const byDay = new Map<string, number>();
+    const payments = await db.select().from(inPatientPayments);
+    for (const p of payments as any[]) {
+      if (!inRange(p.paymentDate)) continue;
+      if (allowedAdmissionIds && !allowedAdmissionIds.has(p.admissionId)) continue;
+      byDay.set(p.paymentDate, (byDay.get(p.paymentDate) ?? 0) + (parseFloat(p.amount) || 0));
+    }
+    const discharges = await db.select().from(inPatientDischarges);
+    for (const d of discharges as any[]) {
+      if (!inRange(d.dischargeDate)) continue;
+      if (allowedAdmissionIds && !allowedAdmissionIds.has(d.admissionId)) continue;
+      byDay.set(d.dischargeDate, (byDay.get(d.dischargeDate) ?? 0) + (parseFloat(d.amountPaid) || 0));
+    }
+
+    return Array.from(byDay.entries())
+      .map(([date, revenue]) => ({ date, revenue }))
+      .sort((a, b) => a.date.localeCompare(b.date));
   }
 
   async getIncentiveSettings(): Promise<IncentiveSettings | undefined> {

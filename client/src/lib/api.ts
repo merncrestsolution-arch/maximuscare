@@ -362,6 +362,8 @@ export const patientApi = {
     const qs = q.toString() ? `?${q.toString()}` : "";
     return apiRequest<{ patientCode: string }>(`/patients/next-id${qs}`);
   },
+  nextSessionNumber: (patientId: string) =>
+    apiRequest<{ nextSessionNumber: number }>(`/patients/${patientId}/next-session-number`),
   create: (data: any) => apiRequest<any>('/patients', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -463,6 +465,9 @@ export const inPatientApi = {
   }),
   delete: (id: string) => apiRequest<{ message: string }>(`/inpatients/${id}`, {
     method: 'DELETE',
+  }),
+  readmit: (admissionId: string) => apiRequest<any>(`/inpatients/${admissionId}/readmit`, {
+    method: 'POST',
   }),
 
   // Sessions

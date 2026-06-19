@@ -8,7 +8,6 @@ import {
   summarizeAttendance,
   isPaidPaymentStatus,
   visitMatchesStaff,
-  getVisitCollectedRevenue,
 } from "./calculationEngine";
 import { computeExtendedDashboardKpis, computeDashboardCharts, type DashboardCharts } from "./reportService";
 
@@ -69,12 +68,10 @@ export async function computeDashboardKpis(
   const ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
   const todaySessions = ipSessions.filter((s) => s.sessionDate === today).length;
 
-  // Collected revenue only (paid in full + partial amount paid) — matches the
-  // revenue summary / revenue report. Branch-scoped uses the branch's visits;
-  // unscoped falls back to the global income aggregate (visits + inpatient).
-  const totalRevenue = branchFilter
-    ? visits.reduce((sum, v) => sum + getVisitCollectedRevenue(v), 0)
-    : await storage.getTotalIncome(rangeFrom, rangeTo);
+  // Collected revenue (paid in full + partial amount paid) plus in-patient
+  // income. getTotalIncome already folds in in-patient payments/discharges and
+  // branch-scopes them, so use it for both scoped and unscoped views.
+  const totalRevenue = await storage.getTotalIncome(rangeFrom, rangeTo, branchFilter ?? null);
   let attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
   if (branchFilter) attendance = filterByBranchName(attendance, branchFilter);
   const attendanceSummary = summarizeAttendance(attendance);

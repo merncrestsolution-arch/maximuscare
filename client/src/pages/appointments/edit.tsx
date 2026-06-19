@@ -12,7 +12,7 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
 import { useAuth } from "@/context/auth-context";
-import { isManagementRole } from "@/lib/permissions";
+import { canManageAppointments } from "@/lib/permissions";
 
 export default function EditAppointment() {
   const [, params] = useRoute("/appointments/edit/:id");
@@ -104,10 +104,10 @@ export default function EditAppointment() {
     );
   }
 
-  if (user && !isManagementRole(user.role)) {
+  if (user && !canManageAppointments(user.role)) {
     return (
       <div className={`${EDIT_PAGE_ROOT} p-6 text-center space-y-4`}>
-        <p className="text-black/80 font-medium">Only Admin or MD can edit appointments.</p>
+        <p className="text-black/80 font-medium">You don't have permission to edit appointments.</p>
         <Button onClick={() => setLocation("/appointments")} data-testid="button-back-from-denied">
           Back to Appointments
         </Button>
