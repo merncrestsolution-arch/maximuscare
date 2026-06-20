@@ -15,15 +15,16 @@ export interface AppRelease {
 }
 
 export const APP_RELEASE: AppRelease = {
-  version: "1.1.2",
+  version: "1.1.3",
   title: "App Updated — What's New",
   highlights: [
-    "Multi-branch support with quick branch switching.",
-    "New Reports hub: revenue, sessions, attendance, expenses & incentives.",
-    "Salary & payroll: generate, approve, fines, OT and deductions.",
-    "Expense tracking and per-branch dashboards.",
-    "In-app notifications and task assignments.",
-    "Performance, stability and UI improvements across the app.",
+    "In-patient sessions: branch isolation, live dashboard counts, and PDF export.",
+    "Dashboard: branch-wide KPIs, improved revenue trend, and cleaner admin view.",
+    "Patient profiles: full visit history for staff and clearer revenue visibility.",
+    "Revenue reports: accurate branch totals and home-visit fee breakdown.",
+    "Appointments & patients: lists stay in sync with your selected branch.",
+    "Managers can edit visits and in-patient sessions; therapist summary for all staff.",
+    "Fines, attendance, and payroll fixes across the app.",
   ],
 };
 
