@@ -45,6 +45,7 @@ function appVersionPlugin(): Plugin {
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(buildId),
+    __APP_BUILD_DATE__: JSON.stringify(new Date().toISOString().split('T')[0].replace(/-/g, '/')),
   },
   plugins: [react(), tailwindcss(), appVersionPlugin()],
   resolve: {

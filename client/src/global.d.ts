@@ -3,3 +3,4 @@
  * Used to detect when a newer deployment is live and prompt a refresh.
  */
 declare const __APP_VERSION__: string;
+declare const __APP_BUILD_DATE__: string;
