@@ -23,3 +23,7 @@ export type ClinicalRole = (typeof CLINICAL_ROLES)[number];
 export function isClinicalRole(role: string | null | undefined): boolean {
   return CLINICAL_ROLES.includes(String(role ?? "") as ClinicalRole);
 }
+
+export function isOperationalLead(role: string): boolean {
+  return ["admin", "manager", "branch_manager", "org_admin"].includes(role);
+}
