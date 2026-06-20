@@ -234,7 +234,7 @@ export async function computeBranchDashboardStats(
       attendance: attendanceSummary,
       incentiveAmount,
     };
-  });
+  }));
 }
 
 export function assignPatientsToFirstVisitTherapist(

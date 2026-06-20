@@ -2745,7 +2745,6 @@ export async function registerRoutes(
         updatedByStaffId: (req as any).user?.staffId,
       } as any);
       if (!fine) return res.status(404).json({ message: "Fine not found" });
-      const user = (req as any).user;
       const editor = await storage.getStaff(user.staffId);
       await logAudit(storage, {
         userId: user.staffId,
