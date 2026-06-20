@@ -1,5 +1,6 @@
 import type { IStorage } from "../storage";
 import type { Visit } from "@shared/schema";
+import { normalizeBranchName, getHomeVisitRateTier } from "@shared/branches";
 import { DEFAULT_RATES } from "./calculationEngine";
 
 export const HOME_VISIT_RATES = {
@@ -29,7 +30,7 @@ export async function detectHomeVisitType(
   }
   const attendance = await storage.getAttendanceByStaffAndDate(staffId, visitDate);
   if (attendance?.status === "Absent") return "Holiday";
-  if (branch === "Bandaragama") return "Bandaragama";
+  if (getHomeVisitRateTier(branch) === "bandaragama") return "Bandaragama";
   return "Colombo";
 }
 

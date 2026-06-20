@@ -890,7 +890,10 @@ export async function registerRoutes(
       } else {
         const all = await storage.getAllPatients();
         patientList = all.filter((p) => staffPatientIds!.includes(p.id));
-        if (branch) patientList = patientList.filter((p) => p.branch === branch);
+        if (branch) {
+          const target = normalizeBranchName(branch).toLowerCase();
+          patientList = patientList.filter((p) => normalizeBranchName(p.branch).toLowerCase() === target);
+        }
       }
       return res.json(patientList);
     } catch (error: any) {
@@ -1089,13 +1092,24 @@ export async function registerRoutes(
           visitList = await storage.getAllVisits();
         }
       } else {
-        visitList = await storage.getVisitsForStaffMember(currentUser.staffId);
-        if (patientId) visitList = visitList.filter((v) => v.patientId === patientId);
-        if (startDate && endDate) {
-          visitList = visitList.filter((v) => v.visitDate >= startDate && v.visitDate <= endDate);
+        // Patient profile: all staff see the full visit history for that patient.
+        if (patientId) {
+          visitList = await storage.getVisitsByPatient(patientId);
+          if (startDate && endDate) {
+            visitList = visitList.filter((v) => v.visitDate >= startDate && v.visitDate <= endDate);
+          }
+        } else {
+          visitList = await storage.getVisitsForStaffMember(currentUser.staffId);
+          if (startDate && endDate) {
+            visitList = visitList.filter((v) => v.visitDate >= startDate && v.visitDate <= endDate);
+          }
         }
       }
-      if (branch) visitList = visitList.filter((v) => v.branch === branch);
+      if (branch && !patientId) {
+        visitList = visitList.filter(
+          (v) => normalizeBranchName(v.branch).toLowerCase() === normalizeBranchName(branch).toLowerCase()
+        );
+      }
 
       return res.json(visitList);
     } catch (error: any) {
@@ -1172,6 +1186,8 @@ export async function registerRoutes(
         recordId: visit.id,
         newValue: visit,
       });
+      const { invalidateOperationalCaches } = await import("./services/cacheService");
+      await invalidateOperationalCaches();
       return res.status(201).json(visit);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -1242,6 +1258,25 @@ export async function registerRoutes(
         }
       }
       const actor = await auditActor(req);
+      const financialFields = ["paymentAmount", "amountPaid", "paymentStatus"] as const;
+      const financialChanges: Record<string, { from: unknown; to: unknown }> = {};
+      for (const field of financialFields) {
+        const oldVal = (before as Record<string, unknown>)[field];
+        const newVal = (visit as Record<string, unknown>)[field];
+        if (newVal !== undefined && String(oldVal ?? "") !== String(newVal ?? "")) {
+          financialChanges[field] = { from: oldVal, to: newVal };
+        }
+      }
+      if (Object.keys(financialChanges).length > 0) {
+        await logAudit(storage, {
+          ...actor,
+          module: "visit_financial",
+          action: "amount_change",
+          recordId: id,
+          oldValue: financialChanges,
+          newValue: { updatedBy: editor?.name ?? user.staffId, changes: financialChanges },
+        });
+      }
       await logAudit(storage, {
         ...actor,
         module: "visit",
@@ -1250,6 +1285,8 @@ export async function registerRoutes(
         oldValue: before,
         newValue: visit,
       });
+      const { invalidateOperationalCaches } = await import("./services/cacheService");
+      await invalidateOperationalCaches();
       return res.json(visit);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -1483,6 +1520,8 @@ export async function registerRoutes(
         recordId: result.id,
         newValue: result,
       });
+      const { invalidateOperationalCaches } = await import("./services/cacheService");
+      await invalidateOperationalCaches();
       return res.status(201).json(result);
     } catch (error: any) {
       console.error(`[ATTENDANCE ERROR]`, error.message || error);
@@ -1720,11 +1759,14 @@ export async function registerRoutes(
     }
   });
 
-  // All in-patient sessions in range (reports / incentives — Admin, MD, Manager).
-  // Optional ?branch= scopes results to one branch (branch dashboards); omitted =
-  // all branches (Maximus-wide payroll/incentive reports).
-  app.get("/api/inpatients/sessions/all", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
+  // All in-patient sessions in range (reports / dashboard — operational roles with
+  // visits.view_all or inpatients.manage). Optional ?branch= scopes to one branch.
+  app.get("/api/inpatients/sessions/all", requireAuth, async (req: Request, res: Response) => {
     try {
+      const user = (req as any).user;
+      if (!hasPermission(user.role, "inpatients.manage") && !hasPermission(user.role, "visits.view_all")) {
+        return res.status(403).json({ message: "Forbidden: insufficient permissions" });
+      }
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       if (!startDate || !endDate) {
@@ -1933,6 +1975,8 @@ export async function registerRoutes(
         recordId: session.id,
         newValue: session,
       });
+      const { invalidateOperationalCaches } = await import("./services/cacheService");
+      await invalidateOperationalCaches();
       return res.status(201).json(session);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1948,7 +1992,9 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Session not found" });
       }
 
-      const canEdit = ["Admin", "MD", "Physiotherapist", "Staff", "Receptionist"].includes(user.role);
+      const canEdit =
+        hasPermission(user.role, "inpatients.manage") ||
+        hasPermission(user.role, "visits.manage");
       if (!canEdit) {
         return res.status(403).json({ message: "Forbidden: insufficient permissions" });
       }
@@ -1968,6 +2014,8 @@ export async function registerRoutes(
       }
       await syncAutoFineForStaffDate(storage, existingSession.treatingStaffId, existingSession.sessionDate);
       await syncAutoFineForStaffDate(storage, session.treatingStaffId, session.sessionDate);
+      const { invalidateOperationalCaches } = await import("./services/cacheService");
+      await invalidateOperationalCaches();
       return res.json(session);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -2450,9 +2498,16 @@ export async function registerRoutes(
       const body = { ...req.body };
       if (body.notes === '' || body.notes === undefined) body.notes = null;
 
+      const resolvedBranch = normalizeBranchName(body.branch ?? branchName ?? "") || branchName;
+      const branchId =
+        (body.branchId as string | undefined) ??
+        (await resolveBranchIdByName(storage, resolvedBranch ?? undefined)) ??
+        null;
+
       const data = {
         ...body,
-        branch: body.branch ?? branchName ?? null,
+        branch: resolvedBranch ?? null,
+        branchId,
         createdByStaffId: user.staffId,
       };
 
@@ -2461,7 +2516,7 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
       }
 
-      const appt = await storage.createAppointment(parsed.data);
+      const appt = await storage.createAppointment(parsed.data as any);
       const apptActor = await auditActor(req);
       await logAudit(storage, {
         ...apptActor,
@@ -2494,7 +2549,7 @@ export async function registerRoutes(
       }
 
       const beforeAppt = await storage.getAppointment(param(req, "id"));
-      const appt = await storage.updateAppointment(param(req, "id"), parsed.data);
+      const appt = await storage.updateAppointment(param(req, "id"), parsed.data as any);
       if (!appt) return res.status(404).json({ message: "Appointment not found" });
       const apptUpdActor = await auditActor(req);
       await logAudit(storage, {
@@ -2587,6 +2642,8 @@ export async function registerRoutes(
         recordId: fine.id,
         newValue: fine,
       });
+      const { invalidateOperationalCaches } = await import("./services/cacheService");
+      await invalidateOperationalCaches();
       return res.status(201).json(fine);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });

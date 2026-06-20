@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
+import { isManager, isBranchManager } from "@/lib/permissions";
 
 const EXPENSE_CATEGORIES = ["Food", "Nurse Visit", "Doctor Visit", "Speech Therapy", "Others"];
 
@@ -101,7 +102,11 @@ export default function InPatientProfilePage() {
   const canViewPayments = isAdminMD || isReceptionist;
   /** Billing summary + billing PDF — Admin & MD only (hidden from physiotherapy staff). */
   const canViewBillingSummary = isAdminMD;
-  const canEditInPatientSession = ["Admin", "MD", "Physiotherapist", "Staff", "Receptionist"].includes(user?.role || "");
+  const canEditInPatientSession =
+    isAdminMD ||
+    isManager(user?.role) ||
+    isBranchManager(user?.role) ||
+    ["Physiotherapist", "Staff", "Receptionist"].includes(user?.role || "");
   const canAddPayment = canViewPayments;
   const canAddSession = patient?.status === "Admitted";
   const canDischarge = isAdminMD && patient?.status === "Admitted";
@@ -773,7 +778,34 @@ export default function InPatientProfilePage() {
                             <div className="text-xs text-green-700 mt-1 line-clamp-2">{session.improvements}</div>
                           ) : null}
                         </div>
-                        <div className="flex justify-end pt-2 md:pt-0">
+                        <div className="flex justify-end pt-2 md:pt-0 gap-1 flex-wrap">
+                          <StructuredReportActions
+                            reportTitle={`In-Patient Session #${session.sessionNumber} — ${session.patientName}`}
+                            fileBaseName={`ip-session-${session.id}`}
+                            columns={[
+                              { key: "field", label: "Field" },
+                              { key: "value", label: "Value" },
+                            ]}
+                            rows={[
+                              { field: "Patient", value: session.patientName },
+                              { field: "Session Date", value: session.sessionDate },
+                              { field: "Session #", value: String(session.sessionNumber) },
+                              { field: "Treating Staff", value: session.treatingStaffName },
+                              { field: "Time", value: `${session.startTime} – ${session.endTime}` },
+                              { field: "Treatment", value: session.treatmentProvided },
+                              { field: "Improvements", value: session.improvements || "—" },
+                              { field: "Notes", value: (session as any).notes || "—" },
+                              { field: "Payments Total", value: `LKR ${paymentTotal.toLocaleString()}` },
+                              { field: "Stay Days", value: String(stayDays) },
+                            ]}
+                            logoUri={logoUri}
+                            themeColor="#0F766E"
+                            meta={[
+                              { label: "Patient", value: patient?.patientName ?? session.patientName },
+                              { label: "Admission", value: patientId },
+                              { label: "Generated", value: format(new Date(), "dd MMM yyyy hh:mm a") },
+                            ]}
+                          />
                           {canEditInPatientSession ? (
                             <Button type="button" variant="outline" size="sm" onClick={() => openSessionEdit(session)} data-testid={`button-edit-session-${session.id}`}>
                               Edit

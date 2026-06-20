@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePatients, useDeletePatient } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,6 +40,10 @@ export default function PatientsList() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState(selectedBranchName ?? "");
+
+  useEffect(() => {
+    if (selectedBranchName) setBranchFilter(selectedBranchName);
+  }, [selectedBranchName]);
   const [statusFilter, setStatusFilter] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [, setLocation] = useLocation();

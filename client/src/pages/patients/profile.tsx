@@ -30,6 +30,7 @@ import { useToast } from "@/hooks/use-toast";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
 import { isPaidStatus, paymentStatusBadgeClass, computeOutstanding, isUnpaidLikeStatus } from "@/lib/paymentStatus";
 import { formatLkr } from "@/lib/reportDatePresets";
+import { isManagementRole, isManager, isBranchManager, isNexusManagingDirector, canViewAllVisits } from "@/lib/permissions";
 import { Banknote, Plus } from "lucide-react";
 import { openAuthenticatedFile, patientsApiExtended } from "@/lib/api";
 
@@ -41,7 +42,7 @@ export default function PatientProfile() {
   const patientId = params?.id || "";
   
   const { data: patient, isLoading: patientLoading, error: patientError } = usePatient(patientId);
-  const { data: allVisits = [] } = useVisits({ patientId });
+  const { data: allVisits = [], isLoading: visitsLoading } = useVisits({ patientId });
   const { data: stats } = usePatientStats(patientId);
   const { data: notes = [] } = usePatientNotes(patientId);
   const { data: documents = [] } = usePatientDocuments(patientId);
@@ -122,6 +123,11 @@ export default function PatientProfile() {
   };
 
   const isAdminMD = ["Admin", "MD"].includes(user?.role || "");
+  const canSeePatientFinancials =
+    isManagementRole(user?.role) ||
+    isManager(user?.role) ||
+    isBranchManager(user?.role) ||
+    isNexusManagingDirector(user?.role);
   const canCollectPayment = ["Admin", "MD", "Receptionist"].includes(user?.role || "");
 
   const handleDocFile = (file: File | null) => {
@@ -291,11 +297,15 @@ export default function PatientProfile() {
       </Card>
 
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-center text-sm">
+        <div className={`grid gap-2 text-center text-sm ${canSeePatientFinancials ? "grid-cols-2 md:grid-cols-5" : "grid-cols-2 md:grid-cols-3"}`}>
           <Card><CardContent className="p-3"><div className="font-bold">{stats.totalVisits}</div><div className="text-muted-foreground text-xs">Visits</div></CardContent></Card>
           <Card><CardContent className="p-3"><div className="font-bold">{stats.totalSessions}</div><div className="text-muted-foreground text-xs">Sessions</div></CardContent></Card>
-          <Card><CardContent className="p-3"><div className="font-bold">Rs.{stats.totalRevenue?.toLocaleString()}</div><div className="text-muted-foreground text-xs">Revenue</div></CardContent></Card>
-          <Card><CardContent className="p-3"><div className="font-bold text-amber-700">Rs.{stats.outstandingAmount?.toLocaleString()}</div><div className="text-muted-foreground text-xs">Outstanding</div></CardContent></Card>
+          {canSeePatientFinancials && (
+            <>
+              <Card><CardContent className="p-3"><div className="font-bold">Rs.{stats.totalRevenue?.toLocaleString()}</div><div className="text-muted-foreground text-xs">Revenue</div></CardContent></Card>
+              <Card><CardContent className="p-3"><div className="font-bold text-amber-700">Rs.{stats.outstandingAmount?.toLocaleString()}</div><div className="text-muted-foreground text-xs">Outstanding</div></CardContent></Card>
+            </>
+          )}
           <Card><CardContent className="p-3"><div className="font-bold text-xs">{stats.lastVisitDate || "—"}</div><div className="text-muted-foreground text-xs">Last Visit</div></CardContent></Card>
         </div>
       )}
@@ -414,11 +424,22 @@ export default function PatientProfile() {
         </div>
 
         <div className="relative pl-4 border-l-2 border-muted/30 space-y-6 ml-2">
-          {patientVisits.map((visit) => {
-            const isManagement = ['Admin', 'MD'].includes(user?.role || '');
+          {visitsLoading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : patientVisits.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">No visits recorded yet.</p>
+          ) : (
+          patientVisits.map((visit) => {
+            const isManagement = isManagementRole(user?.role);
+            const isOperationalLead =
+              isManager(user?.role) || isBranchManager(user?.role) || isNexusManagingDirector(user?.role);
             const isPhysioRole = ['Physiotherapist', 'Staff'].includes(user?.role || '');
             const canEditVisit =
               isManagement ||
+              isOperationalLead ||
+              canViewAllVisits(user?.role) ||
               isPhysioRole ||
               visit.treatingStaffId === user?.id ||
               visit.createdByStaffId === user?.id;
@@ -538,12 +559,7 @@ export default function PatientProfile() {
                 {visitCard}
               </div>
             );
-          })}
-          
-          {patientVisits.length === 0 && (
-            <div className="pl-4 py-8 text-muted-foreground text-sm italic bg-muted/5 rounded-lg border border-dashed mx-2">
-              No visits recorded yet. Add the first visit above.
-            </div>
+          })
           )}
         </div>
       </div>

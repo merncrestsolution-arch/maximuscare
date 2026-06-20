@@ -33,7 +33,7 @@ function ReportsHubContent() {
     { href: "/reports/unpaid", title: "Unpaid Visits", desc: "Outstanding payments until paid", icon: AlertCircle, mgmt: true },
     { href: "/reports/sessions", title: "Session Report", desc: "Outpatient visits and in-patient sessions", icon: ClipboardList },
     { href: "/patients/export", title: "Patient Export", desc: "Excel/PDF register with outstanding balances", icon: Users, mgmt: true },
-    { href: "/therapist-summary", title: "Therapist Summary", desc: "Patients by first-visit therapist", icon: Users, mgmt: true },
+    { href: "/therapist-summary", title: "Therapist Summary", desc: "Patients by first-visit therapist", icon: Users },
     { href: "/branch-dashboards", title: "Branch Dashboards", desc: "Per-branch KPIs and charts", icon: Building2, mgmt: true },
   ].filter((r) => (!r.mgmt || canSeeFinancialReports) && (!r.salary || canSeeSalaryReports));
 

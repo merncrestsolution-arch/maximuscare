@@ -272,6 +272,8 @@ function PhysioSummaryContent() {
           fineDate: fineForm.fineDate,
           amount: fineForm.amount || "500",
           reason: fineForm.reason.trim(),
+          source: "manual",
+          fineType: "Manual Fine",
         });
         toast({ title: "Fine added" });
       }

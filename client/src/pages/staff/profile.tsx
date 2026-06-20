@@ -10,8 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Edit2, CalendarCheck, Stethoscope, Pencil } from "lucide-react";
 import { isVisitForStaff } from "@/lib/visitAccess";
-import { canViewStaffList, canManageStaff } from "@/lib/permissions";
-import { VisitStatsCards } from "@/components/dashboard/visit-stats-cards";
+import { canViewStaffList, canManageStaff, isManager, isBranchManager } from "@/lib/permissions";
 import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
 
 export default function StaffProfilePage() {
@@ -59,7 +58,11 @@ export default function StaffProfilePage() {
   const staffVisits = allVisits
     .filter((v) => isVisitForStaff(v, profileUser))
     .sort((a, b) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime());
-  const canEditVisitsOnProfile = isManagement || currentUser.id === profileUser.id;
+  const canEditVisitsOnProfile =
+    isManagement ||
+    isManager(currentUser.role) ||
+    isBranchManager(currentUser.role) ||
+    currentUser.id === profileUser.id;
   const recentAttendance = [...staffAttendance].sort(
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
@@ -189,7 +192,26 @@ export default function StaffProfilePage() {
 
       <div className="space-y-2">
         <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-1">Performance Overview</h3>
-        <VisitStatsCards visits={staffVisits} limitToBranch={profileUser.branch} />
+        <Card>
+          <CardContent className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-bold">{staffVisits.length}</div>
+              <div className="text-xs text-muted-foreground">Total Visits (all branches)</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold">{staffVisits.filter((v) => v.visitType === "Clinic").length}</div>
+              <div className="text-xs text-muted-foreground">Clinic Visits</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold">{staffVisits.filter((v) => v.visitType === "Home").length}</div>
+              <div className="text-xs text-muted-foreground">Home Visits</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold">{hrmStats?.totalSessions ?? ipSessions.length}</div>
+              <div className="text-xs text-muted-foreground">In-Pt Sessions</div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {payrollSummary && (

@@ -107,6 +107,12 @@ export async function cacheGetOrSet<T>(
   return value;
 }
 
+/** Bust dashboard/report caches after visits, sessions, attendance, or fines change. */
+export async function invalidateOperationalCaches(): Promise<void> {
+  await cacheDeletePrefix("dashboard:");
+  await cacheDeletePrefix("report:");
+}
+
 /** Sync wrappers for legacy callers — prefer async versions. */
 export function cacheGetSync<T>(key: string): T | undefined {
   const entry = memoryStore.get(key);

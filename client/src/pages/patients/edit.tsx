@@ -15,6 +15,7 @@ import { format } from "date-fns";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
 import { BranchSelectField } from "@/components/branch/branch-select-field";
 import { useBranchOptions } from "@/hooks/use-branch-options";
+import { useBranch } from "@/context/branch-context";
 import { patientApi } from "@/lib/api";
 
 const DEFAULT_PATIENT: Omit<Patient, "id"> = {
@@ -34,7 +35,8 @@ export default function PatientEditPage() {
   const [match, params] = useRoute("/patients/:id/edit");
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { defaultValue: defaultBranch } = useBranchOptions();
+  const { defaultValue: defaultBranch, options: branchOptions } = useBranchOptions({ forRegistration: true });
+  const { selectedBranchName } = useBranch();
 
   const patientId = match ? params?.id : undefined;
   const isEdit = !!patientId && patientId !== "new";
@@ -59,9 +61,10 @@ export default function PatientEditPage() {
       if (!existingPatient) return;
       setFormData({ ...existingPatient });
     } else {
-      setFormData({ ...DEFAULT_PATIENT, branch: defaultBranch, registeredDate: format(new Date(), "yyyy-MM-dd") });
+      const branchDefault = selectedBranchName ?? defaultBranch;
+      setFormData({ ...DEFAULT_PATIENT, branch: branchDefault, registeredDate: format(new Date(), "yyyy-MM-dd") });
     }
-  }, [isEdit, existingPatient]);
+  }, [isEdit, existingPatient, selectedBranchName, defaultBranch]);
 
   if (isEdit && isLoading) {
     return (

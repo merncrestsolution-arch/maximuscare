@@ -3,6 +3,7 @@
  * incentives, home visits, OT, fines, expenses, and dashboard KPIs.
  */
 import type { Visit, Attendance, InPatientSession, StaffFine, Expense } from "@shared/schema";
+import { getHomeVisitRateTier } from "@shared/branches";
 
 export const DEFAULT_RATES = {
   incentiveMinCount: 5,
@@ -227,9 +228,7 @@ export function classifyHomeVisit(
   attendanceStatus: string | undefined | null
 ): "Colombo" | "Bandaragama" | "Holiday" {
   if (isHolidayHomeVisitDay(attendanceStatus)) return "Holiday";
-  // Bandaragama tier uses lower home-visit rate; all other branches use main tier.
-  const b = branch.trim().toLowerCase();
-  if (b === "bandaragama" || b.includes("bandaragama")) return "Bandaragama";
+  if (getHomeVisitRateTier(branch) === "bandaragama") return "Bandaragama";
   return "Colombo";
 }
 

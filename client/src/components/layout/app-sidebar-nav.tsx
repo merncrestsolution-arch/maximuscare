@@ -176,16 +176,14 @@ export function AppSidebarNav() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )}
-                  {["Admin", "MD"].includes(user.role) && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton asChild isActive={isActive("/therapist-summary")} className="min-h-11">
-                        <Link href="/therapist-summary" onClick={closeMobile}>
-                          <BarChart3 className="h-5 w-5" />
-                          <span>Therapist Summary</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton asChild isActive={isActive("/therapist-summary")} className="min-h-11">
+                      <Link href="/therapist-summary" onClick={closeMobile}>
+                        <BarChart3 className="h-5 w-5" />
+                        <span>Therapist Summary</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild isActive={location.startsWith("/inpatients")} className="min-h-11">
                       <Link href="/inpatients" onClick={closeMobile}>

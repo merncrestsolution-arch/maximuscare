@@ -490,6 +490,8 @@ export default function AttendancePage() {
         title: "Attendance Marked",
         description: `Staff marked as ${status.toLowerCase()} for ${format(new Date(adminMarkDate), 'dd MMM yyyy')}.`,
       });
+      setSelectedStaffId(adminMarkStaffId);
+      setSelectedMonth(adminMarkDate.slice(0, 7));
       setAdminMarkStaffId("");
     } catch (error: any) {
       toast({

@@ -93,20 +93,21 @@ export default function Dashboard() {
   const deleteExpense = useDeleteExpense();
   const deleteVisit = useDeleteVisit();
 
-  // Managers (and branch managers) see all in-patient sessions for their branch,
-  // not just sessions they personally treated. Scope to the active branch so
-  // other branches/orgs don't leak in.
-  const canViewAllSessions = isManagement || showManagerDashboard;
-  const ipDayEnd = useMemo(() => format(addDays(parseISO(ipSessionDate), 1), "yyyy-MM-dd"), [ipSessionDate]);
-  const { data: ipSessionsAll = [] } = useAllInPatientSessionsInRange(
-    { startDate: ipSessionDate, endDate: ipDayEnd, branch: selectedBranchName ?? undefined },
+  const canViewAllVisitsClient = canViewAllVisits(user?.role);
+
+  // Managers, branch managers, and receptionists see all in-patient sessions for
+  // their branch (API scoped), not just sessions they personally treated.
+  const canViewAllSessions = isManagement || showManagerDashboard || canViewAllVisitsClient;
+  const { data: ipSessionsAll = [], isLoading: loadingIpAll } = useAllInPatientSessionsInRange(
+    { startDate: ipSessionDate, endDate: ipSessionDate, branch: selectedBranchName ?? undefined },
     canViewAllSessions
   );
-  const { data: ipSessionsMine = [] } = useInPatientSessionsForStaffRange(
-    { startDate: ipSessionDate, endDate: ipDayEnd, staffId: user?.id || "" },
+  const { data: ipSessionsMine = [], isLoading: loadingIpMine } = useInPatientSessionsForStaffRange(
+    { startDate: ipSessionDate, endDate: ipSessionDate, staffId: user?.id || "" },
     !canViewAllSessions && !!user?.id
   );
   const ipSessionsForDash = canViewAllSessions ? ipSessionsAll : ipSessionsMine;
+  const loadingIpSessions = canViewAllSessions ? loadingIpAll : loadingIpMine;
 
   const patientNameById = useMemo(
     () => new Map(patients.map((p) => [p.id, p.name])),
@@ -166,10 +167,8 @@ export default function Dashboard() {
     );
   }
   
-  // Roles with visits.view_all (Admin, MD, Receptionist, Manager, Branch Manager,
-  // Nexus MD) see every visit for their branch (the list is already branch-scoped
+  // Roles with visits.view_all see every visit for their branch (already scoped
   // server-side), not just their own. Physiotherapists/Staff stay scoped to theirs.
-  const canViewAllVisitsClient = canViewAllVisits(user?.role);
   const allMyVisits = visits.filter((v) =>
     canViewAllVisitsClient ? true : isVisitForStaff(v, user, { includeCreator: true })
   );
@@ -183,10 +182,11 @@ export default function Dashboard() {
         )
       : myVisits;
 
-  const totalPatients = (isManagement || isManagerRole || canViewAllVisitsClient) ? patients.length : patients.filter(p => myVisits.some(v => v.patientId === p.id)).length;
-  const todayVisits = (isManagement || isManagerRole)
-    ? (dashboardKpis?.todayVisits ?? myVisits.filter((v) => v.visitDate === format(new Date(), "yyyy-MM-dd")).length)
-    : myVisits.filter((v) => v.visitDate === format(new Date(), "yyyy-MM-dd")).length;
+  const totalPatients = (isManagement || isManagerRole || isBranchManagerRole || canViewAllVisitsClient) ? patients.length : patients.filter(p => myVisits.some(v => v.patientId === p.id)).length;
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const todayVisits = (isManagement || isManagerRole || isBranchManagerRole)
+    ? (dashboardKpis?.todayVisits ?? allMyVisits.filter((v) => v.visitDate === todayStr).length)
+    : myVisits.filter((v) => v.visitDate === todayStr).length;
   const paidVisits = myVisits.filter(v => v.paymentStatus?.toLowerCase() === 'paid').length;
   const scopedUnpaid = canViewAllVisitsClient
     ? unpaidVisitsData
@@ -276,13 +276,6 @@ export default function Dashboard() {
               }
               accent="neutral"
               icon={<Users className="h-5 w-5" />}
-            />
-            <StatCard
-              title="Salary Liability"
-              value={loadingKpis ? "—" : formatCurrency(dashboardKpis?.salaryLiability ?? 0)}
-              subtitle={`Unpaid visits: ${unpaidVisits}`}
-              accent="warning"
-              icon={<TrendingUp className="h-5 w-5" />}
             />
           </KpiGrid>
 
@@ -660,7 +653,11 @@ export default function Dashboard() {
           />
         </CardHeader>
         <CardContent>
-          {ipSessionsForDash.length === 0 ? (
+          {loadingIpSessions ? (
+            <div className="flex justify-center py-6">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : ipSessionsForDash.length === 0 ? (
             <div className="text-sm text-muted-foreground">No in-patient sessions on this date.</div>
           ) : (
             <div className="overflow-x-auto rounded-lg border">

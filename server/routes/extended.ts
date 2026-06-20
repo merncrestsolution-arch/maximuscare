@@ -511,7 +511,7 @@ export function registerExtendedRoutes(app: Express) {
     }
   });
 
-  app.get("/api/reports/therapist-patients", requireAuth, requireStaffManage, async (_req, res) => {
+  app.get("/api/reports/therapist-patients", requireAuth, async (_req, res) => {
     try {
       const visits = await storage.getAllVisits();
       const patients = await storage.getAllPatients();

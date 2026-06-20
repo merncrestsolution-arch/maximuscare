@@ -496,11 +496,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPatientsByBranch(branch: string): Promise<Patient[]> {
-    return await db
+    const { normalizeBranchName } = await import("@shared/branches");
+    const target = normalizeBranchName(branch).toLowerCase();
+    const all = await db
       .select()
       .from(patients)
-      .where(and(eq(patients.branch, branch), isNull(patients.deletedAt)))
+      .where(isNull(patients.deletedAt))
       .orderBy(asc(patients.fullName), asc(patients.name));
+    return all.filter((p: Patient) => normalizeBranchName(p.branch).toLowerCase() === target);
   }
 
   async getPatientsPaginated(filters: {
@@ -512,7 +515,7 @@ export class DatabaseStorage implements IStorage {
     limit: number;
   }): Promise<{ data: Patient[]; total: number }> {
     const conditions: SQL[] = [isNull(patients.deletedAt)];
-    if (filters.branch) conditions.push(eq(patients.branch, filters.branch));
+    // Branch filter applied in-memory after fetch so legacy branch labels match.
     if (filters.status) conditions.push(eq(patients.status, filters.status));
     if (filters.patientIds?.length) conditions.push(inArray(patients.id, filters.patientIds));
     if (filters.search?.trim()) {
@@ -527,19 +530,21 @@ export class DatabaseStorage implements IStorage {
       );
     }
     const where = and(...conditions);
-    const countRow = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(patients)
-      .where(where);
-    const total = Number(countRow[0]?.count ?? 0);
-    const offset = (filters.page - 1) * filters.limit;
-    const data = await db
+    let allRows = await db
       .select()
       .from(patients)
       .where(where)
-      .orderBy(asc(patients.fullName), asc(patients.name))
-      .limit(filters.limit)
-      .offset(offset);
+      .orderBy(asc(patients.fullName), asc(patients.name));
+
+    if (filters.branch) {
+      const { normalizeBranchName } = await import("@shared/branches");
+      const target = normalizeBranchName(filters.branch).toLowerCase();
+      allRows = allRows.filter((p: Patient) => normalizeBranchName(p.branch).toLowerCase() === target);
+    }
+
+    const total = allRows.length;
+    const offset = (filters.page - 1) * filters.limit;
+    const data = allRows.slice(offset, offset + filters.limit);
     return { data, total };
   }
 

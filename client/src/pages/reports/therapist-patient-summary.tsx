@@ -2,8 +2,6 @@ import { Link } from "wouter";
 import { useTherapistPatientReport } from "@/hooks/useData";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
-import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canViewManagementReports } from "@/lib/permissions";
 
 function TherapistPatientSummaryContent() {
   const { data: grouped = [], isLoading, error } = useTherapistPatientReport();
@@ -48,9 +46,5 @@ function TherapistPatientSummaryContent() {
 }
 
 export default function TherapistPatientSummaryPage() {
-  return (
-    <RoleProtectedRoute allowed={canViewManagementReports}>
-      <TherapistPatientSummaryContent />
-    </RoleProtectedRoute>
-  );
+  return <TherapistPatientSummaryContent />;
 }

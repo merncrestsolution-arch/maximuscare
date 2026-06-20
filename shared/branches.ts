@@ -24,7 +24,7 @@ export const ENTERPRISE_BRANCHES = [
     code: "NEXUS",
     name: "Nexus Physio & Rehab Center",
     shortName: "Nexus Physio",
-    homeVisitRateTier: "main" as const,
+    homeVisitRateTier: "bandaragama" as const,
   },
 ] as const;
 

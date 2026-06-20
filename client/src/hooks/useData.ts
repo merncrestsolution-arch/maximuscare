@@ -62,6 +62,7 @@ export function useVisits(params?: { patientId?: string; startDate?: string; end
   return useQuery({
     queryKey: ['visits', params],
     queryFn: () => visitApi.getAll(params),
+    enabled: params?.patientId === undefined || !!params.patientId,
   });
 }
 
@@ -400,6 +401,7 @@ export function useCreateInPatientSession() {
       queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'sessions'] });
       queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-range'] });
       queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-all'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
     },
   });
 }
@@ -414,6 +416,7 @@ export function useUpdateInPatientSession() {
       queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'sessions'] });
       queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-range'] });
       queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-all'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
       queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
   });

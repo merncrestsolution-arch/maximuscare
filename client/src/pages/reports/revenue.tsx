@@ -80,6 +80,21 @@ function RevenueReportContent() {
             <ReportSummaryCard label="Clinic Revenue" value={formatLkr(data.breakdown?.clinic ?? 0)} />
             <ReportSummaryCard label="Home Visit Revenue" value={formatLkr(data.breakdown?.home ?? 0)} />
           </div>
+          {data.homeVisitFees?.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <h3 className="text-sm font-semibold">Home Visit Fees (LKR 500 branches)</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {data.homeVisitFees.map((line: { branch: string; count: number; rate: number; total: number }) => (
+                  <ReportSummaryCard
+                    key={line.branch}
+                    label={`${line.branch} Home Visits`}
+                    value={formatLkr(line.total)}
+                    sub={`${line.count} × ${formatLkr(line.rate)}`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           {data.dailyTrend?.length > 0 && (
             <div className="mt-6 h-64">
               <ResponsiveContainer width="100%" height="100%">

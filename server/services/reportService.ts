@@ -15,7 +15,7 @@ import {
   getVisitCollectedRevenue,
   getVisitOutstandingBalance,
 } from "./calculationEngine";
-import { ENTERPRISE_BRANCHES, normalizeBranchName } from "@shared/branches";
+import { ENTERPRISE_BRANCHES, normalizeBranchName, getHomeVisitRateTier } from "@shared/branches";
 
 export interface RevenueReport {
   rangeFrom: string;
@@ -25,6 +25,7 @@ export interface RevenueReport {
   unpaidRevenue: number;
   outstandingBalance: number;
   breakdown: { clinic: number; home: number; sessions: number };
+  homeVisitFees: { branch: string; count: number; rate: number; total: number }[];
   byBranch: { branch: string; revenue: number }[];
   dailyTrend: { date: string; revenue: number }[];
 }
@@ -90,7 +91,9 @@ export interface DashboardCharts {
 
 function groupRevenueByDay(
   visits: Visit[],
-  inPatientDaily: { date: string; revenue: number }[] = []
+  inPatientDaily: { date: string; revenue: number }[] = [],
+  rangeFrom?: string,
+  rangeTo?: string
 ): { date: string; revenue: number }[] {
   const byDay = new Map<string, number>();
   // Collected revenue (fully paid + partial amount paid) so the trend reconciles
@@ -105,9 +108,41 @@ function groupRevenueByDay(
     if (!d.date) continue;
     byDay.set(d.date, (byDay.get(d.date) ?? 0) + (d.revenue || 0));
   }
+
+  if (rangeFrom && rangeTo) {
+    const filled: { date: string; revenue: number }[] = [];
+    let cursor = rangeFrom;
+    while (cursor <= rangeTo) {
+      filled.push({ date: cursor, revenue: byDay.get(cursor) ?? 0 });
+      const next = new Date(`${cursor}T12:00:00`);
+      next.setDate(next.getDate() + 1);
+      cursor = next.toISOString().slice(0, 10);
+    }
+    return filled;
+  }
+
   return Array.from(byDay.entries())
     .map(([date, revenue]) => ({ date, revenue }))
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function computeHomeVisitFeeLines(
+  visits: Visit[],
+  rates: { homeColombo: number; homeBandaragama: number }
+): { branch: string; count: number; rate: number; total: number }[] {
+  const homeVisits = visits.filter((v) => v.visitType === "Home");
+  const byBranch = new Map<string, number>();
+  for (const v of homeVisits) {
+    const branch = normalizeBranchName(v.branch) || "Unknown";
+    byBranch.set(branch, (byBranch.get(branch) ?? 0) + 1);
+  }
+  return Array.from(byBranch.entries())
+    .map(([branch, count]) => {
+      const tier = getHomeVisitRateTier(branch);
+      const rate = tier === "bandaragama" ? rates.homeBandaragama : rates.homeColombo;
+      return { branch, count, rate, total: count * rate };
+    })
+    .sort((a, b) => a.branch.localeCompare(b.branch));
 }
 
 export async function computeRevenueReport(
@@ -135,15 +170,24 @@ export async function computeRevenueReport(
   const totalRevenue = await storage.getTotalIncome(rangeFrom, rangeTo, branchFilter ?? null);
 
   const breakdown = computeRevenueBreakdown(visits, [inPatientRevenue], []);
+  const settings = await loadPayrollSettings(storage);
+  const homeVisitFees = computeHomeVisitFeeLines(visits, {
+    homeColombo: settings.homeColombo,
+    homeBandaragama: settings.homeBandaragama,
+  });
+
   const branchNames = branchFilter
-    ? [branchFilter]
+    ? [normalizeBranchName(branchFilter)]
     : ENTERPRISE_BRANCHES.map((b) => b.shortName);
-  const byBranch = branchNames.map((branch) => ({
-    branch,
-    revenue: filterVisitsByBranch(visits, branch)
-      .filter((v) => isPaidPaymentStatus(v.paymentStatus))
-      .reduce((a, v) => a + (Number(v.paymentAmount) || 0), 0),
-  }));
+  const byBranch = await Promise.all(
+    branchNames.map(async (branch) => {
+      const branchVisits = filterVisitsByBranch(visits, branch);
+      const visitRevenue = branchVisits.reduce((a, v) => a + getVisitCollectedRevenue(v), 0);
+      const branchIpDaily = await storage.getInPatientRevenueByDay(rangeFrom, rangeTo, branch);
+      const ipRevenue = branchIpDaily.reduce((a, d) => a + (d.revenue || 0), 0);
+      return { branch, revenue: visitRevenue + ipRevenue };
+    })
+  );
 
   return {
     rangeFrom,
@@ -153,8 +197,9 @@ export async function computeRevenueReport(
     unpaidRevenue,
     outstandingBalance,
     breakdown: { clinic: breakdown.clinicVisits, home: breakdown.homeVisits, sessions: breakdown.inpatientSessions },
+    homeVisitFees,
     byBranch,
-    dailyTrend: groupRevenueByDay(visits, inPatientDaily),
+    dailyTrend: groupRevenueByDay(visits, inPatientDaily, rangeFrom, rangeTo),
   };
 }
 
@@ -446,7 +491,7 @@ export async function computeDashboardCharts(
   const incentiveRows = await computeIncentiveReport(storage, rangeFrom, rangeTo);
 
   const inPatientDaily = await storage.getInPatientRevenueByDay(rangeFrom, rangeTo, branchFilter ?? null);
-  const revenueTrend = groupRevenueByDay(visits, inPatientDaily);
+  const revenueTrend = groupRevenueByDay(visits, inPatientDaily, rangeFrom, rangeTo);
 
   const attByDay = new Map<string, Attendance[]>();
   for (const a of attendance) {
@@ -527,12 +572,14 @@ export async function computeExtendedDashboardKpis(
   const todayAttendanceSummary = summarizeAttendance(todayAttendance);
 
   const todayPaidVisitRevenue = todayVisitsList.reduce((a, v) => a + getVisitCollectedRevenue(v), 0);
+  const todayIpDaily = await storage.getInPatientRevenueByDay(today, today, branchFilter ?? null);
+  const todayIpRevenue = todayIpDaily.reduce((a, d) => a + (d.revenue || 0), 0);
 
   return {
     todayClinicVisits,
     todayHomeVisits,
     todaySessions,
-    todayRevenue: todayPaidVisitRevenue,
+    todayRevenue: todayPaidVisitRevenue + todayIpRevenue,
     todayAttendance: todayAttendanceSummary,
     outstandingAmount,
     outstandingPatients,
