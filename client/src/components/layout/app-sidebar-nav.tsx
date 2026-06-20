@@ -224,7 +224,7 @@ export function AppSidebarNav() {
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                  {(user.role === "Physiotherapist" || user.role === "Staff" || ["Admin", "MD"].includes(user.role)) && (
+                  {(user.role === "Physiotherapist" || user.role === "Staff" || user.role === "Manager" || ["Admin", "MD"].includes(user.role)) && (
                     <SidebarMenuItem>
                       <SidebarMenuButton asChild isActive={location.startsWith("/salary")} className="min-h-11">
                         <Link href="/salary" onClick={closeMobile}>

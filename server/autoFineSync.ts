@@ -3,7 +3,7 @@ import type { DatabaseStorage } from "./storage";
 /** Roles that conduct billable sessions — only they are subject to the “before noon” auto fine. */
 export function isAutoFineSessionRole(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
-  return r === "Physiotherapist" || r === "Staff";
+  return r === "Physiotherapist" || r === "Staff" || r === "Manager";
 }
 
 /**

@@ -30,19 +30,29 @@ export async function generateUniquePatientCode(
 
 export async function assertNoDuplicatePatient(
   storage: IStorage,
-  phone: string,
+  phone: string | null | undefined,
   nicOrPassport?: string | null,
   excludeId?: string
 ): Promise<void> {
   const all = await storage.getAllPatients();
-  const normalizedPhone = phone.replace(/\s+/g, "").trim();
-  for (const p of all) {
-    if (excludeId && p.id === excludeId) continue;
-    if (p.phone.replace(/\s+/g, "").trim() === normalizedPhone) {
-      throw new Error("A patient with this phone number already exists.");
+  const normalizedPhone = phone && phone.trim() !== "" ? phone.replace(/\s+/g, "").trim() : null;
+  const normalizedNic = nicOrPassport && nicOrPassport.trim() !== "" ? nicOrPassport.trim() : null;
+  
+  if (normalizedPhone) {
+    for (const p of all) {
+      if (excludeId && p.id === excludeId) continue;
+      if (p.phone && p.phone.replace(/\s+/g, "").trim() === normalizedPhone) {
+        throw new Error("A patient with this phone number already exists.");
+      }
     }
-    if (nicOrPassport && p.nicOrPassport && p.nicOrPassport.trim() === nicOrPassport.trim()) {
-      throw new Error("A patient with this NIC/Passport already exists.");
+  }
+
+  if (normalizedNic) {
+    for (const p of all) {
+      if (excludeId && p.id === excludeId) continue;
+      if (p.nicOrPassport && p.nicOrPassport.trim() === normalizedNic) {
+        throw new Error("A patient with this NIC/Passport already exists.");
+      }
     }
   }
 }

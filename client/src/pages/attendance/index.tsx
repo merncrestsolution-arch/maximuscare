@@ -1142,6 +1142,7 @@ export default function AttendancePage() {
                       label="Check-in"
                       value={editCheckIn}
                       onChange={setEditCheckIn}
+                      defaultTime="08:30"
                       testIdPrefix="edit-attendance-checkin"
                       weekStartsOn={calendarWeekStartsOn}
                     />
@@ -1151,6 +1152,7 @@ export default function AttendancePage() {
                       onChange={setEditCheckOut}
                       optional
                       anchorDateYmd={editRecord.date}
+                      defaultTime="17:30"
                       testIdPrefix="edit-attendance-checkout"
                       weekStartsOn={calendarWeekStartsOn}
                     />

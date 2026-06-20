@@ -943,7 +943,14 @@ export class DatabaseStorage implements IStorage {
   async deleteAttendance(id: string, deletedBy?: string): Promise<boolean> {
     const result = await db
       .update(attendance)
-      .set({ deletedAt: new Date(), deletedBy: deletedBy ?? null, updatedAt: new Date() } as any)
+      .set({ 
+        deletedAt: new Date(), 
+        deletedBy: deletedBy ?? null, 
+        updatedAt: new Date(),
+        checkInTime: null,
+        checkOutTime: null,
+        overtimeHours: "0" 
+      } as any)
       .where(eq(attendance.id, id))
       .returning();
     return result.length > 0;
@@ -964,15 +971,23 @@ export class DatabaseStorage implements IStorage {
     return result[0] ? (parseJsonArrays(result[0] as any, ["reportsAttachments", "idCopyAttachments"]) as InPatientAdmission) : undefined;
   }
 
-  async getAllInPatientAdmissions(): Promise<InPatientAdmission[]> {
-    const rows = await db.select().from(inPatientAdmissions).orderBy(desc(inPatientAdmissions.admitDate));
+  async getAllInPatientAdmissions(branchId?: string | null): Promise<InPatientAdmission[]> {
+    let query = db.select().from(inPatientAdmissions).$dynamic();
+    if (branchId) {
+      query = query.where(eq(inPatientAdmissions.branchId, branchId));
+    }
+    const rows = await query.orderBy(desc(inPatientAdmissions.admitDate));
     return rows.map((r: any) =>
       parseJsonArrays(r as any, ["reportsAttachments", "idCopyAttachments"]) as InPatientAdmission
     );
   }
 
-  async getInPatientAdmissionsByStatus(status: string): Promise<InPatientAdmission[]> {
-    const rows = await db.select().from(inPatientAdmissions).where(eq(inPatientAdmissions.status, status)).orderBy(desc(inPatientAdmissions.admitDate));
+  async getInPatientAdmissionsByStatus(status: string, branchId?: string | null): Promise<InPatientAdmission[]> {
+    let query = db.select().from(inPatientAdmissions).where(eq(inPatientAdmissions.status, status)).$dynamic();
+    if (branchId) {
+      query = query.where(and(eq(inPatientAdmissions.status, status), eq(inPatientAdmissions.branchId, branchId)));
+    }
+    const rows = await query.orderBy(desc(inPatientAdmissions.admitDate));
     return rows.map((r: any) =>
       parseJsonArrays(r as any, ["reportsAttachments", "idCopyAttachments"]) as InPatientAdmission
     );
@@ -1315,14 +1330,15 @@ export class DatabaseStorage implements IStorage {
       const { normalizeBranchName } = await import("@shared/branches");
       const target = normalizeBranchName(branchName).toLowerCase();
       const admissions = await this.getAllInPatientAdmissions();
-      // Attribute by branch when present, but keep unbranched admissions (the
-      // common case — admissions carry no branch column) so in-patient income
-      // still shows up on the branch-scoped revenue trend.
+      const branches = await this.getAllBranches();
+      const matchingBranch = branches.find((b) => normalizeBranchName(b.name).toLowerCase() === target);
       allowedAdmissionIds = new Set(
         admissions
           .filter((a: any) => {
+            if (matchingBranch && a.branchId === matchingBranch.id) return true;
+            // Legacy fallback if 'branch' field somehow exists on older records
             const b = normalizeBranchName(a.branch).toLowerCase();
-            return !b || b === target;
+            return !!b && b === target;
           })
           .map((a: any) => a.id)
       );

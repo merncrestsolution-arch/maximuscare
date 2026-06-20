@@ -19,6 +19,7 @@ export interface DashboardKpis {
   todayClinicVisits: number;
   todayHomeVisits: number;
   todaySessions: number;
+  inpatientSessionCount: number;
   todayRevenue: number;
   attendance: { present: number; absent: number; leave: number; holiday: number };
   todayAttendance: { present: number; absent: number; leave: number; holiday: number };
@@ -65,7 +66,21 @@ export async function computeDashboardKpis(
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
   if (branchFilter) visits = filterVisitsByBranch(visits, branchFilter);
   const todayVisits = visits.filter((v) => v.visitDate === today);
-  const ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
+  let ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
+  if (branchFilter) {
+    const branches = await storage.getAllBranches();
+    const targetBranch = normalizeBranchName(branchFilter).toLowerCase();
+    const matchingBranch = branches.find((b) => normalizeBranchName(b.name).toLowerCase() === targetBranch);
+    const branchStaffIds = new Set(
+      (await storage.getAllStaff())
+        .filter((s) => normalizeBranchName(s.branch ?? "").toLowerCase() === targetBranch)
+        .map((s) => s.id)
+    );
+    ipSessions = ipSessions.filter(s => 
+      (matchingBranch && s.branchId === matchingBranch.id) || 
+      branchStaffIds.has(s.treatingStaffId)
+    );
+  }
   const todaySessions = ipSessions.filter((s) => s.sessionDate === today).length;
 
   // Collected revenue (paid in full + partial amount paid) plus in-patient
@@ -141,6 +156,7 @@ export async function computeDashboardKpis(
     todayClinicVisits: extended.todayClinicVisits,
     todayHomeVisits: extended.todayHomeVisits,
     todaySessions: extended.todaySessions,
+    inpatientSessionCount: ipSessions.length,
     todayRevenue: extended.todayRevenue,
     attendance: attendanceSummary,
     todayAttendance: extended.todayAttendance,
@@ -166,21 +182,25 @@ export async function computeBranchDashboardStats(
   const attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
   const settings = await loadPayrollSettings(storage);
   const staffDirectory = await storage.getAllStaff();
-  const allStaff = staffDirectory.filter((st) => st.role === "Physiotherapist" || st.role === "Staff");
+  const allStaff = staffDirectory.filter((st) => st.role === "Physiotherapist" || st.role === "Staff" || st.role === "Manager");
   const fines = await storage.getStaffFinesByDateRange(rangeFrom, rangeTo);
-  const branchNames = ["Colombo", "Bandaragama"];
+  const branches = await storage.getAllBranches();
 
-  return branchNames.map((branch) => {
-    const branchVisits = filterVisitsByBranch(visits, branch);
+  return Promise.all(branches.map(async (branch) => {
+    const branchId = branch.id;
+    const branchName = branch.name;
+
+    const branchVisits = visits.filter(v => v.branchId === branchId);
     const clinicVisits = branchVisits.filter((v) => v.visitType === "Clinic").length;
     const homeVisits = branchVisits.filter((v) => v.visitType === "Home").length;
     const branchStaffIds = new Set(
       staffDirectory
-        .filter((s) => String(s.branch ?? "").trim().toLowerCase() === branch.toLowerCase())
+        .filter((s) => s.branchId === branchId || s.branch === branchName)
         .map((s) => s.id)
     );
-    const sessions = ipSessions.filter((s) => branchStaffIds.has(s.treatingStaffId)).length;
+    const sessions = ipSessions.filter((s) => s.branchId === branchId || branchStaffIds.has(s.treatingStaffId)).length;
 
+    // Only fully paid visits count towards branch revenue in this overview
     const revenue = branchVisits
       .filter((v) => isPaidPaymentStatus(v.paymentStatus))
       .reduce((acc, v) => acc + (Number(v.paymentAmount) || 0), 0);
@@ -206,7 +226,7 @@ export async function computeBranchDashboardStats(
     }
 
     return {
-      branch,
+      branch: branchName,
       clinicVisits,
       homeVisits,
       sessions,

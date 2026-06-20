@@ -66,7 +66,7 @@ export default function Dashboard() {
   const canSeeFinancials = canViewFinancialSummary(user?.role);
   const showFinancialDashboard = isManagement && canSeeFinancials;
   const showManagerDashboard = isManagerRole || isBranchManagerRole;
-  const isStaff = role === "physiotherapist" || role === "receptionist" || role === "staff";
+  const isStaff = role === "physiotherapist" || role === "receptionist" || role === "staff" || role === "manager";
 
   const selectedDate = new Date(selectedYear, selectedMonth, 1);
   const monthStart = format(selectedDate, 'yyyy-MM-dd');
@@ -256,9 +256,14 @@ export default function Dashboard() {
             <StatCard
               title="Today's Visits"
               value={loadingKpis ? "—" : todayVisits}
-              subtitle={dashboardKpis ? `${dashboardKpis.todaySessions} IP sessions today` : undefined}
               accent="primary"
               icon={<Calendar className="h-5 w-5" />}
+            />
+            <StatCard
+              title="Total IP Sessions"
+              value={loadingKpis ? "—" : (dashboardKpis?.inpatientSessionCount ?? 0)}
+              accent="secondary"
+              icon={<Activity className="h-5 w-5" />}
             />
             <StatCard
               title="Today's Revenue"
@@ -318,13 +323,19 @@ export default function Dashboard() {
                 <CardHeader><CardTitle className="text-base">Revenue Trend</CardTitle></CardHeader>
                 <CardContent className="h-52">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={dashboardKpis.charts.revenueTrend}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                      <YAxis tick={{ fontSize: 11 }} width={48} />
-                      <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                      <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" dot={{ r: 2 }} />
-                    </LineChart>
+                    {!dashboardKpis.charts.revenueTrend || dashboardKpis.charts.revenueTrend.length === 0 ? (
+                      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                        No data available
+                      </div>
+                    ) : (
+                      <LineChart data={dashboardKpis.charts.revenueTrend}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} width={48} />
+                        <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                        <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" dot={{ r: 2 }} />
+                      </LineChart>
+                    )}
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
@@ -424,12 +435,17 @@ export default function Dashboard() {
             <StatCard
               title="Today's Visits"
               value={loadingKpis ? "—" : todayVisits}
-              subtitle={dashboardKpis ? `${dashboardKpis.todaySessions} IP sessions today` : undefined}
               accent="primary"
               icon={<Calendar className="h-5 w-5" />}
             />
           </KpiGrid>
           <KpiGrid>
+            <StatCard
+              title="Total IP Sessions"
+              value={loadingKpis ? "—" : (dashboardKpis?.inpatientSessionCount ?? 0)}
+              accent="secondary"
+              icon={<Activity className="h-5 w-5" />}
+            />
             <StatCard
               title="Attendance Today"
               value={loadingKpis ? "—" : (dashboardKpis?.todayAttendance?.present ?? 0)}

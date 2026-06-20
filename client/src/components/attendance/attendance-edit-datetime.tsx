@@ -12,12 +12,12 @@ function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-function parseLocal(value: string): { day: Date; hhmm: string } {
+function parseLocal(value: string, defaultHhmm?: string): { day: Date; hhmm: string } {
   if (!value?.trim()) {
     const n = new Date();
     return {
       day: new Date(n.getFullYear(), n.getMonth(), n.getDate()),
-      hhmm: `${pad2(n.getHours())}:${pad2(n.getMinutes())}`,
+      hhmm: defaultHhmm || `${pad2(n.getHours())}:${pad2(n.getMinutes())}`,
     };
   }
   const d = new Date(value);
@@ -25,7 +25,7 @@ function parseLocal(value: string): { day: Date; hhmm: string } {
     const n = new Date();
     return {
       day: new Date(n.getFullYear(), n.getMonth(), n.getDate()),
-      hhmm: "09:00",
+      hhmm: defaultHhmm || "09:00",
     };
   }
   return {
@@ -67,6 +67,7 @@ export function AttendanceEditDateTime({
   onChange: (v: string) => void;
   optional?: boolean;
   anchorDateYmd?: string;
+  defaultTime?: string;
   testIdPrefix: string;
   weekStartsOn: WeekStart;
 }) {
@@ -83,10 +84,10 @@ export function AttendanceEditDateTime({
               const n = new Date();
               return new Date(n.getFullYear(), n.getMonth(), n.getDate());
             })();
-      return { day: base, hhmm: "17:00" };
+      return { day: base, hhmm: defaultTime || "17:30" };
     }
-    return parseLocal(value);
-  }, [value, isEmpty, anchorDateYmd]);
+    return parseLocal(value, defaultTime);
+  }, [value, isEmpty, anchorDateYmd, defaultTime]);
 
   const [timeInput, setTimeInput] = useState(hhmm);
 
@@ -158,6 +159,7 @@ export function AttendanceEditDateTime({
                   setOpen(false);
                 }}
                 weekStartsOn={weekStartsOn}
+                disabled={(date) => date > new Date()}
                 captionLayout="dropdown"
                 startMonth={new Date(2020, 0)}
                 endMonth={new Date(2036, 11)}

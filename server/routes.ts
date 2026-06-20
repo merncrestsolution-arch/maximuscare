@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { isAutoFineSessionRole, syncAutoFineForStaffDate } from "./autoFineSync";
 import { createSession, destroySession, requireAuth } from "./auth";
 import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest } from "./helpers/authCookies";
-import { attachBranchContext, requireBranchContext, resolveBranchFilter, getBranchFilter } from "./middleware/branchContext";
+import { attachBranchContext, requireBranchContext, resolveBranchFilter, getBranchFilter, getSelectedBranchId } from "./middleware/branchContext";
 import {
   requireCriticalDelete,
   requirePatientsManage,
@@ -952,6 +952,9 @@ export async function registerRoutes(
   app.post("/api/patients", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const validatedData = insertPatientSchema.parse(req.body);
+      if (typeof validatedData.phone === "string" && validatedData.phone.trim() === "") {
+        validatedData.phone = null as any;
+      }
       await assertNoDuplicatePatient(storage, validatedData.phone, (validatedData as any).nicOrPassport);
       const patientCode = await generateUniquePatientCode(storage, validatedData.registeredDate);
       const patient = await storage.createPatient({ ...validatedData, patientCode, fullName: validatedData.name } as any);
@@ -978,6 +981,9 @@ export async function registerRoutes(
       const id = param(req, "id");
       const beforePatient = await storage.getPatient(id);
       const validatedData = updatePatientSchema.parse(req.body);
+      if (typeof validatedData.phone === "string" && validatedData.phone.trim() === "") {
+        validatedData.phone = null as any;
+      }
       if (validatedData.phone) {
         await assertNoDuplicatePatient(storage, validatedData.phone, (validatedData as any).nicOrPassport, id);
       }
@@ -1344,13 +1350,10 @@ export async function registerRoutes(
       // attendance.branch column. Build the set of staff IDs in the active branch.
       let branchStaffIds: Set<string> | null = null;
       if (branch && isAdmin) {
-        const target = normalizeBranchName(branch).toLowerCase();
+        const { filterStaffByBranchAccess } = await import("./services/staffService");
         const allStaff = await storage.getAllStaff();
-        branchStaffIds = new Set(
-          allStaff
-            .filter((s: any) => normalizeBranchName(s.branch).toLowerCase() === target)
-            .map((s: any) => s.id)
-        );
+        const filteredStaff = await filterStaffByBranchAccess(storage, allStaff, branch);
+        branchStaffIds = new Set(filteredStaff.map((s: any) => s.id));
         // Always include the requesting user's own records, even if their staff
         // branch is unset or differs from the selected branch — otherwise a
         // manager's own attendance (and check-out / OT) silently disappears from
@@ -1594,6 +1597,7 @@ export async function registerRoutes(
         if (validatedData.status === "Absent") {
           patch.checkInTime = null;
           patch.checkOutTime = null;
+          patch.overtimeHours = "0";
         }
       }
       
@@ -1744,14 +1748,15 @@ export async function registerRoutes(
   // ========== In-Patient Admission Routes ==========
 
   // Get all in-patient admissions
-  app.get("/api/inpatients", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/inpatients", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const { status } = req.query;
+      const branchId = getSelectedBranchId(req as any);
       let admissions;
       if (status && typeof status === 'string') {
-        admissions = await storage.getInPatientAdmissionsByStatus(status);
+        admissions = await storage.getInPatientAdmissionsByStatus(status, branchId);
       } else {
-        admissions = await storage.getAllInPatientAdmissions();
+        admissions = await storage.getAllInPatientAdmissions(branchId);
       }
       return res.json(admissions);
     } catch (error: any) {
@@ -1761,7 +1766,7 @@ export async function registerRoutes(
 
   // All in-patient sessions in range (reports / dashboard — operational roles with
   // visits.view_all or inpatients.manage). Optional ?branch= scopes to one branch.
-  app.get("/api/inpatients/sessions/all", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/inpatients/sessions/all", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
       if (!hasPermission(user.role, "inpatients.manage") && !hasPermission(user.role, "visits.view_all")) {
@@ -1774,7 +1779,7 @@ export async function registerRoutes(
       }
       let sessions = await storage.getAllInPatientSessionsInDateRange(startDate, endDate);
 
-      const branchParam = (req.query.branch as string | undefined) || undefined;
+      const branchParam = await resolveBranchFilter(req as any, req.query.branch as string);
       if (branchParam) {
         const target = normalizeBranchName(branchParam).toLowerCase();
         const branches = await storage.getAllBranches();
@@ -2102,19 +2107,75 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Only discharged patients can be re-admitted" });
       }
 
-      await storage.deleteInPatientDischargeByAdmission(admissionId);
-      const updated = await storage.updateInPatientAdmission(admissionId, { status: 'Admitted' });
+      const newAdmissionData = {
+        patientName: admission.patientName,
+        age: admission.age,
+        condition: admission.condition,
+        careTakerName: admission.careTakerName,
+        careTakerRelationship: admission.careTakerRelationship,
+        phone: admission.phone,
+        address: admission.address,
+        patientIdNo: admission.patientIdNo,
+        careTakerIdNo: admission.careTakerIdNo,
+        packageType: admission.packageType,
+        amountPerDay: admission.amountPerDay,
+        branch: admission.branch,
+        branchId: admission.branchId,
+        admitDate: clinicDateString(),
+        status: 'Admitted'
+      };
+
+      const newAdmission = await storage.createInPatientAdmission(newAdmissionData as any);
 
       const actor = await auditActor(req);
       await logAudit(storage, {
         ...actor,
         module: "inpatient",
-        action: "update",
-        recordId: admissionId,
-        newValue: { status: 'Admitted', readmitted: true },
+        action: "create",
+        recordId: newAdmission.id,
+        newValue: { ...newAdmission, readmittedFromId: admissionId },
       });
 
-      return res.json(updated);
+      return res.status(201).json(newAdmission);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Export inpatient full history PDF
+  app.get("/api/inpatients/:admissionId/export-pdf", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const admissionId = param(req, "admissionId");
+      const admission = await storage.getInPatientAdmission(admissionId);
+      if (!admission) return res.status(404).json({ message: "Admission not found" });
+
+      const sessions = await storage.getSessionsForAdmission(admissionId);
+      const exportSvc = await import("./services/exportService");
+
+      const title = `Inpatient History - ${admission.patientName} (${admission.status})`;
+      const columns = [
+        { header: "Date", key: "date" },
+        { header: "Session #", key: "sessionNumber" },
+        { header: "Treatment", key: "treatment" },
+        { header: "Therapist", key: "therapist" },
+        { header: "Notes", key: "notes" },
+      ];
+
+      const rows = sessions.map((s) => ({
+        date: s.sessionDate,
+        sessionNumber: String(s.sessionNumber),
+        treatment: s.treatmentProvided,
+        therapist: s.treatingStaffName,
+        notes: (s as any).notes || s.improvements || "-",
+      }));
+
+      const pdf = await exportSvc.rowsToPdfBuffer(title, columns, rows);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="inpatient-history-${admission.id.substring(0, 8)}.pdf"`
+      );
+      return res.send(pdf);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -2596,7 +2657,7 @@ export async function registerRoutes(
       if (!startDate || !endDate) {
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
-      if (["Admin", "MD"].includes(user.role)) {
+      if (["Admin", "MD", "Manager", "Branch Manager", "Nexus MD"].includes(user.role)) {
         if (queryStaffId) {
           const rows = await storage.getStaffFinesByStaffAndDateRange(queryStaffId, startDate, endDate);
           return res.json(rows);
@@ -2611,14 +2672,25 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/staff-fines", requireAuth, requireSalaryManage, async (req: Request, res: Response) => {
+  app.post("/api/staff-fines", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
+      const { isManagementRole, isOperationalLead } = await import("./permissions");
+      if (!isManagementRole(user.role) && !isOperationalLead(user.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
       const editor = await storage.getStaff(user.staffId);
       const body = { ...req.body, source: "manual" };
       if (!body.staffId || !String(body.staffId).trim()) {
         return res.status(400).json({ message: "Staff is required" });
       }
+      
+      // Auto-inject branchId
+      const targetStaff = await storage.getStaff(body.staffId);
+      if (targetStaff && targetStaff.branchId) {
+        body.branchId = targetStaff.branchId;
+      }
+
       if (!body.fineDate || !String(body.fineDate).trim()) {
         return res.status(400).json({ message: "Fine date is required" });
       }
@@ -2650,8 +2722,13 @@ export async function registerRoutes(
     }
   });
 
-  app.patch("/api/staff-fines/:id", requireAuth, requireSalaryManage, async (req: Request, res: Response) => {
+  app.patch("/api/staff-fines/:id", requireAuth, async (req: Request, res: Response) => {
     try {
+      const user = (req as any).user;
+      const { isManagementRole, isOperationalLead } = await import("./permissions");
+      if (!isManagementRole(user.role) && !isOperationalLead(user.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
       const existingFine = await storage.getStaffFine(param(req, "id"));
       if (!existingFine) return res.status(404).json({ message: "Fine not found" });
       const body = { ...req.body } as Record<string, unknown>;
@@ -2685,8 +2762,13 @@ export async function registerRoutes(
     }
   });
 
-  app.delete("/api/staff-fines/:id", requireAuth, requireSalaryManage, async (req: Request, res: Response) => {
+  app.delete("/api/staff-fines/:id", requireAuth, async (req: Request, res: Response) => {
     try {
+      const user = (req as any).user;
+      const { isManagementRole, isOperationalLead } = await import("./permissions");
+      if (!isManagementRole(user.role) && !isOperationalLead(user.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
       const fineId = param(req, "id");
       const existingFine = await storage.getStaffFine(fineId);
       const deleted = await storage.deleteStaffFine(fineId, (req as any).user?.staffId);

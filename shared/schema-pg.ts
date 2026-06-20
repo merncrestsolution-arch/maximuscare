@@ -239,8 +239,9 @@ export const inPatientAdmissions = pgTable("in_patient_admissions", {
   reportsAttachments: text("reports_attachments").array(),
   idCopyAttachments: text("id_copy_attachments").array(),
   status: text("status").notNull().default("Admitted"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  branchId: text("branch_id"),
+  createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
 });
 
 export const insertInPatientAdmissionSchema = createInsertSchema(inPatientAdmissions)

@@ -88,7 +88,7 @@ function SalaryHistoryContent() {
                   <SelectTrigger className="w-48"><SelectValue placeholder="All staff" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All staff</SelectItem>
-                    {(staffList ?? []).filter((s: any) => s.role === "Physiotherapist" || s.role === "Staff").map((s: any) => (
+                    {(staffList ?? []).filter((s: any) => s.role === "Physiotherapist" || s.role === "Staff" || s.role === "Manager").map((s: any) => (
                       <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>

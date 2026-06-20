@@ -29,7 +29,7 @@ function SalaryGenerateContent() {
   }, [preset]);
 
   const { data: staffList } = useStaff();
-  const therapists = (staffList ?? []).filter((s: any) => s.role === "Physiotherapist" || s.role === "Staff");
+  const therapists = (staffList ?? []).filter((s: any) => s.role === "Physiotherapist" || s.role === "Staff" || s.role === "Manager");
   const { data: preview, isLoading, error } = useSalaryPreview(
     { staffId, periodStart, periodEnd },
     previewEnabled && !generateAll && !!staffId

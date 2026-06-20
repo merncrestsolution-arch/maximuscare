@@ -157,7 +157,7 @@ export default function StaffListPage() {
         )}
       </div>
 
-      <div className="space-y-3 pb-24">
+      <div className="space-y-3">
         {filteredStaff.map((member: any) => (
           <Card key={member.id} className="bg-white border border-border/60 shadow-sm active:scale-[0.99] transition-transform">
             <CardContent className="p-4 flex items-center gap-4">

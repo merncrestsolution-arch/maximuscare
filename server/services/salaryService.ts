@@ -229,7 +229,7 @@ export async function generateSalariesBulk(
   if (staffIds === "all") {
     const allStaff = await storage.getAllStaff();
     targets = allStaff
-      .filter((s) => s.role === "Physiotherapist" || s.role === "Staff")
+      .filter((s) => s.role === "Physiotherapist" || s.role === "Staff" || s.role === "Manager")
       .map((s) => s.id);
   } else {
     targets = staffIds;

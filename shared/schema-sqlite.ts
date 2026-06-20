@@ -247,6 +247,7 @@ export const inPatientAdmissions = sqliteTable("in_patient_admissions", {
   reportsAttachments: text("reports_attachments"), // JSON string
   idCopyAttachments: text("id_copy_attachments"), // JSON string
   status: text("status").notNull().default("Admitted"),
+  branchId: text("branch_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -439,6 +440,7 @@ export const staffFines = sqliteTable("staff_fines", {
   fineDate: text("fine_date").notNull(),
   amount: text("amount").notNull().default("500"),
   reason: text("reason").notNull(),
+  branchId: text("branch_id"),
   source: text("source").notNull().default("manual"),
   fineType: text("fine_type").notNull().default("Manual Fine"),
   remarks: text("remarks"),

@@ -141,9 +141,9 @@ function PhysioSummaryContent() {
 
   const physios = useMemo(() => {
     if (!user) return [];
-    const all = (staff || []).filter((s) => {
+    const all = staff.filter((s: any) => {
       const r = (s.role || "").toLowerCase();
-      return r === "physiotherapist" || r === "staff";
+      return r === "physiotherapist" || r === "staff" || r === "manager";
     });
     if (isManagement) return all;
     return all.filter((s) => s.id === user.id);
@@ -215,9 +215,9 @@ function PhysioSummaryContent() {
     incentive: String(s.incentiveTotal),
   }));
 
-  const physioOptions = (staff || []).filter((s: any) => {
+  const clinicalStaff = staff.filter((s: any) => {
     const r = (s.role || "").toLowerCase();
-    return r === "physiotherapist" || r === "staff";
+    return r === "physiotherapist" || r === "staff" || r === "manager";
   });
   const fineStaffOptions = (staff || []).filter((s: any) => {
     const r = String(s.role || "").toLowerCase();
@@ -293,7 +293,7 @@ function PhysioSummaryContent() {
   };
 
   return (
-    <div className="space-y-5 pb-24" data-testid="page-physio-summary">
+    <div className="space-y-5" data-testid="page-physio-summary">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight" data-testid="text-physio-summary-title">
           Physio Summary

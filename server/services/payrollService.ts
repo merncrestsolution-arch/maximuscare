@@ -249,7 +249,7 @@ export async function computePayrollReport(
   const allStaff = await storage.getAllStaff();
   const targets = allStaff.filter((s) => {
     const r = s.role;
-    if (r !== "Physiotherapist" && r !== "Staff") return false;
+    if (r !== "Physiotherapist" && r !== "Staff" && r !== "Manager") return false;
     if (staffIds?.length && !staffIds.includes(s.id)) return false;
     return true;
   });

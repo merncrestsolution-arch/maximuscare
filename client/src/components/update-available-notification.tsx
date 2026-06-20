@@ -49,22 +49,22 @@ function playNotificationSound() {
   }
 }
 
-async function fetchDeployedVersion(): Promise<string | null> {
+async function fetchDeployedVersion(): Promise<{ version: string; message?: string } | null> {
   try {
     const res = await fetch(`/version.json?ts=${Date.now()}`, {
       cache: "no-store",
       headers: { "Cache-Control": "no-cache" },
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { version?: string };
-    return typeof data.version === "string" ? data.version : null;
+    const data = await res.json();
+    return (data && typeof data.version === "string") ? data : null;
   } catch {
     return null;
   }
 }
 
 export function UpdateAvailableNotification() {
-  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; message?: string } | null>(null);
   const [dismissed, setDismissed] = useState(false);
   // The version compiled into the currently running app.
   const currentVersion = useRef<string>(
@@ -77,9 +77,9 @@ export function UpdateAvailableNotification() {
     const deployed = await fetchDeployedVersion();
     if (!deployed || !currentVersion.current) return;
 
-    if (deployed !== currentVersion.current) {
+    if (deployed.version !== currentVersion.current) {
       announced.current = true;
-      setUpdateAvailable(true);
+      setUpdateInfo(deployed);
       playNotificationSound();
     }
   }, []);
@@ -102,7 +102,7 @@ export function UpdateAvailableNotification() {
     };
   }, [checkForUpdate]);
 
-  if (!updateAvailable || dismissed) return null;
+  if (!updateInfo || dismissed) return null;
 
   return (
     <div
@@ -128,15 +128,30 @@ export function UpdateAvailableNotification() {
             <h3 className="text-base font-bold text-foreground">
               New Update Available
             </h3>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              Please refresh your browser to get the latest version.
-            </p>
+            
+            {updateInfo.message && (
+              <div className="mt-2 mb-3 rounded-md bg-muted/50 p-2.5 border border-border/50">
+                <p className="text-sm font-medium text-foreground">
+                  What's new:
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground line-clamp-3">
+                  {updateInfo.message}
+                </p>
+              </div>
+            )}
+            
+            {!updateInfo.message && (
+              <p className="mt-0.5 mb-3 text-sm text-muted-foreground">
+                Please refresh your browser to get the latest version.
+              </p>
+            )}
+
             <Button
               size="sm"
-              className="mt-3"
+              className="mt-1 w-full sm:w-auto"
               onClick={() => window.location.reload()}
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="mr-2 h-4 w-4" />
               Refresh Browser
             </Button>
           </div>

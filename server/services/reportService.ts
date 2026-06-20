@@ -487,6 +487,19 @@ export async function computeDashboardCharts(
   if (branchFilter) {
     visits = filterVisitsByBranch(visits, branchFilter);
     attendance = applyBranchFilter(attendance, branchFilter);
+    
+    const branches = await storage.getAllBranches();
+    const targetBranch = normalizeBranchName(branchFilter).toLowerCase();
+    const matchingBranch = branches.find((b) => normalizeBranchName(b.name).toLowerCase() === targetBranch);
+    const branchStaffIds = new Set(
+      (await storage.getAllStaff())
+        .filter((s) => normalizeBranchName(s.branch ?? "").toLowerCase() === targetBranch)
+        .map((s) => s.id)
+    );
+    ipSessions = ipSessions.filter(s => 
+      (matchingBranch && s.branchId === matchingBranch.id) || 
+      branchStaffIds.has(s.treatingStaffId)
+    );
   }
   const incentiveRows = await computeIncentiveReport(storage, rangeFrom, rangeTo);
 

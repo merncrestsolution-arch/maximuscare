@@ -725,16 +725,26 @@ export default function InPatientProfilePage() {
         <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Treatment Sessions</h2>
-            {canAddSession && (
-              <Button 
+            <div className="flex gap-2">
+              <Button
                 size="sm"
-                onClick={() => setLocation(`/inpatients/${patientId}/session/new`)}
-                data-testid="button-add-session"
+                variant="outline"
+                onClick={() => window.open(`/api/inpatients/${patientId}/export-pdf`, "_blank")}
+                data-testid="button-export-history-pdf"
               >
-                <Plus className="h-4 w-4 mr-1" />
-                Add Session
+                Export Full History PDF
               </Button>
-            )}
+              {canAddSession && (
+                <Button 
+                  size="sm"
+                  onClick={() => setLocation(`/inpatients/${patientId}/session/new`)}
+                  data-testid="button-add-session"
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Session
+                </Button>
+              )}
+            </div>
           </div>
 
           {sortedDates.length === 0 ? (
@@ -779,33 +789,7 @@ export default function InPatientProfilePage() {
                           ) : null}
                         </div>
                         <div className="flex justify-end pt-2 md:pt-0 gap-1 flex-wrap">
-                          <StructuredReportActions
-                            reportTitle={`In-Patient Session #${session.sessionNumber} — ${session.patientName}`}
-                            fileBaseName={`ip-session-${session.id}`}
-                            columns={[
-                              { key: "field", label: "Field" },
-                              { key: "value", label: "Value" },
-                            ]}
-                            rows={[
-                              { field: "Patient", value: session.patientName },
-                              { field: "Session Date", value: session.sessionDate },
-                              { field: "Session #", value: String(session.sessionNumber) },
-                              { field: "Treating Staff", value: session.treatingStaffName },
-                              { field: "Time", value: `${session.startTime} – ${session.endTime}` },
-                              { field: "Treatment", value: session.treatmentProvided },
-                              { field: "Improvements", value: session.improvements || "—" },
-                              { field: "Notes", value: (session as any).notes || "—" },
-                              { field: "Payments Total", value: `LKR ${paymentTotal.toLocaleString()}` },
-                              { field: "Stay Days", value: String(stayDays) },
-                            ]}
-                            logoUri={logoUri}
-                            themeColor="#0F766E"
-                            meta={[
-                              { label: "Patient", value: patient?.patientName ?? session.patientName },
-                              { label: "Admission", value: patientId },
-                              { label: "Generated", value: format(new Date(), "dd MMM yyyy hh:mm a") },
-                            ]}
-                          />
+                          {/* Removed single-session PDF buttons as per Bug 17 */}
                           {canEditInPatientSession ? (
                             <Button type="button" variant="outline" size="sm" onClick={() => openSessionEdit(session)} data-testid={`button-edit-session-${session.id}`}>
                               Edit

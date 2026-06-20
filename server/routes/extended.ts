@@ -73,7 +73,7 @@ export function registerExtendedRoutes(app: Express) {
       let staffIds: string[] | undefined;
       if (isManagementRole(user.role)) {
         staffIds = staffId ? [staffId] : undefined;
-      } else if (user.role === "Physiotherapist" || user.role === "Staff") {
+      } else if (user.role === "Physiotherapist" || user.role === "Staff" || user.role === "Manager") {
         staffIds = [user.staffId];
       } else {
         return errorResponse(res, "Forbidden", 403);

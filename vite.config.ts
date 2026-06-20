@@ -12,16 +12,31 @@ const distClient = path.join(projectRoot, "dist", "client");
 // deployment produces a new value; fall back to a timestamp for local builds.
 const buildId = process.env.VERCEL_GIT_COMMIT_SHA || Date.now().toString();
 
+import { execSync } from "child_process";
+
 // Emits a `version.json` into the build output so the running client can poll
 // it and detect when a newer deployment is live.
 function appVersionPlugin(): Plugin {
+  let commitMessage = process.env.VERCEL_GIT_COMMIT_MESSAGE || "";
+  if (!commitMessage) {
+    try {
+      commitMessage = execSync("git log -1 --pretty=%s").toString().trim();
+    } catch (e) {
+      commitMessage = "A new version of the application is available.";
+    }
+  }
+  // Optional truncation to avoid massive toasts
+  if (commitMessage.length > 120) {
+    commitMessage = commitMessage.substring(0, 120) + "...";
+  }
+
   return {
     name: "app-version-json",
     generateBundle() {
       this.emitFile({
         type: "asset",
         fileName: "version.json",
-        source: JSON.stringify({ version: buildId }),
+        source: JSON.stringify({ version: buildId, message: commitMessage }),
       });
     },
   };

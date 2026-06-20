@@ -1,7 +1,7 @@
 import type { IStorage } from "../storage";
 import type { Staff, Branch } from "@shared/schema";
 import { normalizeBranchName } from "@shared/branches";
-import { isClinicalRole } from "@shared/roles";
+import { isClinicalRole, isOperationalLead } from "@shared/roles";
 import { clinicDateString } from "../clinicTime";
 import { computePayrollReport } from "./payrollService";
 import { summarizeAttendance, inDateRange, computeExtraHolidayCount } from "./calculationEngine";
@@ -223,7 +223,13 @@ export async function filterStaffByBranchAccess(
   } catch {
     // fall back to column heuristic only
   }
-  return list.filter((s) => staffMatchesBranch(s, branchName) || permittedIds.has(s.id));
+  return list.filter((s) => 
+    staffMatchesBranch(s, branchName) || 
+    permittedIds.has(s.id) ||
+    isOperationalLead(s.role) ||
+    s.role === "Admin" ||
+    s.role === "MD"
+  );
 }
 
 export interface TreatingStaffOption {

@@ -14,7 +14,7 @@ export function isManagementRole(role: string | undefined): boolean {
 }
 
 export function isSessionRole(role: string | undefined): boolean {
-  return role === "Physiotherapist" || role === "Staff";
+  return role === "Physiotherapist" || role === "Staff" || role === "Manager";
 }
 
 /**

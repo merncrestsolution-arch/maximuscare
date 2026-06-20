@@ -214,7 +214,7 @@ export default function AuditLogPage() {
   };
 
   return (
-    <div className="space-y-4 pb-24">
+    <div className="space-y-4">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon" className="-ml-2 md:hidden" onClick={() => setLocation("/dashboard")}>
           <ArrowLeft className="h-5 w-5" />
