@@ -1275,16 +1275,20 @@ export class DatabaseStorage implements IStorage {
   private async getVisitIncome(
     startDate?: string,
     endDate?: string,
-    branchName?: string | null
+    branchName?: string | string[] | null
   ): Promise<number> {
-    if (branchName) {
+    if (branchName && (Array.isArray(branchName) ? branchName.length > 0 : true)) {
       const { normalizeBranchName } = await import("@shared/branches");
-      const target = normalizeBranchName(branchName).toLowerCase();
+      const targets = new Set(
+        Array.isArray(branchName)
+          ? branchName.map(b => normalizeBranchName(b).toLowerCase())
+          : [normalizeBranchName(branchName).toLowerCase()]
+      );
       const allVisits = startDate && endDate
         ? await this.getVisitsByDateRange(startDate, endDate)
         : await this.getAllVisits();
       return allVisits
-        .filter((v: any) => !v.deletedAt && normalizeBranchName(v.branch).toLowerCase() === target)
+        .filter((v: any) => !v.deletedAt && targets.has(normalizeBranchName(v.branch).toLowerCase()))
         .reduce((sum: number, v: any) => {
           const status = String(v.paymentStatus ?? "").toLowerCase();
           if (status === "paid") return sum + (parseFloat(v.paymentAmount) || 0);
@@ -1324,25 +1328,33 @@ export class DatabaseStorage implements IStorage {
   async getInPatientRevenueByDay(
     startDate?: string,
     endDate?: string,
-    branchName?: string | null
+    branchName?: string | string[] | null
   ): Promise<{ date: string; revenue: number }[]> {
     const inRange = (d?: string | null) =>
       !startDate || !endDate || (!!d && d >= startDate && d <= endDate);
 
     let allowedAdmissionIds: Set<string> | null = null;
-    if (branchName) {
+    if (branchName && (Array.isArray(branchName) ? branchName.length > 0 : true)) {
       const { normalizeBranchName } = await import("@shared/branches");
-      const target = normalizeBranchName(branchName).toLowerCase();
+      const targets = new Set(
+        Array.isArray(branchName)
+          ? branchName.map(b => normalizeBranchName(b).toLowerCase())
+          : [normalizeBranchName(branchName).toLowerCase()]
+      );
       const admissions = await this.getAllInPatientAdmissions();
       const branches = await this.getAllBranches();
-      const matchingBranch = branches.find((b) => normalizeBranchName(b.name).toLowerCase() === target);
+      const matchingBranchIds = new Set(
+        branches
+          .filter((b) => targets.has(normalizeBranchName(b.name).toLowerCase()))
+          .map((b) => b.id)
+      );
       allowedAdmissionIds = new Set(
         admissions
           .filter((a: any) => {
-            if (matchingBranch && a.branchId === matchingBranch.id) return true;
+            if (a.branchId && matchingBranchIds.has(a.branchId)) return true;
             // Legacy fallback if 'branch' field somehow exists on older records
             const b = normalizeBranchName(a.branch).toLowerCase();
-            return !!b && b === target;
+            return !!b && targets.has(b);
           })
           .map((a: any) => a.id)
       );

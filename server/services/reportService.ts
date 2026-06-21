@@ -494,20 +494,28 @@ export async function computeDashboardCharts(
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
   let ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
   let attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
-  if (branchFilter) {
+  if (branchFilter && (Array.isArray(branchFilter) ? branchFilter.length > 0 : true)) {
     visits = filterVisitsByBranch(visits, branchFilter);
     attendance = applyBranchFilter(attendance, branchFilter);
     
     const branches = await storage.getAllBranches();
-    const targetBranch = normalizeBranchName(branchFilter).toLowerCase();
-    const matchingBranch = branches.find((b) => normalizeBranchName(b.name).toLowerCase() === targetBranch);
+    const targets = new Set(
+      Array.isArray(branchFilter)
+        ? branchFilter.map((b) => normalizeBranchName(b).toLowerCase())
+        : [normalizeBranchName(branchFilter).toLowerCase()]
+    );
+    const matchingBranchIds = new Set(
+      branches
+        .filter((b) => targets.has(normalizeBranchName(b.name).toLowerCase()))
+        .map((b) => b.id)
+    );
     const branchStaffIds = new Set(
       (await storage.getAllStaff())
-        .filter((s) => normalizeBranchName(s.branch ?? "").toLowerCase() === targetBranch)
+        .filter((s) => targets.has(normalizeBranchName(s.branch ?? "").toLowerCase()))
         .map((s) => s.id)
     );
     ipSessions = ipSessions.filter(s => 
-      (matchingBranch && s.branchId === matchingBranch.id) || 
+      (s.branchId && matchingBranchIds.has(s.branchId)) || 
       branchStaffIds.has(s.treatingStaffId)
     );
   }

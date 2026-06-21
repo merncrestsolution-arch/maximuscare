@@ -706,7 +706,7 @@ export function useNotifications(opts?: { unreadOnly?: boolean; archived?: boole
   return useQuery({
     queryKey: ['notifications', opts],
     queryFn: () => notificationsApi.getAll(opts),
-    refetchInterval: 60000,
+    refetchInterval: 30000,
   });
 }
 

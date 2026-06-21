@@ -54,7 +54,7 @@ export function NotificationBell() {
                 <span className="font-medium text-sm">{n.title}</span>
                 <span className="text-xs text-muted-foreground line-clamp-2">{n.message}</span>
                 <span className="text-[10px] text-muted-foreground">
-                  {n.createdAt ? formatDistanceToNow(new Date(n.createdAt), { addSuffix: true }) : ""}
+                  {n.createdAt ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(n.createdAt)) : ""}
                 </span>
               </div>
             </DropdownMenuItem>
