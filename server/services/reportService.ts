@@ -203,15 +203,25 @@ export async function computeRevenueReport(
   };
 }
 
-function filterVisitsByBranch(visits: Visit[], branch: string) {
-  const target = normalizeBranchName(branch).toLowerCase();
-  return visits.filter((v) => normalizeBranchName(v.branch).toLowerCase() === target);
+export function filterVisitsByBranch(visits: Visit[], branchFilter: string | string[]): Visit[] {
+  const { normalizeBranchName } = require("@shared/branches");
+  const targets = new Set(
+    Array.isArray(branchFilter)
+      ? branchFilter.map(b => normalizeBranchName(b).toLowerCase())
+      : [normalizeBranchName(branchFilter).toLowerCase()]
+  );
+  return visits.filter((v) => targets.has(normalizeBranchName(v.branch).toLowerCase()));
 }
 
-function applyBranchFilter<T extends { branch?: string | null }>(items: T[], branchFilter?: string | null): T[] {
-  if (!branchFilter) return items;
-  const target = normalizeBranchName(branchFilter).toLowerCase();
-  return items.filter((item) => normalizeBranchName(item.branch).toLowerCase() === target);
+function applyBranchFilter<T extends { branch?: string | null }>(items: T[], branchFilter?: string | string[] | null): T[] {
+  if (!branchFilter || (Array.isArray(branchFilter) && branchFilter.length === 0)) return items;
+  const { normalizeBranchName } = require("@shared/branches");
+  const targets = new Set(
+    Array.isArray(branchFilter)
+      ? branchFilter.map(b => normalizeBranchName(b).toLowerCase())
+      : [normalizeBranchName(branchFilter).toLowerCase()]
+  );
+  return items.filter((item) => targets.has(normalizeBranchName(item.branch).toLowerCase()));
 }
 
 /**
@@ -479,7 +489,7 @@ export async function computeDashboardCharts(
   storage: IStorage,
   rangeFrom: string,
   rangeTo: string,
-  branchFilter?: string | null
+  branchFilter?: string | string[] | null
 ): Promise<DashboardCharts> {
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
   let ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);

@@ -282,11 +282,11 @@ export interface IStorage {
   createExpense(data: InsertExpense): Promise<Expense>;
   updateExpense(id: string, data: UpdateExpense): Promise<Expense | undefined>;
   deleteExpense(id: string, deletedBy?: string): Promise<boolean>;
-  getExpenseTotal(startDate?: string, endDate?: string, branchName?: string | null): Promise<number>;
+  getExpenseTotal(startDate?: string, endDate?: string, branchName?: string | string[] | null): Promise<number>;
 
   // Revenue calculation methods
-  getTotalIncome(startDate?: string, endDate?: string, branchName?: string | null): Promise<number>;
-  getInPatientRevenueByDay(startDate?: string, endDate?: string, branchName?: string | null): Promise<{ date: string; revenue: number }[]>;
+  getTotalIncome(startDate?: string, endDate?: string, branchName?: string | string[] | null): Promise<number>;
+  getInPatientRevenueByDay(startDate?: string, endDate?: string, branchName?: string | string[] | null): Promise<{ date: string; revenue: number }[]>;
 
   // Incentive Settings methods
   getIncentiveSettings(): Promise<IncentiveSettings | undefined>;
@@ -1221,13 +1221,17 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
-  async getExpenseTotal(startDate?: string, endDate?: string, branchName?: string | null): Promise<number> {
+  async getExpenseTotal(startDate?: string, endDate?: string, branchName?: string | string[] | null): Promise<number> {
     // When a branch is selected we filter in JS via normalizeBranchName so that
     // legacy branch aliases (e.g. "Colombo" -> "Dehiwala") are matched correctly,
     // which a raw SQL equality on the stored text column would miss.
-    if (branchName) {
+    if (branchName && (Array.isArray(branchName) ? branchName.length > 0 : true)) {
       const { normalizeBranchName } = await import("@shared/branches");
-      const target = normalizeBranchName(branchName).toLowerCase();
+      const targets = new Set(
+        Array.isArray(branchName) 
+          ? branchName.map(b => normalizeBranchName(b).toLowerCase())
+          : [normalizeBranchName(branchName).toLowerCase()]
+      );
       const rows = await db
         .select()
         .from(expenses)
@@ -1237,7 +1241,7 @@ export class DatabaseStorage implements IStorage {
             : isNull(expenses.deletedAt)
         );
       return rows
-        .filter((e: any) => normalizeBranchName(e.branch).toLowerCase() === target)
+        .filter((e: any) => targets.has(normalizeBranchName(e.branch).toLowerCase()))
         .reduce((sum: number, e: any) => sum + (parseFloat(e.amount) || 0), 0);
     }
     const conditions = [isNull(expenses.deletedAt)];
@@ -1252,7 +1256,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Revenue calculation methods
-  async getTotalIncome(startDate?: string, endDate?: string, branchName?: string | null): Promise<number> {
+  async getTotalIncome(startDate?: string, endDate?: string, branchName?: string | string[] | null): Promise<number> {
     const visitsTotal = await this.getVisitIncome(startDate, endDate, branchName ?? null);
     // In-patient cash collected (in-stay payments + the incremental amount settled
     // at discharge). getInPatientRevenueByDay de-duplicates the cumulative discharge

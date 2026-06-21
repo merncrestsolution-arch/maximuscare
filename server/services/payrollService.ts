@@ -248,8 +248,8 @@ export async function computePayrollReport(
   const settings = await loadPayrollSettings(storage);
   const allStaff = await storage.getAllStaff();
   const targets = allStaff.filter((s) => {
-    const r = s.role;
-    if (r !== "Physiotherapist" && r !== "Staff" && r !== "Manager") return false;
+    const { isClinicalRole } = require("@shared/roles");
+    if (!isClinicalRole(s.role)) return false;
     if (staffIds?.length && !staffIds.includes(s.id)) return false;
     return true;
   });

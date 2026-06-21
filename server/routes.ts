@@ -1851,8 +1851,11 @@ export async function registerRoutes(
   });
 
   // Create in-patient admission (Admin, MD, Receptionist, Physiotherapist)
-  app.post("/api/inpatients", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
+  app.post("/api/inpatients", requireAuth, requireBranchContext(), requirePatientsManage, async (req: Request, res: Response) => {
     try {
+      const branchContext = (req as any).branchContext;
+      const branchId = branchContext?.selectedBranchId ?? null;
+
       const normalizedBody = normalizeInPatientAdmissionBody(req.body as Record<string, unknown>);
       const parsed = insertInPatientAdmissionSchema.safeParse(normalizedBody);
       if (!parsed.success) {
@@ -1861,6 +1864,7 @@ export async function registerRoutes(
       const d = parsed.data;
       const admission = await storage.createInPatientAdmission({
         ...d,
+        branchId: d.branchId || branchId,
         reportsAttachments: (d as any).reportsAttachments ?? null,
         idCopyAttachments: (d as any).idCopyAttachments ?? null,
       } as any);
@@ -2344,7 +2348,16 @@ export async function registerRoutes(
       } else {
         expensesList = await storage.getAllExpenses();
       }
-      if (branchFilter) expensesList = filterByBranchName(expensesList, branchFilter);
+
+      if (branchFilter) {
+        expensesList = filterByBranchName(expensesList, branchFilter);
+      } else {
+        const ctx = (req as any).branchContext;
+        if (ctx?.allowedBranches) {
+          const allowedNorms = new Set(ctx.allowedBranches.map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
+          expensesList = expensesList.filter((e: any) => allowedNorms.has(normalizeBranchName(e.branch).toLowerCase()));
+        }
+      }
       
       return res.json(expensesList);
     } catch (error: any) {
@@ -2477,7 +2490,9 @@ export async function registerRoutes(
   app.get("/api/revenue-summary", requireAuth, requireBranchContext(), requireReportsView, async (req: Request, res: Response) => {
     try {
       const { startDate, endDate } = req.query;
-      const branchFilter = getBranchFilter(req as any);
+      const ctx = (req as any).branchContext;
+      const explicitFilter = getBranchFilter(req as any);
+      const branchFilter = explicitFilter || (ctx?.allowedBranches ? ctx.allowedBranches.map((b: any) => b.branchName ?? b.name) : null);
 
       let totalIncome: number;
       let totalExpenses: number;
@@ -2565,6 +2580,15 @@ export async function registerRoutes(
         (await resolveBranchIdByName(storage, resolvedBranch ?? undefined)) ??
         null;
 
+      if (body.patientId && !body.patientName) {
+        const patient = await storage.getPatient(body.patientId);
+        if (patient) body.patientName = patient.name;
+      }
+      if (body.treatingStaffId && !body.treatingStaffName) {
+        const staffMem = await storage.getStaff(body.treatingStaffId);
+        if (staffMem) body.treatingStaffName = staffMem.name;
+      }
+
       const data = {
         ...body,
         branch: resolvedBranch ?? null,
@@ -2604,12 +2628,28 @@ export async function registerRoutes(
       const body = { ...req.body };
       if (body.notes === '') body.notes = null;
 
+      if (body.patientId && !body.patientName) {
+        const patient = await storage.getPatient(body.patientId);
+        if (patient) body.patientName = patient.name;
+      }
+      if (body.treatingStaffId && !body.treatingStaffName) {
+        const staffMem = await storage.getStaff(body.treatingStaffId);
+        if (staffMem) body.treatingStaffName = staffMem.name;
+      }
+
       const parsed = updateAppointmentSchema.safeParse(body);
       if (!parsed.success) {
         return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
       }
 
       const beforeAppt = await storage.getAppointment(param(req, "id"));
+      if (!beforeAppt) return res.status(404).json({ message: "Appointment not found" });
+
+      const ctx = (req as any).branchContext;
+      if (beforeAppt.branchId && !ctx?.allowedBranchIds?.includes(beforeAppt.branchId)) {
+        return res.status(403).json({ message: "Unauthorized branch access" });
+      }
+
       const appt = await storage.updateAppointment(param(req, "id"), parsed.data as any);
       if (!appt) return res.status(404).json({ message: "Appointment not found" });
       const apptUpdActor = await auditActor(req);
@@ -2630,6 +2670,13 @@ export async function registerRoutes(
   app.delete("/api/appointments/:id", requireAuth, requireBranchContext(), requireAppointmentsManage, async (req: Request, res: Response) => {
     try {
       const beforeAppt = await storage.getAppointment(param(req, "id"));
+      if (!beforeAppt) return res.status(404).json({ message: "Appointment not found" });
+
+      const ctx = (req as any).branchContext;
+      if (beforeAppt.branchId && !ctx?.allowedBranchIds?.includes(beforeAppt.branchId)) {
+        return res.status(403).json({ message: "Unauthorized branch access" });
+      }
+
       const deleted = await storage.deleteAppointment(param(req, "id"));
       if (!deleted) return res.status(404).json({ message: "Appointment not found" });
       const apptDelActor = await auditActor(req);

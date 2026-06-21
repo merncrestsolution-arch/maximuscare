@@ -22,10 +22,7 @@ export function isSessionRole(role: string | undefined): boolean {
  * Manager, Branch Manager, and Nexus MD. They can view staff and all
  * patients/visits within their branch context.
  */
-export function isOperationalLead(role: string | undefined): boolean {
-  const r = String(role ?? "").trim();
-  return r === "Manager" || r === "Branch Manager" || r === "Nexus MD";
-}
+export { isOperationalLead } from "@shared/roles";
 
 /** Roles that can view the staff directory and other staff profiles (read access). */
 export function canViewStaff(role: string | undefined): boolean {

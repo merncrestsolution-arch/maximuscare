@@ -60,7 +60,7 @@ export async function computeDashboardKpis(
   rangeFrom: string,
   rangeTo: string,
   staffFilter?: string[],
-  branchFilter?: string | null
+  branchFilter?: string | string[] | null
 ): Promise<DashboardKpis> {
   const today = clinicDateString();
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);

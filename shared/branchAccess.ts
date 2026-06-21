@@ -43,9 +43,7 @@ export function isManager(role: string): boolean {
   return role === "Manager";
 }
 
-export function isOperationalLead(role: string): boolean {
-  return hasFullBranchAccess(role) || isBranchManager(role) || isManager(role);
-}
+export { isOperationalLead } from "./roles";
 
 export function hasFullBranchAccess(role: string): boolean {
   return isSuperAdmin(role) || isManagingDirector(role);

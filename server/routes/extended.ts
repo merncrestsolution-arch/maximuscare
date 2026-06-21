@@ -444,8 +444,10 @@ export function registerExtendedRoutes(app: Express) {
       const staffFilter =
         isManagementRole(user.role) || isOperationalLead(user.role) ? undefined : [user.staffId];
       const { cacheGetOrSet } = await import("../services/cacheService");
-      const branchFilter = (req as any).branchContext?.selectedBranchName;
-      const cacheKey = `dashboard:${startDate}:${endDate}:${user.staffId}:${branchFilter ?? "none"}`;
+      const ctx = (req as any).branchContext;
+      const explicitFilter = ctx?.selectedBranchName;
+      const branchFilter = explicitFilter || (ctx?.allowedBranches ? ctx.allowedBranches.map((b: any) => b.branchName ?? b.name) : null);
+      const cacheKey = `dashboard:${startDate}:${endDate}:${user.staffId}:${explicitFilter ?? "none"}`;
       const kpis = await cacheGetOrSet(cacheKey, 120, () =>
         computeDashboardKpis(storage, startDate, endDate, staffFilter, branchFilter)
       );
