@@ -34,16 +34,16 @@ export async function generateStandardPDF(options: PDFExportOptions): Promise<vo
   }
 
   // Add Title
-  doc.setFontSize(18);
-  doc.setTextColor(30, 41, 59); // slate-800
+  doc.setFontSize(22);
+  doc.setTextColor(225, 29, 72); // vibrant rose
   const titleX = options.logoUri ? 40 : 14;
   const titleY = options.logoUri ? 20 : startY;
   doc.text(options.title, titleX, titleY);
 
   // Add Subtitle
   if (options.subtitle) {
-    doc.setFontSize(11);
-    doc.setTextColor(100, 116, 139); // slate-500
+    doc.setFontSize(12);
+    doc.setTextColor(147, 51, 234); // vibrant purple
     doc.text(options.subtitle, titleX, titleY + 7);
     if (!options.logoUri) startY += 15;
   } else if (!options.logoUri) {
@@ -52,7 +52,7 @@ export async function generateStandardPDF(options: PDFExportOptions): Promise<vo
 
   // Add Generation Timestamp
   doc.setFontSize(9);
-  doc.setTextColor(148, 163, 184); // slate-400
+  doc.setTextColor(14, 165, 233); // vibrant sky blue
   doc.text(`Generated: ${format(new Date(), "dd MMM yyyy, HH:mm")} (SLST)`, titleX, titleY + 13);
 
   // Add Table
@@ -68,23 +68,27 @@ export async function generateStandardPDF(options: PDFExportOptions): Promise<vo
     })),
     theme: "striped",
     headStyles: {
-      fillColor: [45, 157, 139], // primary teal
+      fillColor: [79, 70, 229], // vibrant indigo
       textColor: 255,
       fontStyle: 'bold',
+      fontSize: 10,
     },
     styles: {
       fontSize: 9,
-      cellPadding: 3,
+      cellPadding: 4,
+      lineColor: [244, 114, 182], // pink 400
+      lineWidth: 0.2,
+      textColor: [15, 23, 42],
     },
     alternateRowStyles: {
-      fillColor: [248, 250, 252], // slate-50
+      fillColor: [254, 240, 138], // vibrant yellow 200
     },
     margin: { left: 14, right: 14 },
     didDrawPage: (data) => {
       // Add Footer
       const str = `Page ${doc.internal.getNumberOfPages()}`;
-      doc.setFontSize(8);
-      doc.setTextColor(148, 163, 184);
+      doc.setFontSize(9);
+      doc.setTextColor(234, 88, 12); // vibrant orange
       doc.text(
         str,
         data.settings.margin.left,
