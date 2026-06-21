@@ -10,7 +10,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Archive, Trash2, CheckCheck, Sparkles } from "lucide-react";
+import { Loader2, Archive, Trash2, CheckCheck } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -50,18 +50,6 @@ export default function NotificationsPage() {
         >
           <CheckCheck className="h-4 w-4 mr-1" /> Mark all read
         </Button>
-      </div>
-
-      <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 mb-4">
-        <h2 className="font-bold text-primary flex items-center gap-2">
-          <Sparkles className="h-5 w-5" />
-          Latest Update: Version 1.2.0
-        </h2>
-        <ul className="list-disc list-inside text-sm mt-2 space-y-1 text-muted-foreground">
-          <li><strong>PDF Downloads Fixed:</strong> Resolved silent crashing bug in PDF report generation across all sections.</li>
-          <li><strong>Mobile UI Overhaul:</strong> Completely redesigned mobile forms and touch targets for better usability.</li>
-          <li><strong>Responsive Design:</strong> Buttons perfectly sized for phones, and all layout grids adapt correctly to smaller screens.</li>
-        </ul>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>

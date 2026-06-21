@@ -15,16 +15,12 @@ export interface AppRelease {
 }
 
 export const APP_RELEASE: AppRelease = {
-  version: "1.1.3",
+  version: "1.2.0",
   title: "App Updated — What's New",
   highlights: [
-    "In-patient sessions: branch isolation, live dashboard counts, and PDF export.",
-    "Dashboard: branch-wide KPIs, improved revenue trend, and cleaner admin view.",
-    "Patient profiles: full visit history for staff and clearer revenue visibility.",
-    "Revenue reports: accurate branch totals and home-visit fee breakdown.",
-    "Appointments & patients: lists stay in sync with your selected branch.",
-    "Managers can edit visits and in-patient sessions; therapist summary for all staff.",
-    "Fines, attendance, and payroll fixes across the app.",
+    "PDF Downloads Fixed: Resolved silent crashing bug in PDF report generation across all sections.",
+    "Mobile UI Overhaul: Completely redesigned mobile forms and touch targets for better usability.",
+    "Responsive Design: Buttons perfectly sized for phones, and all layout grids adapt correctly to smaller screens."
   ],
 };
 
