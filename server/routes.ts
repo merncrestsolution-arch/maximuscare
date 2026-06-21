@@ -2158,11 +2158,11 @@ export async function registerRoutes(
 
       const title = `Inpatient History - ${admission.patientName} (${admission.status})`;
       const columns = [
-        { header: "Date", key: "date" },
-        { header: "Session #", key: "sessionNumber" },
-        { header: "Treatment", key: "treatment" },
-        { header: "Therapist", key: "therapist" },
-        { header: "Notes", key: "notes" },
+        { label: "Date", key: "date" },
+        { label: "Session #", key: "sessionNumber" },
+        { label: "Treatment", key: "treatment" },
+        { label: "Therapist", key: "therapist" },
+        { label: "Notes", key: "notes" },
       ];
 
       const rows = sessions.map((s) => ({
