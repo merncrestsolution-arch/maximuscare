@@ -94,7 +94,6 @@ export function StructuredReportActions({
 
   const exportPdf = async () => {
     const { generateStandardPDF } = await import("@/lib/pdfBuilder");
-    const safeBase = getSafeBaseName();
     
     await generateStandardPDF({
       title: reportTitle,
