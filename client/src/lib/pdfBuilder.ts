@@ -19,54 +19,46 @@ export interface PDFExportOptions {
 export async function generateStandardPDF(options: PDFExportOptions): Promise<void> {
   const doc = new jsPDF("p", "mm", "a4");
   const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
   
-  // ==========================
-  // TOP BANNER (Very Colorful!)
-  // ==========================
-  doc.setFillColor(79, 70, 229); // Vibrant Indigo
-  doc.rect(0, 0, pageWidth, 45, 'F');
-  
-  // Decorative Accent Bar
-  doc.setFillColor(236, 72, 153); // Pink
-  doc.rect(0, 45, pageWidth, 2, 'F');
-
-  let startY = 55;
+  let startY = 15;
 
   // Add Logo if provided
   if (options.logoUri) {
     try {
       const isPng = options.logoUri.startsWith("data:image/png");
-      doc.addImage(options.logoUri, isPng ? "PNG" : "JPEG", 14, 10, 25, 25, undefined, "FAST");
+      doc.addImage(options.logoUri, isPng ? "PNG" : "JPEG", 14, 10, 20, 20, undefined, "FAST");
+      startY = 35;
     } catch (e) {
       console.warn("Could not add logo to PDF:", e);
     }
   }
 
   // Add Title
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(24);
-  doc.setTextColor(255, 255, 255); // White text on indigo banner
-  const titleX = options.logoUri ? 45 : 14;
-  doc.text(options.title, titleX, 22);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(18);
+  doc.setTextColor(30, 41, 59); // slate-800
+  const titleX = options.logoUri ? 40 : 14;
+  const titleY = options.logoUri ? 20 : startY;
+  doc.text(options.title, titleX, titleY);
 
   // Add Subtitle
   if (options.subtitle) {
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(12);
-    doc.setTextColor(254, 240, 138); // Yellow text
-    doc.text(options.subtitle, titleX, 30);
+    doc.setFontSize(11);
+    doc.setTextColor(100, 116, 139); // slate-500
+    doc.text(options.subtitle, titleX, titleY + 7);
+    if (!options.logoUri) startY += 15;
+  } else if (!options.logoUri) {
+    startY += 10;
   }
 
   // Add Generation Timestamp
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.setTextColor(191, 219, 254); // Light blue
-  doc.text(`Generated: ${format(new Date(), "dd MMM yyyy, HH:mm")} (SLST)`, titleX, 38);
+  doc.setFontSize(9);
+  doc.setTextColor(148, 163, 184); // slate-400
+  doc.text(`Generated: ${format(new Date(), "dd MMM yyyy, HH:mm")} (SLST)`, titleX, titleY + 13);
 
   // Add Table
   const tableOptions: UserOptions = {
-    startY: startY,
+    startY: startY + 5,
     head: [options.columns.map(c => c.header)],
     body: options.data.map(row => options.columns.map(c => {
       const val = row[c.dataKey];
@@ -75,40 +67,34 @@ export async function generateStandardPDF(options: PDFExportOptions): Promise<vo
       }
       return val ?? "";
     })),
-    theme: "grid",
+    theme: "striped",
     headStyles: {
-      fillColor: [225, 29, 72], // Rose 600 header
+      fillColor: [45, 157, 139], // primary teal
       textColor: 255,
       fontStyle: 'bold',
-      fontSize: 10,
     },
     styles: {
       fontSize: 9,
-      cellPadding: 4,
-      lineColor: [203, 213, 225], // Slate 300
-      lineWidth: 0.1,
-      textColor: [30, 41, 59], // Slate 800
+      cellPadding: 3,
     },
     alternateRowStyles: {
-      fillColor: [240, 253, 250], // Light Teal / Cyan hue for rows
+      fillColor: [248, 250, 252], // slate-50
     },
-    margin: { left: 14, right: 14, bottom: 20 },
+    margin: { left: 14, right: 14 },
     didDrawPage: (data) => {
-      // Add Footer Banner
-      doc.setFillColor(30, 41, 59); // Slate 800
-      doc.rect(0, pageHeight - 15, pageWidth, 15, 'F');
-      
+      // Add Footer
       const str = `Page ${doc.internal.getNumberOfPages()}`;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.setTextColor(253, 186, 116); // Orange
-      doc.text(str, data.settings.margin.left, pageHeight - 6);
-      
-      doc.setTextColor(244, 114, 182); // Pink
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text(
+        str,
+        data.settings.margin.left,
+        doc.internal.pageSize.getHeight() - 10
+      );
       doc.text(
         "Maximus Care Management System",
         pageWidth - data.settings.margin.right,
-        pageHeight - 6,
+        doc.internal.pageSize.getHeight() - 10,
         { align: "right" }
       );
     },
