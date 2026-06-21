@@ -15,12 +15,12 @@ export interface AppRelease {
 }
 
 export const APP_RELEASE: AppRelease = {
-  version: "1.2.0",
+  version: "1.3.0",
   title: "App Updated — What's New",
   highlights: [
-    "PDF Downloads Fixed: Resolved silent crashing bug in PDF report generation across all sections.",
-    "Mobile UI Overhaul: Completely redesigned mobile forms and touch targets for better usability.",
-    "Responsive Design: Buttons perfectly sized for phones, and all layout grids adapt correctly to smaller screens."
+    "Premium PDF Redesign: All exported reports now feature a deeply redesigned, highly professional corporate layout.",
+    "Smart Table Scaling: PDF reports with massive amounts of data (like the Physio Summary) now automatically generate in Landscape orientation so data is perfectly spaced and legible.",
+    "Elegant Styling: PDFs now include right-aligned titles, subtle teal accent lines, structured table grids, and formal page footers."
   ],
 };
 
