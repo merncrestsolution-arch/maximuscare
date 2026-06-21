@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
+import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
 import { useBranding } from "@/context/branding-context";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,7 @@ export default function InPatientProfilePage() {
   const updateExtraExpense = useUpdateInPatientExtraExpense();
   const deleteExtraExpense = useDeleteInPatientExtraExpense();
   const { data: staffList = [] } = useTreatingStaff();
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const updateInPatientSession = useUpdateInPatientSession();
 
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
@@ -729,9 +731,21 @@ export default function InPatientProfilePage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => window.open(`/api/inpatients/${patientId}/export-pdf`, "_blank")}
+                disabled={isDownloadingPdf}
+                onClick={async () => {
+                  try {
+                    setIsDownloadingPdf(true);
+                    await downloadAuthenticatedFile(`/api/inpatients/${patientId}/export-pdf`, `inpatient-history-${patientId.substring(0, 8)}.pdf`);
+                    toast({ title: "Success", description: "Report downloaded successfully." });
+                  } catch (err: any) {
+                    toast({ title: "Error", description: err.message || "Failed to download PDF", variant: "destructive" });
+                  } finally {
+                    setIsDownloadingPdf(false);
+                  }
+                }}
                 data-testid="button-export-history-pdf"
               >
+                {isDownloadingPdf ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
                 Export Full History PDF
               </Button>
               {canAddSession && (

@@ -115,7 +115,7 @@ export default function AppointmentsList() {
                 <button
                   key={dateStr}
                   onClick={() => setSelectedDate(day)}
-                  className={`h-11 min-w-[2.75rem] flex flex-col items-center justify-center rounded-full relative transition-colors touch-manipulation ${
+                  className={`h-[48px] min-w-[48px] flex flex-col items-center justify-center rounded-full relative transition-colors touch-manipulation ${
                     isSelected
                       ? "bg-primary/20 text-primary font-bold"
                       : isTodayDate

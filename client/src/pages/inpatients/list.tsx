@@ -103,12 +103,12 @@ export default function InPatientsListPage() {
             placeholder="Search by name or phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 h-10"
+            className="pl-9"
             data-testid="input-search"
           />
         </div>
 
-        <div className="flex gap-2 mb-4">
+        <div className="grid grid-cols-3 gap-2 mb-4">
           {(["Admitted", "Discharged", "all"] as const).map((status) => (
             <Button
               key={status}

@@ -216,6 +216,52 @@ export async function openAuthenticatedFile(endpoint: string): Promise<void> {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/** Download a protected document forcefully using a blob and hidden <a> tag. */
+export async function downloadAuthenticatedFile(endpoint: string, fallbackFilename: string = "download.pdf"): Promise<void> {
+  const token = getAccessToken();
+  const response = await fetch(apiUrl(endpoint), {
+    credentials: "include",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  
+  if (!response.ok) {
+    let errorMsg = "Failed to download document";
+    try {
+      const errorData = await response.json();
+      if (errorData.message) errorMsg = errorData.message;
+    } catch {
+      // Not JSON, ignore
+    }
+    throw new Error(errorMsg);
+  }
+  
+  // Try to get filename from Content-Disposition header
+  const disposition = response.headers.get("Content-Disposition");
+  let filename = fallbackFilename;
+  if (disposition && disposition.indexOf("attachment") !== -1) {
+    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+    const matches = filenameRegex.exec(disposition);
+    if (matches != null && matches[1]) { 
+      filename = matches[1].replace(/['"]/g, "");
+    }
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.style.display = "none";
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  
+  // Cleanup
+  setTimeout(() => {
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }, 100);
+}
+
 // Auth API
 export const authApi = {
   login: async (email: string, password: string) => {

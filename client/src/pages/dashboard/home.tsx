@@ -220,7 +220,7 @@ export default function Dashboard() {
               setSelectedYear(y);
             }}
           >
-            <SelectTrigger className="w-full sm:w-[180px] h-11" data-testid="select-month">
+            <SelectTrigger className="w-full sm:w-[180px]" data-testid="select-month">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

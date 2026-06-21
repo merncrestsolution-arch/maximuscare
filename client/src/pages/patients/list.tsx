@@ -130,11 +130,11 @@ export default function PatientsList() {
       </Button>
 
       <div className="flex flex-wrap gap-2">
-        <Link href="/patients/dashboard"><Button variant="outline" className="h-11">Dashboard</Button></Link>
-        <Link href="/patients/home-visits"><Button variant="outline" className="h-11">Home Visits</Button></Link>
-        <Link href="/reports/unpaid"><Button variant="outline" className="h-11">Unpaid</Button></Link>
-        <Link href="/patients/export"><Button variant="outline" className="h-11">Export</Button></Link>
-        <Link href="/reports/sessions"><Button variant="outline" className="h-11">Sessions</Button></Link>
+        <Link href="/patients/dashboard"><Button variant="outline">Dashboard</Button></Link>
+        <Link href="/patients/home-visits"><Button variant="outline">Home Visits</Button></Link>
+        <Link href="/reports/unpaid"><Button variant="outline">Unpaid</Button></Link>
+        <Link href="/patients/export"><Button variant="outline">Export</Button></Link>
+        <Link href="/reports/sessions"><Button variant="outline">Sessions</Button></Link>
       </div>
 
       <div className="flex items-center justify-between gap-2">

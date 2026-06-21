@@ -164,7 +164,7 @@ export default function EditInPatientPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="age">Age *</Label>
               <Input
@@ -216,7 +216,7 @@ export default function EditInPatientPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="careTakerName">Caretaker Name *</Label>
               <Input
@@ -241,7 +241,7 @@ export default function EditInPatientPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="patientIdNo">Patient ID No</Label>
               <Input

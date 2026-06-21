@@ -40,6 +40,7 @@ if (allowedOrigins.length > 0) {
         "Access-Control-Allow-Headers",
         "Content-Type, Authorization, X-Requested-With",
       );
+      res.header("Access-Control-Expose-Headers", "Content-Disposition");
     }
     if (req.method === "OPTIONS") {
       res.sendStatus(204);
