@@ -161,7 +161,7 @@ export function StructuredReportActions({
     try {
       if (type === "xlsx") await exportXlsx();
       if (type === "csv") exportCsv();
-      if (type === "pdf") exportPdf();
+      if (type === "pdf") await exportPdf();
       toast({ title: `${type.toUpperCase()} generated`, description: `Saved ${safeBase}.${type}` });
     } catch (error) {
       toast({

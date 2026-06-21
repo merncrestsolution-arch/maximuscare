@@ -25,7 +25,8 @@ export async function generateStandardPDF(options: PDFExportOptions): Promise<vo
   // Add Logo if provided
   if (options.logoUri) {
     try {
-      doc.addImage(options.logoUri, "JPEG", 14, 10, 20, 20, undefined, "FAST");
+      const isPng = options.logoUri.startsWith("data:image/png");
+      doc.addImage(options.logoUri, isPng ? "PNG" : "JPEG", 14, 10, 20, 20, undefined, "FAST");
       startY = 35;
     } catch (e) {
       console.warn("Could not add logo to PDF:", e);
