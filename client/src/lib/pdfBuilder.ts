@@ -17,10 +17,16 @@ export interface PDFExportOptions {
 }
 
 export async function generateStandardPDF(options: PDFExportOptions): Promise<void> {
-  const doc = new jsPDF("p", "mm", "a4");
+  const isLandscape = options.columns.length > 6;
+  const doc = new jsPDF(isLandscape ? "l" : "p", "mm", "a4");
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   
+  const isManyColumns = options.columns.length > 10;
+  const baseFontSize = isManyColumns ? 7 : 9;
+  const headerFontSize = isManyColumns ? 8 : 10;
+  const cellPadding = isManyColumns ? 2 : 4;
+
   let startY = 15;
 
   // 1. HEADER (Left: Logo, Right: Titles)
@@ -76,11 +82,11 @@ export async function generateStandardPDF(options: PDFExportOptions): Promise<vo
       fillColor: [45, 157, 139], // Primary teal
       textColor: 255,
       fontStyle: 'bold',
-      fontSize: 10,
+      fontSize: headerFontSize,
     },
     styles: {
-      fontSize: 9,
-      cellPadding: 4,
+      fontSize: baseFontSize,
+      cellPadding: cellPadding,
       textColor: [30, 41, 59], // Slate 800
       lineColor: [226, 232, 240], // Light grey grid lines #e2e8f0
       lineWidth: 0.1, // Very thin, elegant lines
