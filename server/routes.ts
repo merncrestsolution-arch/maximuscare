@@ -1815,21 +1815,16 @@ export async function registerRoutes(
         
         const admissions = await storage.getAllInPatientAdmissions();
         const admMap = new Map(admissions.map((a) => [a.id, a]));
-        
-        const allPatients = await storage.getAllPatients();
-        const patientBranchById = new Map(
-          allPatients.map((p) => [p.id, normalizeBranchName(p.branch).toLowerCase()])
-        );
 
         sessions = sessions.filter((s) => {
           const adm = admMap.get(s.admissionId);
-          const pBranch = adm ? patientBranchById.get(adm.patientId) : "";
+          const fromAdm = adm?.branchId ? branchIdToShort.get(adm.branchId) ?? "" : "";
           
           const fromText = normalizeBranchName((s as any).branch).toLowerCase();
           const fromId = (s as any).branchId ? branchIdToShort.get((s as any).branchId) ?? "" : "";
           const fromStaff = staffBranchById.get(s.treatingStaffId) ?? "";
           
-          const short = fromText || fromId || pBranch || fromStaff;
+          const short = fromText || fromId || fromAdm || fromStaff;
           return short === target;
         });
       }
