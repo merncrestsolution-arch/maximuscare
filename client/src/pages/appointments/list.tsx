@@ -40,11 +40,11 @@ export default function AppointmentsList() {
   const startDayOfWeek = getDay(monthStart);
 
   const appointmentDates = new Set(
-    appointments.map((a: Appointment) => a.appointmentDate)
+    (Array.isArray(appointments) ? appointments : []).map((a: Appointment) => a.appointmentDate)
   );
 
   const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
-  const dayAppointments = appointments
+  const dayAppointments = (Array.isArray(appointments) ? appointments : [])
     .filter((a: Appointment) => a.appointmentDate === selectedDateStr)
     .sort((a: Appointment, b: Appointment) => a.appointmentTime.localeCompare(b.appointmentTime));
 

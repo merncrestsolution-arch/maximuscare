@@ -255,10 +255,18 @@ export function computeHomeVisitBreakdown(
   let holidayVisits = 0;
   for (const v of homeVisits) {
     const att = attendanceByDate.get(v.visitDate);
-    const kind = classifyHomeVisit(v.branch, att?.status);
-    if (kind === "Holiday") holidayVisits++;
-    else if (kind === "Bandaragama") bandaragamaVisits++;
-    else colomboVisits++;
+    const branchName = normalizeBranchName(v.branch).toLowerCase();
+    
+    if (getHomeVisitRateTier(v.branch) === "bandaragama") {
+      bandaragamaVisits++;
+    } else {
+      colomboVisits++;
+    }
+
+    const isHoliday = isHolidayHomeVisitDay(att?.status);
+    if (isHoliday && (branchName === "colombo home" || branchName === "dehiwala")) {
+      holidayVisits++;
+    }
   }
   return {
     colomboVisits,

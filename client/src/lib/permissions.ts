@@ -17,7 +17,8 @@ export function isBranchManager(role: string | undefined): boolean {
 }
 
 export function isManager(role: string | undefined): boolean {
-  return String(role ?? "").trim() === "Manager";
+  const r = String(role ?? "").trim();
+  return r === "Manager" || r === "Staff";
 }
 
 /** Admin, MD, and Nexus MD — income, revenue, and org-wide financial summaries. */

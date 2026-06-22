@@ -58,6 +58,7 @@ export default function InPatientProfilePage() {
   const createExtraExpense = useCreateInPatientExtraExpense();
   const updateExtraExpense = useUpdateInPatientExtraExpense();
   const deleteExtraExpense = useDeleteInPatientExtraExpense();
+  const deleteSession = useDeleteInPatientSession();
   const { data: staffList = [] } = useTreatingStaff();
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const updateInPatientSession = useUpdateInPatientSession();
@@ -98,6 +99,8 @@ export default function InPatientProfilePage() {
   });
 
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null);
+  const [deleteSessionId, setSessionToDelete] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const isAdminMD = user?.role === "Admin" || user?.role === "MD";
   const isReceptionist = user?.role === "Receptionist";
@@ -158,8 +161,24 @@ export default function InPatientProfilePage() {
     } catch (error) {
       toast({ 
         title: "Error", 
-        description: error instanceof Error ? error.message : "Failed to delete",
+        description: error instanceof Error ? error.message : "Failed to delete record",
         variant: "destructive"
+      });
+    }
+  };
+
+  const handleDeleteSession = async () => {
+    if (!deleteSessionId) return;
+    try {
+      await deleteSession.mutateAsync(deleteSessionId);
+      toast({ title: "Success", description: "Session deleted successfully" });
+      setDeleteDialogOpen(false);
+      setSessionToDelete(null);
+    } catch (error) {
+      toast({ 
+        title: "Error", 
+        description: error instanceof Error ? error.message : "Failed to delete session", 
+        variant: "destructive" 
       });
     }
   };
@@ -429,14 +448,17 @@ export default function InPatientProfilePage() {
                   </AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader>
-                      <AlertDialogTitle>Delete In-Patient Record?</AlertDialogTitle>
+                      <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This will permanently delete this admission record and all associated sessions.
+                        This action cannot be undone. This will permanently delete the in-patient record
+                        and all associated data.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+                      <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                        {deleteInPatient.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+                      </AlertDialogAction>
                     </AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
@@ -509,7 +531,7 @@ export default function InPatientProfilePage() {
               <span className="text-muted-foreground">Caretaker Rate: </span>
               <span className="font-medium" data-testid="text-caretaker-rate">LKR {patient.careTakerRatePerDay || "0"}/day</span>
               {patient.careTakerDaysOverride && (
-                <span className="text-xs text-muted-foreground" data-testid="text-caretaker-days-override">
+                <span className="font-medium text-xs text-muted-foreground" data-testid="text-caretaker-days-override">
                   (Override: {patient.careTakerDaysOverride} days)
                 </span>
               )}
@@ -728,26 +750,23 @@ export default function InPatientProfilePage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
             <h2 className="text-lg font-semibold">Treatment Sessions</h2>
             <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={isDownloadingPdf}
-                onClick={async () => {
-                  try {
-                    setIsDownloadingPdf(true);
-                    await downloadAuthenticatedFile(`/api/inpatients/${patientId}/export-pdf`, `inpatient-history-${patientId.substring(0, 8)}.pdf`);
-                    toast({ title: "Success", description: "Report downloaded successfully." });
-                  } catch (err: any) {
-                    toast({ title: "Error", description: err.message || "Failed to download PDF", variant: "destructive" });
-                  } finally {
-                    setIsDownloadingPdf(false);
-                  }
-                }}
-                data-testid="button-export-history-pdf"
-              >
-                {isDownloadingPdf ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : null}
-                Export Full History PDF
-              </Button>
+              <StructuredReportActions
+                reportTitle={`In-Patient Sessions - ${patient?.patientName || 'Patient'}`}
+                fileBaseName={`inpatient-sessions-${patientId.substring(0, 8)}`}
+                columns={[
+                  { label: "Date", key: "date" },
+                  { label: "Session #", key: "sessionNumber" },
+                  { label: "Treatment", key: "treatmentProvided" },
+                  { label: "Therapist", key: "treatingStaffName" },
+                  { label: "Notes", key: "improvements" },
+                ]}
+                rows={(sessions || []).map(s => ({
+                  ...s,
+                  date: format(new Date(s.sessionDate), "yyyy-MM-dd"),
+                  improvements: (s as any).notes || s.improvements || "-",
+                }))}
+                logoUri={logoUri}
+              />
               {canAddSession && (
                 <Button 
                   size="sm"
@@ -803,11 +822,15 @@ export default function InPatientProfilePage() {
                           ) : null}
                         </div>
                         <div className="flex justify-end pt-2 md:pt-0 gap-1 flex-wrap">
-                          {/* Removed single-session PDF buttons as per Bug 17 */}
                           {canEditInPatientSession ? (
-                            <Button type="button" variant="outline" size="sm" onClick={() => openSessionEdit(session)} data-testid={`button-edit-session-${session.id}`}>
-                              Edit
-                            </Button>
+                            <>
+                              <Button type="button" variant="outline" size="sm" onClick={() => openSessionEdit(session)} data-testid={`button-edit-session-${session.id}`}>
+                                Edit
+                              </Button>
+                              <Button type="button" variant="outline" size="sm" className="text-destructive border-destructive hover:bg-destructive hover:text-white" onClick={() => { setSessionToDelete(session.id); setDeleteDialogOpen(true); }} data-testid={`button-delete-session-${session.id}`}>
+                                Delete
+                              </Button>
+                            </>
                           ) : null}
                         </div>
                       </div>
@@ -912,6 +935,24 @@ export default function InPatientProfilePage() {
             </AlertDialogContent>
           </AlertDialog>
         )}
+
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Session</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete this session? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setSessionToDelete(null)}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteSession} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" disabled={deleteSession.isPending}>
+                {deleteSession.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete Session"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
       </div>
 
       <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>

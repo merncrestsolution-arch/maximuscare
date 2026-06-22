@@ -214,6 +214,8 @@ export const insertAttendanceSchema = createInsertSchema(attendance).omit({ id: 
   staffName: z.string().optional(),
   role: z.string().optional(),
   date: z.string().optional(),
+  checkInTime: z.any().optional(),
+  checkOutTime: z.any().optional(),
 });
 export const updateAttendanceSchema = insertAttendanceSchema.partial();
 export type InsertAttendance = z.infer<typeof insertAttendanceSchema>;

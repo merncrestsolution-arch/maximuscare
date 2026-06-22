@@ -1297,11 +1297,12 @@ export class DatabaseStorage implements IStorage {
         }, 0);
     }
 
+    const endDateStr = endDate && !endDate.includes('T') ? `${endDate}T23:59:59.999Z` : (endDate ?? '9999-12-31');
     const whereClause = startDate && endDate
       ? and(
           sql`LOWER(${visits.paymentStatus}) IN ('paid', 'partially paid')`,
           gte(visits.visitDate, startDate),
-          lte(visits.visitDate, endDate),
+          lte(visits.visitDate, endDateStr),
           isNull(visits.deletedAt)
         )
       : and(sql`LOWER(${visits.paymentStatus}) IN ('paid', 'partially paid')`, isNull(visits.deletedAt));
@@ -1330,8 +1331,11 @@ export class DatabaseStorage implements IStorage {
     endDate?: string,
     branchName?: string | string[] | null
   ): Promise<{ date: string; revenue: number }[]> {
-    const inRange = (d?: string | null) =>
-      !startDate || !endDate || (!!d && d >= startDate && d <= endDate);
+    const inRange = (d?: string | null) => {
+      if (!startDate || !endDate || !d) return true;
+      const day = d.split('T')[0];
+      return day >= startDate && day <= (endDate.split('T')[0]);
+    };
 
     let allowedAdmissionIds: Set<string> | null = null;
     if (branchName && (Array.isArray(branchName) ? branchName.length > 0 : true)) {
@@ -1380,7 +1384,8 @@ export class DatabaseStorage implements IStorage {
     for (const p of payments as any[]) {
       if (!inRange(p.paymentDate)) continue;
       if (allowedAdmissionIds && !allowedAdmissionIds.has(p.admissionId)) continue;
-      byDay.set(p.paymentDate, (byDay.get(p.paymentDate) ?? 0) + (parseFloat(p.amount) || 0));
+      const day = p.paymentDate.split('T')[0];
+      byDay.set(day, (byDay.get(day) ?? 0) + (parseFloat(p.amount) || 0));
     }
     const discharges = await db.select().from(inPatientDischarges);
     for (const d of discharges as any[]) {
@@ -1389,7 +1394,8 @@ export class DatabaseStorage implements IStorage {
       const priorPaid = paidByAdmission.get(d.admissionId) ?? 0;
       const dischargeIncrement = Math.max(0, (parseFloat(d.amountPaid) || 0) - priorPaid);
       if (dischargeIncrement <= 0) continue;
-      byDay.set(d.dischargeDate, (byDay.get(d.dischargeDate) ?? 0) + dischargeIncrement);
+      const day = d.dischargeDate.split('T')[0];
+      byDay.set(day, (byDay.get(day) ?? 0) + dischargeIncrement);
     }
 
     return Array.from(byDay.entries())

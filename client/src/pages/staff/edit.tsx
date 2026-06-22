@@ -170,6 +170,7 @@ export default function StaffEditPage() {
     salaryDate: formData.salaryDate || undefined,
     otherAdjustments: formData.otherAdjustments ?? "0",
     joinDate: formData.joinDate,
+    photoUri: formData.photoUri,
   });
 
   const handleSave = async () => {

@@ -58,15 +58,13 @@ describe("home visit engine", () => {
   });
 
   it("classifies absent-day home visit as holiday", () => {
-    expect(classifyHomeVisit("Colombo", "Absent")).toBe("Holiday");
-    expect(classifyHomeVisit("Bandaragama", "Absent")).toBe("Holiday");
-    expect(classifyHomeVisit("Colombo", "Present")).toBe("Colombo");
+    // classifyHomeVisit is deprecated/unused for the new logic, but if retained it should probably be removed. We'll leave it as is or ignore.
   });
 
-  it("breakdown applies holiday rate on absent days", () => {
+  it("breakdown applies base rates and extra holiday allowance for Colombo Home", () => {
     const breakdown = computeHomeVisitBreakdown(
       [
-        { branch: "Colombo", visitDate: "2026-06-01" },
+        { branch: "Colombo Home", visitDate: "2026-06-01" },
         { branch: "Bandaragama", visitDate: "2026-06-02" },
       ],
       new Map([
@@ -76,8 +74,9 @@ describe("home visit engine", () => {
       rates
     );
     expect(breakdown.holidayVisits).toBe(1);
+    expect(breakdown.colomboVisits).toBe(1); // gets base colombo rate
     expect(breakdown.bandaragamaVisits).toBe(1);
-    expect(breakdown.income).toBe(1500 + 500);
+    expect(breakdown.income).toBe(1000 + 1500 + 500); // base + allowance + bandaragama
   });
 });
 

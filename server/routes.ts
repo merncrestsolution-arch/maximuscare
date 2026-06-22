@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { db, schema } from "./db";
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
+import Decimal from "decimal.js";
 import { isAutoFineSessionRole, syncAutoFineForStaffDate } from "./autoFineSync";
 import { createSession, destroySession, requireAuth } from "./auth";
 import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest } from "./helpers/authCookies";
@@ -532,7 +533,7 @@ export async function registerRoutes(
   // Get all staff. Management, operational leads, and receptionists get a
   // branch-scoped list (used for treating-staff/task dropdowns); other roles
   // only see themselves. Salary fields are stripped for non-financial roles.
-  app.get("/api/staff", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/staff", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
       const canSeeAll = canViewStaff(currentUser.role) || currentUser.role === "Receptionist";
@@ -577,7 +578,7 @@ export async function registerRoutes(
   // (Add Visit, Add Session, Appointment). Available to any authenticated user
   // who records visits/sessions — not just staff-directory viewers — because
   // every clinician needs to pick the treating staff for their branch.
-  app.get("/api/staff/treating-options", requireAuth, async (req: Request, res: Response) => {
+  app.get("/api/staff/treating-options", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const { loadBranchContext } = await import("./middleware/branchContext");
       const ctx = await loadBranchContext(req as any);
@@ -1146,8 +1147,16 @@ export async function registerRoutes(
         return res.status(400).json({ message: branchCheck.message });
       }
       incoming.branch = branchCheck.branch;
-      if (!incoming.paymentAmount || Number(incoming.paymentAmount) < 0) {
+      const receivedPaymentAmount = incoming.paymentAmount;
+      if (!incoming.paymentAmount) {
         incoming.paymentAmount = "0";
+      } else {
+        const amt = new Decimal(String(incoming.paymentAmount));
+        if (amt.isNegative()) {
+          incoming.paymentAmount = "0";
+        } else {
+          incoming.paymentAmount = amt.toString();
+        }
       }
       const statusCheck = validatePaymentStatus(incoming.paymentStatus ?? "Unpaid");
       if (!statusCheck.ok) {
@@ -1165,6 +1174,10 @@ export async function registerRoutes(
       if (!incoming.amountPaid) incoming.amountPaid = "0";
       const validatedData = insertVisitSchema.parse(incoming);
       const visit = await storage.createVisit(validatedData);
+      
+      if (receivedPaymentAmount !== undefined && String(receivedPaymentAmount) !== String(visit.paymentAmount)) {
+        console.warn(`[WARNING] Payment amount mutated during save! Received: ${receivedPaymentAmount}, Stored: ${visit.paymentAmount}`);
+      }
       if (visit.visitType === "Home") {
         const hvType = await detectHomeVisitType(
           storage,
@@ -1218,6 +1231,17 @@ export async function registerRoutes(
       }
       const incoming = { ...req.body } as Record<string, unknown>;
       delete incoming.sessionNumber;
+      
+      const receivedPaymentAmount = incoming.paymentAmount;
+      if (incoming.paymentAmount !== undefined) {
+        const amt = new Decimal(String(incoming.paymentAmount));
+        if (amt.isNegative()) {
+          incoming.paymentAmount = "0";
+        } else {
+          incoming.paymentAmount = amt.toString();
+        }
+      }
+
       if (incoming.branch !== undefined) {
         const branchCheck = validateBranch(incoming.branch);
         if (!branchCheck.ok) {
@@ -1247,6 +1271,10 @@ export async function registerRoutes(
 
       if (!visit) {
         return res.status(404).json({ message: "Visit not found" });
+      }
+      
+      if (receivedPaymentAmount !== undefined && String(receivedPaymentAmount) !== String(visit.paymentAmount)) {
+        console.warn(`[WARNING] Payment amount mutated during update! Received: ${receivedPaymentAmount}, Stored: ${visit.paymentAmount}`);
       }
       await syncAutoFineForStaffDate(storage, before.treatingStaffId, before.visitDate);
       await syncAutoFineForStaffDate(storage, visit.treatingStaffId, visit.visitDate);
@@ -2077,6 +2105,16 @@ export async function registerRoutes(
   app.delete("/api/inpatients/sessions/:id", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
       const existing = await storage.getInPatientSession(param(req, "id"));
+      if (!existing) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+      
+      const { getSelectedBranchName } = await import("./middleware/branchContext");
+      const activeBranch = getSelectedBranchName(req as any);
+      if (activeBranch && existing.branch !== activeBranch) {
+        return res.status(403).json({ message: "Cross-branch deletion is not allowed." });
+      }
+      
       const success = await storage.deleteInPatientSession(param(req, "id"));
       if (!success) {
         return res.status(404).json({ message: "Session not found" });

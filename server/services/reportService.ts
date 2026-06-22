@@ -101,7 +101,8 @@ function groupRevenueByDay(
   for (const v of visits) {
     const amt = getVisitCollectedRevenue(v);
     if (amt <= 0) continue;
-    byDay.set(v.visitDate, (byDay.get(v.visitDate) ?? 0) + amt);
+    const day = v.visitDate.split('T')[0];
+    byDay.set(day, (byDay.get(day) ?? 0) + amt);
   }
   // Fold in in-patient payments / discharge amounts for the same day.
   for (const d of inPatientDaily) {
