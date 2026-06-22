@@ -1812,16 +1812,37 @@ export async function registerRoutes(
         const staffBranchById = new Map(
           staffList.map((s) => [s.id, normalizeBranchName(s.branch).toLowerCase()])
         );
+        
+        const admissions = await storage.getAllInPatientAdmissions();
+        const admMap = new Map(admissions.map((a) => [a.id, a]));
+        
+        const allPatients = await storage.getAllPatients();
+        const patientBranchById = new Map(
+          allPatients.map((p) => [p.id, normalizeBranchName(p.branch).toLowerCase()])
+        );
+
         sessions = sessions.filter((s) => {
+          const adm = admMap.get(s.admissionId);
+          const pBranch = adm ? patientBranchById.get(adm.patientId) : "";
+          
           const fromText = normalizeBranchName((s as any).branch).toLowerCase();
           const fromId = (s as any).branchId ? branchIdToShort.get((s as any).branchId) ?? "" : "";
           const fromStaff = staffBranchById.get(s.treatingStaffId) ?? "";
-          const short = fromText || fromId || fromStaff;
+          
+          const short = fromText || fromId || pBranch || fromStaff;
           return short === target;
         });
       }
 
-      return res.json(sessions);
+      const allAdmissions = await storage.getAllInPatientAdmissions();
+      const allAdmMap = new Map(allAdmissions.map((a) => [a.id, a]));
+
+      return res.json(
+        sessions.map((s) => ({
+          ...s,
+          patientName: allAdmMap.get(s.admissionId)?.patientName || s.patientName || "Unknown",
+        }))
+      );
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
