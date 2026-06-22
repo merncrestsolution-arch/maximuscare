@@ -1778,14 +1778,12 @@ export async function registerRoutes(
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
 
-      const startOfDay = new Date(startDateStr);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(endDateStr);
-      endOfDay.setHours(23, 59, 59, 999);
+      const startQuery = startDateStr;
+      const endQuery = endDateStr.includes('T') ? endDateStr : `${endDateStr}T23:59:59.999Z`;
 
       let sessions = await storage.getAllInPatientSessionsInDateRange(
-        startOfDay.toISOString(), 
-        endOfDay.toISOString()
+        startQuery, 
+        endQuery
       );
 
       const branchParam = await resolveBranchFilter(req as any, req.query.branch as string);
@@ -1829,10 +1827,8 @@ export async function registerRoutes(
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
 
-      const startOfDay = new Date(startDateStr);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(endDateStr);
-      endOfDay.setHours(23, 59, 59, 999);
+      const startQuery = startDateStr;
+      const endQuery = endDateStr.includes('T') ? endDateStr : `${endDateStr}T23:59:59.999Z`;
 
       let targetStaffId = user.staffId;
       if (["Admin", "MD"].includes(user.role) && queryStaffId) {
@@ -1840,8 +1836,8 @@ export async function registerRoutes(
       }
       const sessions = await storage.getInPatientSessionsByStaffAndDateRange(
         targetStaffId, 
-        startOfDay.toISOString(), 
-        endOfDay.toISOString()
+        startQuery, 
+        endQuery
       );
       const admissions = await storage.getAllInPatientAdmissions();
       const admMap = new Map(admissions.map((a) => [a.id, a]));
