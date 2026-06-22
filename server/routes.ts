@@ -1786,7 +1786,18 @@ export async function registerRoutes(
         endQuery
       );
 
-      const branchParam = await resolveBranchFilter(req as any, req.query.branch as string);
+      let branchParam: string | null = null;
+      try {
+        branchParam = await resolveBranchFilter(req as any, req.query.branch as string);
+      } catch (err: any) {
+        const { isManagementRole } = await import("./permissions");
+        if (err.message === "Branch selection required" && isManagementRole(user.role)) {
+          branchParam = null;
+        } else {
+          throw err;
+        }
+      }
+
       if (branchParam) {
         const target = normalizeBranchName(branchParam).toLowerCase();
         const branches = await storage.getAllBranches();
