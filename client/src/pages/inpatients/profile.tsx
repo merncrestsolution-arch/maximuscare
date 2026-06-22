@@ -653,7 +653,7 @@ export default function InPatientProfilePage() {
         )}
 
         <div className="mb-6" data-testid="extra-expenses-section">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-lg font-semibold">Extra Expenses</h2>
             <Button
               size="sm"
@@ -725,9 +725,9 @@ export default function InPatientProfilePage() {
         </div>
 
         <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
             <h2 className="text-lg font-semibold">Treatment Sessions</h2>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="outline"

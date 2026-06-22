@@ -1772,12 +1772,21 @@ export async function registerRoutes(
       if (!hasPermission(user.role, "inpatients.manage") && !hasPermission(user.role, "visits.view_all")) {
         return res.status(403).json({ message: "Forbidden: insufficient permissions" });
       }
-      const startDate = req.query.startDate as string | undefined;
-      const endDate = req.query.endDate as string | undefined;
-      if (!startDate || !endDate) {
+      const startDateStr = req.query.startDate as string | undefined;
+      const endDateStr = req.query.endDate as string | undefined;
+      if (!startDateStr || !endDateStr) {
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
-      let sessions = await storage.getAllInPatientSessionsInDateRange(startDate, endDate);
+
+      const startOfDay = new Date(startDateStr);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(endDateStr);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      let sessions = await storage.getAllInPatientSessionsInDateRange(
+        startOfDay.toISOString(), 
+        endOfDay.toISOString()
+      );
 
       const branchParam = await resolveBranchFilter(req as any, req.query.branch as string);
       if (branchParam) {
@@ -1813,17 +1822,27 @@ export async function registerRoutes(
   app.get("/api/inpatients/sessions", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const startDate = req.query.startDate as string | undefined;
-      const endDate = req.query.endDate as string | undefined;
+      const startDateStr = req.query.startDate as string | undefined;
+      const endDateStr = req.query.endDate as string | undefined;
       const queryStaffId = req.query.staffId as string | undefined;
-      if (!startDate || !endDate) {
+      if (!startDateStr || !endDateStr) {
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
+
+      const startOfDay = new Date(startDateStr);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(endDateStr);
+      endOfDay.setHours(23, 59, 59, 999);
+
       let targetStaffId = user.staffId;
       if (["Admin", "MD"].includes(user.role) && queryStaffId) {
         targetStaffId = queryStaffId;
       }
-      const sessions = await storage.getInPatientSessionsByStaffAndDateRange(targetStaffId, startDate, endDate);
+      const sessions = await storage.getInPatientSessionsByStaffAndDateRange(
+        targetStaffId, 
+        startOfDay.toISOString(), 
+        endOfDay.toISOString()
+      );
       const admissions = await storage.getAllInPatientAdmissions();
       const admMap = new Map(admissions.map((a) => [a.id, a]));
       return res.json(
