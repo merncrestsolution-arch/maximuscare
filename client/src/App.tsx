@@ -318,7 +318,7 @@ function Router() {
       </Route>
 
       {/* 404 */}
-      <Route component={NotFound} />
+      <Route path="~" component={NotFound} />
     </Switch>
   );
 }
