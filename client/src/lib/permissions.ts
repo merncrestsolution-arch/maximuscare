@@ -28,8 +28,8 @@ export function canViewFinancialSummary(role: string | undefined): boolean {
 }
 
 /** Branch-level operational leads (Manager / Branch Manager) without full financial access. */
-export { isOperationalLead } from "@shared/roles";
-
+import { isOperationalLead } from "@shared/roles";
+export { isOperationalLead };
 /**
  * Roles allowed to create/edit patients — mirrors the server RBAC `patients.manage`
  * permission (Admin, MD, Receptionist, Physiotherapist, Manager, Branch Manager,
