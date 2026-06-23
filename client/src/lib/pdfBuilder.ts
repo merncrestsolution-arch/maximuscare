@@ -115,7 +115,7 @@ export async function generateStandardPDF(options: PDFExportOptions): Promise<vo
 
       // Right: Page Numbers
       doc.text(
-        `Page ${doc.internal.getNumberOfPages()}`,
+        `Page ${(doc.internal as any).getNumberOfPages()}`,
         pageWidth - 14,
         pageHeight - 9,
         { align: "right" }

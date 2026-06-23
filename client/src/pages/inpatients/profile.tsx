@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -170,7 +170,7 @@ export default function InPatientProfilePage() {
   const handleDeleteSession = async () => {
     if (!deleteSessionId) return;
     try {
-      await deleteSession.mutateAsync(deleteSessionId);
+      await deleteSession.mutateAsync({ admissionId: patientId, sessionId: deleteSessionId });
       toast({ title: "Success", description: "Session deleted successfully" });
       setDeleteDialogOpen(false);
       setSessionToDelete(null);

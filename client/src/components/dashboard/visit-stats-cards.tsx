@@ -53,7 +53,7 @@ function resolveBranchesToShow(
     return options.allowedBranchNames;
   }
   if (statsByBranch.size > 0) {
-    return [...statsByBranch.keys()];
+    return Array.from(statsByBranch.keys());
   }
   return [];
 }
@@ -72,11 +72,11 @@ export function VisitStatsCards({
 
   const allowedBranchNames = useMemo(
     () =>
-      [...new Set(
+      Array.from(new Set(
         allowedBranches
           .map((b) => normalizeBranchName(b.branchName ?? b.name))
-          .filter(Boolean)
-      )],
+          .filter(Boolean) as string[]
+      )),
     [allowedBranches]
   );
 

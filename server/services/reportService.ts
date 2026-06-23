@@ -233,10 +233,12 @@ function applyBranchFilter<T extends { branch?: string | null }>(items: T[], bra
 async function filterSessionsByBranch(
   storage: IStorage,
   sessions: InPatientSession[],
-  branchFilter?: string | null
+  branchFilter?: string | string[] | null
 ): Promise<InPatientSession[]> {
   if (!branchFilter) return sessions;
-  const target = normalizeBranchName(branchFilter).toLowerCase();
+  const targets = Array.isArray(branchFilter) 
+    ? new Set(branchFilter.map(b => normalizeBranchName(b).toLowerCase()))
+    : new Set([normalizeBranchName(branchFilter).toLowerCase()]);
   const branches = await storage.getAllBranches();
   const branchIdToShort = new Map<string, string>();
   for (const b of branches) {
@@ -250,7 +252,7 @@ async function filterSessionsByBranch(
   return sessions.filter((s) => {
     const fromId = (s as any).branchId ? branchIdToShort.get((s as any).branchId) ?? "" : "";
     const fromStaff = staffBranchById.get(s.treatingStaffId) ?? "";
-    return (fromId || fromStaff) === target;
+    return targets.has(fromId || fromStaff);
   });
 }
 
@@ -580,7 +582,7 @@ export async function computeExtendedDashboardKpis(
   rangeFrom: string,
   rangeTo: string,
   staffFilter?: string[],
-  branchFilter?: string | null
+  branchFilter?: string | string[] | null
 ) {
   const today = clinicDateString();
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
@@ -594,7 +596,12 @@ export async function computeExtendedDashboardKpis(
 
   const unpaid = await computeUnpaidReport(storage, staffFilter?.[0]);
   const scopedUnpaid = branchFilter
-    ? unpaid.filter((r) => normalizeBranchName(r.branch).toLowerCase() === normalizeBranchName(branchFilter).toLowerCase())
+    ? unpaid.filter((r) => {
+        const targets = Array.isArray(branchFilter)
+          ? new Set(branchFilter.map(b => normalizeBranchName(b).toLowerCase()))
+          : new Set([normalizeBranchName(branchFilter).toLowerCase()]);
+        return targets.has(normalizeBranchName(r.branch).toLowerCase());
+      })
     : unpaid;
   const outstandingAmount = scopedUnpaid.reduce((a, r) => a + (r.outstandingBalance ?? r.amount), 0);
   const outstandingPatients = new Set(scopedUnpaid.map((r) => r.patientId)).size;

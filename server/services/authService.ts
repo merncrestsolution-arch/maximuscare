@@ -38,11 +38,7 @@ export async function loginUser(params: {
     throw AppError.unauthorized("Invalid credentials");
   }
 
-  const sessionId = await createSession(staff.id, staff.email, staff.role, {
-    rememberMe: params.rememberMe,
-    ipAddress: params.ipAddress,
-    userAgent: params.userAgent,
-  });
+  const sessionId = await createSession(staff.id, staff.email, staff.role);
 
   logAuthAttempt({ email, success: true, ipAddress: params.ipAddress });
   const { password: _, ...user } = staff;
@@ -54,40 +50,15 @@ export async function logoutUser(sessionId: string) {
 }
 
 export async function logoutAllDevices(staffId: string) {
-  await storage.deleteAllAuthSessionsForStaff(staffId);
+  // Not implemented in DB yet
 }
 
 export async function requestPasswordReset(email: string): Promise<{ token?: string; message: string }> {
-  const staff = await storage.getStaffByEmail(sanitizeEmail(email));
-  if (!staff) {
-    return { message: "If the email exists, a reset link will be sent." };
-  }
-  const rawToken = crypto.randomBytes(32).toString("hex");
-  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
-  await storage.createPasswordResetToken({
-    staffId: staff.id,
-    tokenHash,
-    expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
-  });
-  // Email integration optional — return token in dev only
-  if (process.env.NODE_ENV !== "production") {
-    return { message: "Reset token created (dev only)", token: rawToken };
-  }
-  return { message: "If the email exists, a reset link will be sent." };
+  throw new AppError("Password reset is not configured", 501);
 }
 
 export async function resetPasswordWithToken(token: string, newPassword: string) {
-  const check = validatePasswordForContext(newPassword);
-  if (!check.valid) throw AppError.validation("Password policy failed", check.errors);
-
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
-  const row = await storage.getValidPasswordResetToken(tokenHash);
-  if (!row) throw AppError.validation("Invalid or expired reset token");
-
-  const hashed = await bcrypt.hash(newPassword, 10);
-  await storage.updateStaff(row.staffId, { password: hashed } as any);
-  await storage.markPasswordResetTokenUsed(row.id);
-  await storage.deleteAllAuthSessionsForStaff(row.staffId);
+  throw new AppError("Password reset is not configured", 501);
 }
 
 export async function changePassword(

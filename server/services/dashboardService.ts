@@ -44,15 +44,19 @@ export interface BranchDashboardStat {
   incentiveAmount: number;
 }
 
-function filterVisitsByBranch(visits: Visit[], branch: string) {
-  const target = normalizeBranchName(branch).toLowerCase();
-  return visits.filter((v) => normalizeBranchName(v.branch).toLowerCase() === target);
+function filterVisitsByBranch(visits: Visit[], branch: string | string[]) {
+  const targets = Array.isArray(branch)
+    ? new Set(branch.map((b) => normalizeBranchName(b).toLowerCase()))
+    : new Set([normalizeBranchName(branch).toLowerCase()]);
+  return visits.filter((v) => targets.has(normalizeBranchName(v.branch).toLowerCase()));
 }
 
-function filterByBranchName<T extends { branch?: string | null }>(items: T[], branchName?: string | null): T[] {
+function filterByBranchName<T extends { branch?: string | null }>(items: T[], branchName?: string | string[] | null): T[] {
   if (!branchName) return items;
-  const target = normalizeBranchName(branchName).toLowerCase();
-  return items.filter((item) => normalizeBranchName(item.branch).toLowerCase() === target);
+  const targets = Array.isArray(branchName)
+    ? new Set(branchName.map((b) => normalizeBranchName(b).toLowerCase()))
+    : new Set([normalizeBranchName(branchName).toLowerCase()]);
+  return items.filter((item) => targets.has(normalizeBranchName(item.branch ?? "").toLowerCase()));
 }
 
 export async function computeDashboardKpis(
@@ -204,7 +208,7 @@ export async function computeBranchDashboardStats(
     const homeVisits = branchVisits.filter((v) => v.visitType === "Home").length;
     const branchStaffIds = new Set(
       staffDirectory
-        .filter((s) => s.branchId === branchId || s.branch === branchName)
+        .filter((s) => s.branch === branchName)
         .map((s) => s.id)
     );
     const sessions = ipSessions.filter((s) => s.branchId === branchId || branchStaffIds.has(s.treatingStaffId)).length;

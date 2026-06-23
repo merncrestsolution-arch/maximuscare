@@ -1845,7 +1845,7 @@ export class DatabaseStorage implements IStorage {
 
   async setUserBranchPermissions(staffId: string, branchIds: string[]): Promise<void> {
     await db.delete(userBranchPermissions).where(eq(userBranchPermissions.userId, staffId));
-    const unique = [...new Set(branchIds)];
+    const unique = Array.from(new Set(branchIds));
     for (const branchId of unique) {
       await db.insert(userBranchPermissions).values({
         userId: staffId,

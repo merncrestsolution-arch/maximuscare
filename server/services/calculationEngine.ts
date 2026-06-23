@@ -3,7 +3,7 @@
  * incentives, home visits, OT, fines, expenses, and dashboard KPIs.
  */
 import type { Visit, Attendance, InPatientSession, StaffFine, Expense } from "@shared/schema";
-import { getHomeVisitRateTier } from "@shared/branches";
+import { normalizeBranchName, getHomeVisitRateTier } from "@shared/branches";
 
 export const DEFAULT_RATES = {
   incentiveMinCount: 5,

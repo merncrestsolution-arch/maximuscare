@@ -1816,7 +1816,7 @@ export async function registerRoutes(
 
       let branchParam: string | null = null;
       try {
-        branchParam = await resolveBranchFilter(req as any, req.query.branch as string);
+        branchParam = (await resolveBranchFilter(req as any, req.query.branch as string)) || null;
       } catch (err: any) {
         const { isManagementRole } = await import("./permissions");
         if (err.message === "Branch selection required" && isManagementRole(user.role)) {
@@ -2111,7 +2111,7 @@ export async function registerRoutes(
       
       const { getSelectedBranchName } = await import("./middleware/branchContext");
       const activeBranch = getSelectedBranchName(req as any);
-      if (activeBranch && existing.branch !== activeBranch) {
+      if (activeBranch && existing.branchId !== activeBranch) {
         return res.status(403).json({ message: "Cross-branch deletion is not allowed." });
       }
       
@@ -2203,7 +2203,6 @@ export async function registerRoutes(
         careTakerIdNo: admission.careTakerIdNo,
         packageType: admission.packageType,
         amountPerDay: admission.amountPerDay,
-        branch: admission.branch,
         branchId: admission.branchId,
         admitDate: clinicDateString(),
         status: 'Admitted'
@@ -2233,7 +2232,7 @@ export async function registerRoutes(
       const admission = await storage.getInPatientAdmission(admissionId);
       if (!admission) return res.status(404).json({ message: "Admission not found" });
 
-      const sessions = await storage.getSessionsForAdmission(admissionId);
+      const sessions = await storage.getInPatientSessionsByAdmission(admissionId);
       const exportSvc = await import("./services/exportService");
 
       const title = `Inpatient History - ${admission.patientName} (${admission.status})`;
@@ -2245,7 +2244,7 @@ export async function registerRoutes(
         { label: "Notes", key: "notes" },
       ];
 
-      const rows = sessions.map((s) => ({
+      const rows = sessions.map((s: any) => ({
         date: s.sessionDate,
         sessionNumber: String(s.sessionNumber),
         treatment: s.treatmentProvided,
@@ -2814,8 +2813,8 @@ export async function registerRoutes(
       
       // Auto-inject branchId
       const targetStaff = await storage.getStaff(body.staffId);
-      if (targetStaff && targetStaff.branchId) {
-        body.branchId = targetStaff.branchId;
+      if (targetStaff && targetStaff.branch) {
+        body.branchId = targetStaff.branch;
       }
 
       if (!body.fineDate || !String(body.fineDate).trim()) {

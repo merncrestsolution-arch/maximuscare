@@ -8,12 +8,9 @@ interface CacheEntry<T> {
 
 const memoryStore = new Map<string, CacheEntry<unknown>>();
 
-let redisClient: {
-  get: (k: string) => Promise<string | null>;
-  set: (k: string, v: string, mode: string, ttl: number) => Promise<unknown>;
-  del: (...keys: string[]) => Promise<unknown>;
-  keys: (pattern: string) => Promise<string[]>;
-} | null = null;
+import type { Redis } from "ioredis";
+
+let redisClient: Redis | null = null;
 
 let redisInit: Promise<void> | null = null;
 

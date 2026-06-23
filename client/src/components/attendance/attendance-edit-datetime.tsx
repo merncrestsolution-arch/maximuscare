@@ -59,6 +59,7 @@ export function AttendanceEditDateTime({
   optional,
   /** When optional and empty, default calendar day (e.g. attendance record date). */
   anchorDateYmd,
+  defaultTime,
   testIdPrefix,
   weekStartsOn,
 }: {

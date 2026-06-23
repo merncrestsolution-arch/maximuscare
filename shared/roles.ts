@@ -24,6 +24,6 @@ export function isClinicalRole(role: string | null | undefined): boolean {
   return CLINICAL_ROLES.includes(String(role ?? "") as ClinicalRole);
 }
 
-export function isOperationalLead(role: string): boolean {
-  return ["Admin", "MD", "Nexus MD", "Manager", "Branch Manager", "Staff"].includes(role);
+export function isOperationalLead(role: string | null | undefined): boolean {
+  return ["Admin", "MD", "Nexus MD", "Manager", "Branch Manager", "Staff"].includes(String(role ?? ""));
 }

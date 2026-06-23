@@ -60,7 +60,7 @@ export function getJob(id: string): JobRecord | undefined {
 
 export function pruneOldJobs(maxAgeMs = 24 * 60 * 60 * 1000): void {
   const cutoff = Date.now() - maxAgeMs;
-  for (const [id, job] of jobs) {
+  for (const [id, job] of Array.from(jobs.entries())) {
     const t = new Date(job.completedAt ?? job.createdAt).getTime();
     if (job.status !== "running" && t < cutoff) jobs.delete(id);
   }
