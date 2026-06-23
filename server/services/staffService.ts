@@ -225,10 +225,7 @@ export async function filterStaffByBranchAccess(
   }
   return list.filter((s) => 
     staffMatchesBranch(s, branchName) || 
-    permittedIds.has(s.id) ||
-    isOperationalLead(s.role) ||
-    s.role === "Admin" ||
-    s.role === "MD"
+    permittedIds.has(s.id)
   );
 }
 
