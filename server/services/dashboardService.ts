@@ -2,6 +2,7 @@ import type { IStorage } from "../storage";
 import type { Staff, Visit } from "@shared/schema";
 import { normalizeBranchName } from "@shared/branches";
 import { clinicDateString } from "../clinicTime";
+import { isClinicalRole } from "@shared/roles";
 import { loadPayrollSettings, computePayrollForStaff } from "./payrollService";
 import {
   computeExpenseBreakdown,
@@ -194,7 +195,6 @@ export async function computeBranchDashboardStats(
   const attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
   const settings = await loadPayrollSettings(storage);
   const staffDirectory = await storage.getAllStaff();
-  const { isClinicalRole } = require("@shared/roles");
   const allStaff = staffDirectory.filter((st) => isClinicalRole(st.role));
   const fines = await storage.getStaffFinesByDateRange(rangeFrom, rangeTo);
   const branches = await storage.getAllBranches();

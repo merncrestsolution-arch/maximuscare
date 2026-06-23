@@ -1,6 +1,7 @@
 import type { IStorage } from "../storage";
 import type { Staff, Visit, Attendance, InPatientSession, StaffFine } from "@shared/schema";
 import { normalizeBranchName } from "@shared/branches";
+import { isClinicalRole } from "@shared/roles";
 import {
   DEFAULT_RATES,
   type CalculationRates,
@@ -248,7 +249,6 @@ export async function computePayrollReport(
   const settings = await loadPayrollSettings(storage);
   const allStaff = await storage.getAllStaff();
   const targets = allStaff.filter((s) => {
-    const { isClinicalRole } = require("@shared/roles");
     if (!isClinicalRole(s.role)) return false;
     if (staffIds?.length && !staffIds.includes(s.id)) return false;
     return true;
