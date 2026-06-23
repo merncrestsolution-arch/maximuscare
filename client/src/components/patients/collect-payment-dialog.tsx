@@ -107,7 +107,7 @@ export function CollectPaymentDialog({ visit, open, onOpenChange, onSuccess }: C
           ) : (
             <>
               <div>
-                <Label>Amount to pay</Label>
+                <Label>Amount to pay (Rs. 10 will be auto-deducted on save)</Label>
                 <Input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
                 <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={() => setAmount(String(outstanding))}>
                   Pay full outstanding

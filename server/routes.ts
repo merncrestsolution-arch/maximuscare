@@ -175,6 +175,15 @@ function normalizeStaffBody(body: Record<string, unknown>): Record<string, unkno
   if (normalized.isActive !== undefined) {
     normalized.isActive = coerceBooleanField(normalized.isActive);
   }
+  if (normalized.basicSalary === "") {
+    normalized.basicSalary = "0";
+  }
+  if (normalized.otherAdjustments === "") {
+    normalized.otherAdjustments = "0";
+  }
+  if (normalized.salaryDate === "") {
+    delete normalized.salaryDate;
+  }
   return normalized;
 }
 

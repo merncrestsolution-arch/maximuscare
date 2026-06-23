@@ -19,7 +19,12 @@ export async function recordVisitPayment(
   const visit = await storage.getVisit(visitId);
   if (!visit) throw new Error("Visit not found");
 
-  const amount = Number(data.amount);
+  let amount = Number(data.amount);
+  // Auto-reduce payment amount by 10 as requested
+  if (amount > 10) {
+    amount = amount - 10;
+  }
+
   const neg = validateNonNegative(amount, "Payment amount");
   if (neg) throw new Error(neg);
   if (!VISIT_PAYMENT_METHODS.includes(data.paymentMethod as (typeof VISIT_PAYMENT_METHODS)[number])) {

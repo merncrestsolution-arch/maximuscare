@@ -554,7 +554,7 @@ export default function AttendancePage() {
       }
     }
 
-    if (!editReason.trim()) {
+    if (!isManagement && !editReason.trim()) {
       toast({ title: "Reason required", description: "Provide a reason for editing attendance.", variant: "destructive" });
       return;
     }

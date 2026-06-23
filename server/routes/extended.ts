@@ -727,6 +727,7 @@ export function registerExtendedRoutes(app: Express) {
       const pdf = await exportSvc.rowsToPdfBuffer(title, columns, rows);
       return res.send(pdf);
     } catch (error: any) {
+      console.error("Export Error:", error);
       return errorResponse(res, error.message, 500);
     }
   });

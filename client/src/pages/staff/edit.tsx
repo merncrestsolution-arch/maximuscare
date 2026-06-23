@@ -166,9 +166,9 @@ export default function StaffEditPage() {
     passportNo: formData.passportNo,
     degree: formData.degree,
     isActive: formData.isActive === true || formData.isActive === 1,
-    basicSalary: formData.basicSalary ?? "0",
+    basicSalary: formData.basicSalary || "0",
     salaryDate: formData.salaryDate || undefined,
-    otherAdjustments: formData.otherAdjustments ?? "0",
+    otherAdjustments: formData.otherAdjustments || "0",
     joinDate: formData.joinDate,
     photoUri: formData.photoUri,
   });

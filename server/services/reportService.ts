@@ -205,7 +205,6 @@ export async function computeRevenueReport(
 }
 
 export function filterVisitsByBranch(visits: Visit[], branchFilter: string | string[]): Visit[] {
-  const { normalizeBranchName } = require("@shared/branches");
   const targets = new Set(
     Array.isArray(branchFilter)
       ? branchFilter.map(b => normalizeBranchName(b).toLowerCase())
@@ -216,7 +215,6 @@ export function filterVisitsByBranch(visits: Visit[], branchFilter: string | str
 
 function applyBranchFilter<T extends { branch?: string | null }>(items: T[], branchFilter?: string | string[] | null): T[] {
   if (!branchFilter || (Array.isArray(branchFilter) && branchFilter.length === 0)) return items;
-  const { normalizeBranchName } = require("@shared/branches");
   const targets = new Set(
     Array.isArray(branchFilter)
       ? branchFilter.map(b => normalizeBranchName(b).toLowerCase())
