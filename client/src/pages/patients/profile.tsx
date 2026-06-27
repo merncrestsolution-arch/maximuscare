@@ -95,7 +95,16 @@ export default function PatientProfile() {
     { key: "status", label: "Status" },
     { key: "paymentStatus", label: "Payment" },
     { key: "paymentAmount", label: "Amount LKR" },
+    { key: "balance", label: "Balance LKR" },
   ];
+  // Bug 5: surface per-visit outstanding balance and the patient's total balance due
+  // in the exported PDF/report.
+  const visitOutstanding = (v: any): number => {
+    const outstanding = computeOutstanding(Number(v.paymentAmount ?? 0), Number(v.amountPaid ?? 0));
+    return isUnpaidLikeStatus(v.paymentStatus) && outstanding > 0 ? outstanding : 0;
+  };
+  const totalBalanceDue = patientVisits.reduce((sum: number, v: any) => sum + visitOutstanding(v), 0);
+  const unpaidVisitCount = patientVisits.filter((v: any) => visitOutstanding(v) > 0).length;
   const visitRows = patientVisits.map((v: any) => ({
     date: format(new Date(v.visitDate), "yyyy-MM-dd"),
     session: String(v.sessionNumber),
@@ -105,6 +114,7 @@ export default function PatientProfile() {
     status: v.status || "",
     paymentStatus: v.paymentStatus || "",
     paymentAmount: String(v.paymentAmount ?? ""),
+    balance: visitOutstanding(v) > 0 ? visitOutstanding(v).toLocaleString() : "-",
   }));
 
   const handleConfirmDeleteVisit = async () => {
@@ -396,6 +406,11 @@ export default function PatientProfile() {
           { label: "Patient ID", value: patient.id },
           { label: "Generated", value: format(new Date(), "dd MMM yyyy hh:mm a") },
           { label: "Prepared By", value: user?.name || "System" },
+          { label: "Unpaid Visits", value: String(unpaidVisitCount) },
+          {
+            label: "Total Balance Due",
+            value: totalBalanceDue > 0 ? `LKR ${totalBalanceDue.toLocaleString()}` : "No outstanding balance",
+          },
         ]}
       />
       {/* Timeline / Visits */}
@@ -432,15 +447,10 @@ export default function PatientProfile() {
             <p className="text-sm text-muted-foreground py-4">No visits recorded yet.</p>
           ) : (
           patientVisits.map((visit) => {
-            const isManagement = isManagementRole(user?.role);
-            const isOperationalLead =
-              isManager(user?.role) || isBranchManager(user?.role) || isNexusManagingDirector(user?.role);
-            const isPhysioRole = ['Physiotherapist', 'Staff'].includes(user?.role || '');
+            // Bug 11/13: managers & operational leads edit any visit; physiotherapists
+            // and normal staff only see the edit control on visits they treated/created.
             const canEditVisit =
-              isManagement ||
-              isOperationalLead ||
               canViewAllVisits(user?.role) ||
-              isPhysioRole ||
               visit.treatingStaffId === user?.id ||
               visit.createdByStaffId === user?.id;
             const paidAmount = Number(visit.paymentAmount);

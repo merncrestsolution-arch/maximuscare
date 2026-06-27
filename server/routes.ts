@@ -3,7 +3,7 @@ import { type Server } from "http";
 import { storage } from "./storage";
 import { db, schema } from "./db";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { isAutoFineSessionRole, syncAutoFineForStaffDate } from "./autoFineSync";
 import { createSession, destroySession, requireAuth } from "./auth";
@@ -38,6 +38,7 @@ import {
   canViewAllPatients,
   canViewAllVisits,
   canEditVisit,
+  canEditAllVisits,
   canViewStaff,
   canViewStaffFinancials,
 } from "./permissions";
@@ -99,6 +100,30 @@ import { z } from "zod";
 function param(req: Request, name: string): string {
   const v = req.params[name];
   return Array.isArray(v) ? (v[0] ?? "") : (v ?? "");
+}
+
+/**
+ * Bug 9: validate an admit date — must be a real date, not in the future, and not more
+ * than one year in the past. Returns the normalized YYYY-MM-DD string when valid.
+ */
+function validateAdmitDate(input: unknown): { ok: true; date: string } | { ok: false; message: string } {
+  const raw = String(input ?? "").trim().split("T")[0];
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return { ok: false, message: "Admit date must be a valid date (YYYY-MM-DD)." };
+  }
+  const parsed = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return { ok: false, message: "Admit date is not a valid calendar date." };
+  }
+  const today = clinicDateString();
+  if (raw > today) {
+    return { ok: false, message: "Admit date cannot be in the future." };
+  }
+  const oneYearAgo = clinicDateOffset(-365);
+  if (raw < oneYearAgo) {
+    return { ok: false, message: "Admit date cannot be more than one year in the past." };
+  }
+  return { ok: true, date: raw };
 }
 
 function normalizeAttachmentInput(value: unknown): string[] | string | undefined {
@@ -965,7 +990,16 @@ export async function registerRoutes(
       if (typeof validatedData.phone === "string" && validatedData.phone.trim() === "") {
         validatedData.phone = null as any;
       }
-      await assertNoDuplicatePatient(storage, validatedData.phone, (validatedData as any).nicOrPassport);
+      // Bug 7: appointment booking may reuse an existing phone number; the client passes
+      // skipPhoneCheck so duplicate phones don't block a booking (NIC/Passport still checked).
+      const skipPhoneCheck = (req.body as any)?.skipPhoneCheck === true;
+      await assertNoDuplicatePatient(
+        storage,
+        validatedData.phone,
+        (validatedData as any).nicOrPassport,
+        undefined,
+        { skipPhoneCheck }
+      );
       const patientCode = await generateUniquePatientCode(storage, validatedData.registeredDate);
       const patient = await storage.createPatient({ ...validatedData, patientCode, fullName: validatedData.name } as any);
       const actor = await auditActor(req);
@@ -1240,7 +1274,23 @@ export async function registerRoutes(
       }
       const incoming = { ...req.body } as Record<string, unknown>;
       delete incoming.sessionNumber;
-      
+
+      // Bug 11/13: server-side field protection. Only Admin/MD may move a visit across
+      // branches; non-management roles can never re-scope branch/organization. Staff /
+      // physiotherapists (who can only reach their own visits) may not reassign the
+      // treating clinician either.
+      const isVisitManagement = ["Admin", "MD"].includes(user.role);
+      if (!isVisitManagement) {
+        delete incoming.branch;
+        delete (incoming as any).branchId;
+        delete (incoming as any).organizationId;
+      }
+      if (!canEditAllVisits(user.role)) {
+        delete (incoming as any).treatingStaffId;
+        delete (incoming as any).treatingStaffName;
+        delete (incoming as any).createdByStaffId;
+      }
+
       const receivedPaymentAmount = incoming.paymentAmount;
       if (incoming.paymentAmount !== undefined) {
         const amt = new Decimal(String(incoming.paymentAmount));
@@ -1526,6 +1576,14 @@ export async function registerRoutes(
 
       const checkInTime = body.checkInTime ? new Date(body.checkInTime) : (status === 'Present' ? new Date() : undefined);
 
+      // Bug 6: capture the real GPS location sent from the device at check-in.
+      const hasGeo =
+        body.latitude !== undefined && body.latitude !== null && body.latitude !== "" &&
+        body.longitude !== undefined && body.longitude !== null && body.longitude !== "";
+      const latitude = hasGeo ? String(body.latitude) : null;
+      const longitude = hasGeo ? String(body.longitude) : null;
+      const locationLabel = body.locationLabel ? String(body.locationLabel) : null;
+
       console.log(`[ATTENDANCE] staffId=${targetStaffId}, date=${attendanceDate}, status=${status}`);
 
       const existing = await storage.getAttendanceByStaffAndDate(targetStaffId, attendanceDate);
@@ -1535,6 +1593,11 @@ export async function registerRoutes(
         }
         const updateData: Record<string, any> = { status, updatedAt: new Date() };
         if (checkInTime) updateData.checkInTime = checkInTime;
+        if (hasGeo) {
+          updateData.latitude = latitude;
+          updateData.longitude = longitude;
+          updateData.locationLabel = locationLabel;
+        }
         const updated = await storage.updateAttendance(existing.id, updateData);
         await syncAutoFineForStaffDate(storage, targetStaffId, attendanceDate);
         return res.json(updated);
@@ -1548,6 +1611,9 @@ export async function registerRoutes(
         date: attendanceDate,
         status,
         checkInTime: checkInTime || undefined,
+        latitude: latitude || undefined,
+        longitude: longitude || undefined,
+        locationLabel: locationLabel || undefined,
       };
 
       const result = await storage.createAttendance(attendanceData);
@@ -2080,11 +2146,16 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Session not found" });
       }
 
-      const canEdit =
+      const hasManage =
         hasPermission(user.role, "inpatients.manage") ||
         hasPermission(user.role, "visits.manage");
-      if (!canEdit) {
+      if (!hasManage) {
         return res.status(403).json({ message: "Forbidden: insufficient permissions" });
+      }
+      // Bug 11/13: management + operational leads may edit any session; normal staff /
+      // physiotherapists may only edit sessions they treated.
+      if (!canEditAllVisits(user.role) && existingSession.treatingStaffId !== user.staffId) {
+        return res.status(403).json({ message: "You can only edit your own sessions." });
       }
 
       const parsed = updateInPatientSessionSchema.safeParse(req.body);
@@ -2092,6 +2163,13 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid data", errors: parsed.error.flatten() });
       }
       let patch: Record<string, unknown> = { ...parsed.data };
+      // Never allow re-scoping a session across branch via raw body (RBAC server-side only).
+      delete (patch as any).branchId;
+      // Staff cannot reassign sessions to other clinicians.
+      if (!canEditAllVisits(user.role)) {
+        delete (patch as any).treatingStaffId;
+        delete (patch as any).treatingStaffName;
+      }
       if (patch.treatingStaffId && typeof patch.treatingStaffId === "string") {
         const st = await storage.getStaff(patch.treatingStaffId as string);
         if (st) patch = { ...patch, treatingStaffName: st.name };
@@ -2200,6 +2278,13 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Only discharged patients can be re-admitted" });
       }
 
+      // Bug 9: allow re-admission with a past (or today's) admit date; future dates rejected.
+      const requestedAdmit = (req.body as any)?.admitDate ? String((req.body as any).admitDate).split('T')[0] : clinicDateString();
+      const admitValidation = validateAdmitDate(requestedAdmit);
+      if (!admitValidation.ok) {
+        return res.status(400).json({ message: admitValidation.message });
+      }
+
       const newAdmissionData = {
         patientName: admission.patientName,
         age: admission.age,
@@ -2213,7 +2298,7 @@ export async function registerRoutes(
         packageType: admission.packageType,
         amountPerDay: admission.amountPerDay,
         branchId: admission.branchId,
-        admitDate: clinicDateString(),
+        admitDate: requestedAdmit,
         status: 'Admitted'
       };
 
@@ -2234,6 +2319,123 @@ export async function registerRoutes(
     }
   });
 
+  // Bug 9: edit an admission's admit date (Admin & MD only). Validated and audit-logged.
+  app.patch("/api/inpatients/:id/admit-date", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      if (!["Admin", "MD"].includes(user.role)) {
+        return res.status(403).json({ message: "Only Admin or MD can edit the admit date." });
+      }
+      const id = param(req, "id");
+      const admission = await storage.getInPatientAdmission(id);
+      if (!admission) {
+        return res.status(404).json({ message: "Admission not found" });
+      }
+      const validation = validateAdmitDate((req.body as any)?.admitDate);
+      if (!validation.ok) {
+        return res.status(400).json({ message: validation.message });
+      }
+      const oldDate = admission.admitDate;
+      const updated = await storage.updateInPatientAdmission(id, { admitDate: validation.date } as any);
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "inpatient",
+        action: "update",
+        recordId: id,
+        oldValue: { admitDate: oldDate },
+        newValue: { admitDate: validation.date },
+      });
+      return res.json(updated);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Bug 4: transfer an in-patient to another branch. Historical sessions/bills keep their
+  // original branch; only the admission's current branch changes and a transfer log is written.
+  app.post("/api/inpatients/:id/transfer", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      if (!["Admin", "MD", "Manager", "Branch Manager", "Nexus MD"].includes(user.role)) {
+        return res.status(403).json({ message: "You do not have permission to transfer patients." });
+      }
+      const id = param(req, "id");
+      const admission = await storage.getInPatientAdmission(id);
+      if (!admission) {
+        return res.status(404).json({ message: "Admission not found" });
+      }
+      const { targetBranchId, transferNote } = (req.body as any) ?? {};
+      if (!targetBranchId || typeof targetBranchId !== "string") {
+        return res.status(400).json({ message: "targetBranchId is required." });
+      }
+      const branches = await storage.getAllBranches();
+      const targetBranch = branches.find((b: any) => b.id === targetBranchId);
+      if (!targetBranch) {
+        return res.status(400).json({ message: "Target branch not found in this organization." });
+      }
+      if (targetBranchId === admission.branchId) {
+        return res.status(400).json({ message: "Patient is already in the selected branch." });
+      }
+      const rawDate = (req.body as any)?.transferDate ? String((req.body as any).transferDate).split("T")[0] : clinicDateString();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate) || rawDate > clinicDateString()) {
+        return res.status(400).json({ message: "Transfer date must be a valid date no later than today." });
+      }
+
+      const fromBranchId = admission.branchId ?? null;
+      const updated = await storage.updateInPatientAdmission(id, { branchId: targetBranchId } as any);
+
+      const editor = await storage.getStaff(user.staffId);
+      await db.insert((schema as any).patientTransferLogs).values({
+        admissionId: id,
+        patientName: admission.patientName,
+        fromBranchId,
+        toBranchId: targetBranchId,
+        transferDate: rawDate,
+        transferNote: transferNote ? String(transferNote) : null,
+        transferredByStaffId: user.staffId,
+        transferredByName: editor?.name ?? user.name ?? "",
+      });
+
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "inpatient",
+        action: "transfer",
+        recordId: id,
+        oldValue: { branchId: fromBranchId },
+        newValue: { branchId: targetBranchId, transferDate: rawDate, transferNote: transferNote ?? null },
+      });
+
+      return res.json(updated);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Bug 4: list branch-transfer history for an admission (with resolved branch names).
+  app.get("/api/inpatients/:id/transfers", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = param(req, "id");
+      const logs = await db
+        .select()
+        .from((schema as any).patientTransferLogs)
+        .where(eq((schema as any).patientTransferLogs.admissionId, id))
+        .orderBy(desc((schema as any).patientTransferLogs.createdAt));
+      const branches = await storage.getAllBranches();
+      const branchName = (bid: string | null | undefined) =>
+        bid ? (branches.find((b: any) => b.id === bid)?.name ?? bid) : null;
+      const enriched = (logs as any[]).map((l) => ({
+        ...l,
+        fromBranchName: branchName(l.fromBranchId),
+        toBranchName: branchName(l.toBranchId),
+      }));
+      return res.json(enriched);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Export inpatient full history PDF
   app.get("/api/inpatients/:admissionId/export-pdf", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -2245,20 +2447,23 @@ export async function registerRoutes(
       const exportSvc = await import("./services/exportService");
 
       const title = `Inpatient History - ${admission.patientName} (${admission.status})`;
+      // Bug 2: include session time + Improvements, and drop the Notes column.
       const columns = [
         { label: "Date", key: "date" },
+        { label: "Time", key: "time" },
         { label: "Session #", key: "sessionNumber" },
         { label: "Treatment", key: "treatment" },
         { label: "Therapist", key: "therapist" },
-        { label: "Notes", key: "notes" },
+        { label: "Improvements", key: "improvements" },
       ];
 
       const rows = sessions.map((s: any) => ({
         date: s.sessionDate,
+        time: [s.startTime, s.endTime].filter(Boolean).join(" - ") || "-",
         sessionNumber: String(s.sessionNumber),
         treatment: s.treatmentProvided,
         therapist: s.treatingStaffName,
-        notes: (s as any).notes || s.improvements || "-",
+        improvements: s.improvements || "-",
       }));
 
       const pdf = await exportSvc.rowsToPdfBuffer(title, columns, rows);

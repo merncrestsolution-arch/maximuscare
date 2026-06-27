@@ -208,6 +208,10 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart14ExpensesBranch();
   const { runPart15EnterpriseConstraints } = await import("./migrations/part15EnterpriseConstraints");
   await runPart15EnterpriseConstraints();
+  const { runPart18AttendanceGeo } = await import("./migrations/part18AttendanceGeo");
+  await runPart18AttendanceGeo();
+  const { runPart19PatientTransferLogs } = await import("./migrations/part19PatientTransferLogs");
+  await runPart19PatientTransferLogs();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -241,4 +245,8 @@ export async function ensurePostgresSchemaCompatibility() {
   await runPart14ExpensesBranch();
   const { runPart15EnterpriseConstraints } = await import("./migrations/part15EnterpriseConstraints");
   await runPart15EnterpriseConstraints();
+  const { runPart18AttendanceGeo } = await import("./migrations/part18AttendanceGeo");
+  await runPart18AttendanceGeo();
+  const { runPart19PatientTransferLogs } = await import("./migrations/part19PatientTransferLogs");
+  await runPart19PatientTransferLogs();
 }

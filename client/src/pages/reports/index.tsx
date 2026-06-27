@@ -1,7 +1,7 @@
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canViewReports, canViewFinancialSummary, canViewSalary } from "@/lib/permissions";
+import { canViewReportsHub, canViewFinancialSummary, canViewSalary } from "@/lib/permissions";
 import { useAuth } from "@/context/auth-context";
 import { PageShell } from "@/components/layout/page-shell";
 import {
@@ -73,7 +73,7 @@ function ReportsHubContent() {
 
 export default function ReportsHubPage() {
   return (
-    <RoleProtectedRoute allowed={canViewReports}>
+    <RoleProtectedRoute allowed={canViewReportsHub}>
       <ReportsHubContent />
     </RoleProtectedRoute>
   );

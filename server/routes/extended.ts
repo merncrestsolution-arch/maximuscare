@@ -70,10 +70,13 @@ export function registerExtendedRoutes(app: Express) {
         return errorResponse(res, "startDate and endDate are required", 400);
       }
 
+      // Bug 14: management sees any staff; everyone else (incl. branch leads &
+      // receptionists) may always view their own salary. This prevents the
+      // "salary not showing" 403 for non-management roles viewing themselves.
       let staffIds: string[] | undefined;
       if (isManagementRole(user.role)) {
         staffIds = staffId ? [staffId] : undefined;
-      } else if (user.role === "Physiotherapist" || user.role === "Staff" || user.role === "Manager") {
+      } else if (user.staffId) {
         staffIds = [user.staffId];
       } else {
         return errorResponse(res, "Forbidden", 403);

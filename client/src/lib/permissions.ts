@@ -74,6 +74,17 @@ export function canViewReports(role: string | undefined): boolean {
   return r !== "Receptionist" && r !== "Staff";
 }
 
+/**
+ * Bug 19: the Reports hub page + nav item are hidden from Admin and MD (they use the
+ * dashboards/overviews instead). This is intentionally narrower than `canViewReports`
+ * so individual report-backed screens (patient dashboard, home visits, session report)
+ * remain reachable for Admin/MD.
+ */
+export function canViewReportsHub(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return canViewReports(r) && r !== "Admin" && r !== "MD";
+}
+
 export function canExportPatients(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
   return r === "Admin" || r === "MD" || r === "Receptionist";

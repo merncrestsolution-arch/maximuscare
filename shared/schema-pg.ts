@@ -197,6 +197,10 @@ export const attendance = pgTable("attendance", {
   checkOutTime: timestamp("check_out_time"),
   overtimeHours: decimal("overtime_hours", { precision: 4, scale: 2 }),
   branch: text("branch"),
+  // Bug 6: real GPS coordinates captured from the device at check-in time.
+  latitude: text("latitude"),
+  longitude: text("longitude"),
+  locationLabel: text("location_label"),
   notes: text("notes"),
   attendanceDate: date("attendance_date"),
   remarks: text("remarks"),
@@ -376,6 +380,21 @@ export const updateInPatientExtraExpenseSchema = insertInPatientExtraExpenseSche
 export type InsertInPatientExtraExpense = z.infer<typeof insertInPatientExtraExpenseSchema>;
 export type UpdateInPatientExtraExpense = z.infer<typeof updateInPatientExtraExpenseSchema>;
 export type InPatientExtraExpense = typeof inPatientExtraExpenses.$inferSelect;
+
+// Bug 4: audit trail for in-patient branch transfers.
+export const patientTransferLogs = pgTable("patient_transfer_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  admissionId: varchar("admission_id").notNull(),
+  patientName: text("patient_name"),
+  fromBranchId: text("from_branch_id"),
+  toBranchId: text("to_branch_id").notNull(),
+  transferDate: date("transfer_date").notNull(),
+  transferNote: text("transfer_note"),
+  transferredByStaffId: varchar("transferred_by_staff_id"),
+  transferredByName: text("transferred_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type PatientTransferLog = typeof patientTransferLogs.$inferSelect;
 
 export const expenses = pgTable("expenses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

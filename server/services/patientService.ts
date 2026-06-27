@@ -32,13 +32,16 @@ export async function assertNoDuplicatePatient(
   storage: IStorage,
   phone: string | null | undefined,
   nicOrPassport?: string | null,
-  excludeId?: string
+  excludeId?: string,
+  options?: { skipPhoneCheck?: boolean }
 ): Promise<void> {
   const all = await storage.getAllPatients();
   const normalizedPhone = phone && phone.trim() !== "" ? phone.replace(/\s+/g, "").trim() : null;
   const normalizedNic = nicOrPassport && nicOrPassport.trim() !== "" ? nicOrPassport.trim() : null;
-  
-  if (normalizedPhone) {
+
+  // Bug 7: the Book Appointment flow allows re-using an existing phone number, so callers
+  // can opt out of the phone-duplicate guard while still enforcing the NIC/Passport check.
+  if (normalizedPhone && !options?.skipPhoneCheck) {
     for (const p of all) {
       if (excludeId && p.id === excludeId) continue;
       if (p.phone && p.phone.replace(/\s+/g, "").trim() === normalizedPhone) {

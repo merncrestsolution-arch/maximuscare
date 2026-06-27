@@ -23,6 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
 import { BranchSelectField } from "@/components/branch/branch-select-field";
+import { canViewAllVisits } from "@/lib/permissions";
 
 export default function EditVisit() {
   const [match, params] = useRoute("/visits/edit/:id");
@@ -74,11 +75,11 @@ export default function EditVisit() {
     );
   }
 
-  const isPhysioRole = user && ["Physiotherapist", "Staff"].includes(user.role);
+  // Bug 11: managers / operational leads can edit any visit in their branch.
+  // Bug 13: physiotherapists & normal staff can only edit visits they treated or created.
   const canEditVisit =
     !!user &&
-    (isManagement ||
-      isPhysioRole ||
+    (canViewAllVisits(user.role) ||
       visit.treatingStaffId === user.id ||
       visit.createdByStaffId === user.id);
 

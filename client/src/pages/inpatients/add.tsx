@@ -241,6 +241,7 @@ export default function AddInPatientPage() {
                 id="admitDate"
                 type="date"
                 value={formData.admitDate}
+                max={format(new Date(), "yyyy-MM-dd")}
                 onChange={(e) => updateField("admitDate", e.target.value)}
                 className="h-12"
                 data-testid="input-admit-date"

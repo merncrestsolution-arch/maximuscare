@@ -23,6 +23,11 @@ function SalaryHubContent() {
   const { data: dashboard } = useSalaryDashboard(isMgmt);
 
   const links = [
+    // Bug 14/15/17: non-management staff get a direct link to their detailed,
+    // date-ranged salary breakdown (rendered on their own profile page).
+    ...(!isMgmt && user?.id
+      ? [{ href: `/staff/${user.id}`, title: "My Salary Detail", desc: "Detailed breakdown with date range", icon: Banknote, mgmt: false }]
+      : []),
     { href: "/salary/history", title: "Salary History", desc: "All salary records with filters", icon: History, mgmt: false },
     { href: "/salary/generate", title: "Generate Salary", desc: "Preview and generate monthly payroll", icon: Calculator, mgmt: true },
     { href: "/salary/approval", title: "Salary Approval", desc: "Approve, reject, or mark paid", icon: FileCheck, mgmt: true },

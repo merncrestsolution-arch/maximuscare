@@ -255,8 +255,13 @@ export function computeHomeVisitBreakdown(
   let holidayVisits = 0;
   for (const v of homeVisits) {
     const att = attendanceByDate.get(v.visitDate);
-    const branchName = normalizeBranchName(v.branch).toLowerCase();
-    
+
+    // Business rule (Bug 8): the LKR 1,500 holiday home-visit rate applies ONLY to
+    // the Colombo "main"-tier branches — Dehiwala and the Neuro (Rehabilitation) Unit.
+    // Other branches (Bandaragama, Nexus/Beruwala) never receive the holiday rate and
+    // use their standard branch home-visit rate instead.
+    const isColomboBranch = getHomeVisitRateTier(v.branch) === "main";
+
     if (getHomeVisitRateTier(v.branch) === "bandaragama") {
       bandaragamaVisits++;
     } else {
@@ -264,7 +269,7 @@ export function computeHomeVisitBreakdown(
     }
 
     const isHoliday = isHolidayHomeVisitDay(att?.status);
-    if (isHoliday && (branchName === "colombo home" || branchName === "dehiwala")) {
+    if (isHoliday && isColomboBranch) {
       holidayVisits++;
     }
   }

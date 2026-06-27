@@ -23,7 +23,7 @@ import { useBranch } from "@/context/branch-context";
 import {
   canAccessMaximusOverview,
   canAccessNexusOverview,
-  canViewReports,
+  canViewReportsHub,
   canViewAuditLogs,
   canViewStaffList,
 } from "@/lib/permissions";
@@ -166,7 +166,7 @@ export function AppSidebarNav() {
                       <span>Quick Add</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                  {canViewReports(user.role) && (
+                  {canViewReportsHub(user.role) && (
                     <SidebarMenuItem>
                       <SidebarMenuButton asChild isActive={location.startsWith("/reports") || isActive("/physio-summary")} className="min-h-11">
                         <Link href="/reports" onClick={closeMobile}>

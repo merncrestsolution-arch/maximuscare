@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Users, Calendar, DollarSign, Activity, TrendingUp, Loader2, Plus, Pencil, Trash2, Wallet, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { Users, Calendar, DollarSign, Activity, TrendingUp, Loader2, Plus, Pencil, Trash2, Wallet, ArrowDownLeft, ArrowUpRight, MapPin } from "lucide-react";
 import { Bar, BarChart, Line, LineChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { ReportDateFilters } from "@/components/reports/report-date-filters";
 import { getDateRangeForPreset, type DatePreset } from "@/lib/reportDatePresets";
@@ -322,12 +322,19 @@ export default function Dashboard() {
               <Card>
                 <CardHeader><CardTitle className="text-base">Revenue Trend</CardTitle></CardHeader>
                 <CardContent className="h-52">
-                  <ResponsiveContainer width="100%" height="100%">
-                    {!dashboardKpis.charts.revenueTrend || dashboardKpis.charts.revenueTrend.length === 0 ? (
-                      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                        No data available
-                      </div>
-                    ) : (
+                  {/* Bug 20: keep the empty/loading states OUTSIDE ResponsiveContainer — recharts
+                      can fail to render when its only child is a non-chart node. Empty state shows
+                      only when every day in the range has zero collected revenue. */}
+                  {loadingKpis ? (
+                    <div className="h-full w-full animate-pulse rounded-md bg-muted/40" />
+                  ) : !dashboardKpis.charts.revenueTrend ||
+                    dashboardKpis.charts.revenueTrend.length === 0 ||
+                    dashboardKpis.charts.revenueTrend.every((d: any) => Number(d.revenue) === 0) ? (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      No revenue data for this period
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={dashboardKpis.charts.revenueTrend}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" tick={{ fontSize: 11 }} />
@@ -335,8 +342,8 @@ export default function Dashboard() {
                         <Tooltip formatter={(v: number) => formatCurrency(v)} />
                         <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" dot={{ r: 2 }} />
                       </LineChart>
-                    )}
-                  </ResponsiveContainer>
+                    </ResponsiveContainer>
+                  )}
                 </CardContent>
               </Card>
               <Card>
@@ -848,17 +855,42 @@ export default function Dashboard() {
             <div className="space-y-4">
                {attendance
                  .filter(a => a.date === format(new Date(), 'yyyy-MM-dd'))
-                 .map(record => (
-                   <div key={record.id} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0">
-                     <div>
-                       <div className="font-medium">{record.staffName}</div>
+                 .map(record => {
+                   // Bug 6: show check-in time and a Google Maps link to the captured GPS location.
+                   const lat = (record as any).latitude;
+                   const lng = (record as any).longitude;
+                   const hasLocation = lat != null && lat !== "" && lng != null && lng !== "";
+                   const checkIn = (record as any).checkInTime;
+                   return (
+                   <div key={record.id} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0 gap-2">
+                     <div className="min-w-0">
+                       <div className="font-medium truncate">{record.staffName}</div>
                        <div className="text-xs text-muted-foreground">{record.role}</div>
+                       <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+                         <span className="text-muted-foreground">
+                           {checkIn ? format(new Date(checkIn), 'hh:mm a') : '—'}
+                         </span>
+                         {hasLocation ? (
+                           <a
+                             href={`https://www.google.com/maps?q=${lat},${lng}`}
+                             target="_blank"
+                             rel="noopener noreferrer"
+                             className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                             data-testid={`link-location-${record.id}`}
+                           >
+                             <MapPin className="h-3 w-3" /> Location
+                           </a>
+                         ) : (
+                           <span className="text-muted-foreground/70">Location not captured</span>
+                         )}
+                       </div>
                      </div>
-                     <div className={`px-2 py-1 rounded text-xs font-medium ${record.status === 'Present' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                     <div className={`px-2 py-1 rounded text-xs font-medium shrink-0 ${record.status === 'Present' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                        {record.status}
                      </div>
                    </div>
-                 ))}
+                   );
+                 })}
                {attendance.filter(a => a.date === format(new Date(), 'yyyy-MM-dd')).length === 0 && (
                  <div className="text-center text-sm text-muted-foreground py-4">No attendance marked today yet.</div>
                )}

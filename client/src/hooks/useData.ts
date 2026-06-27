@@ -367,10 +367,45 @@ export function useDeleteInPatient() {
 export function useReadmitInPatient() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (admissionId: string) => inPatientApi.readmit(admissionId),
+    mutationFn: (arg: string | { admissionId: string; admitDate?: string }) => {
+      const admissionId = typeof arg === "string" ? arg : arg.admissionId;
+      const admitDate = typeof arg === "string" ? undefined : arg.admitDate;
+      return inPatientApi.readmit(admissionId, admitDate);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inpatients'] });
     },
+  });
+}
+
+export function useUpdateInPatientAdmitDate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, admitDate }: { id: string; admitDate: string }) =>
+      inPatientApi.updateAdmitDate(id, admitDate),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
+    },
+  });
+}
+
+export function useTransferInPatient() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; targetBranchId: string; transferDate?: string; transferNote?: string }) =>
+      inPatientApi.transfer(id, data),
+    onSuccess: (_res, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatient-transfers', vars.id] });
+    },
+  });
+}
+
+export function useInPatientTransfers(id: string) {
+  return useQuery({
+    queryKey: ['inpatient-transfers', id],
+    queryFn: () => inPatientApi.getTransfers(id),
+    enabled: !!id,
   });
 }
 

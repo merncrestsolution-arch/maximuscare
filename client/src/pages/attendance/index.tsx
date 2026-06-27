@@ -385,6 +385,18 @@ export default function AttendancePage() {
 
     setMarkingStatus(status);
     try {
+      // Bug 6: capture the real GPS location at check-in. Permission denial is handled
+      // gracefully — we simply store no coordinates rather than blocking attendance.
+      let geo: { latitude: number; longitude: number } | null = null;
+      if (status === 'Present' && typeof navigator !== "undefined" && navigator.geolocation) {
+        geo = await new Promise((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+            () => resolve(null),
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+          );
+        });
+      }
       await createAttendance.mutateAsync({
         staffId: user.id,
         staffName: user.name,
@@ -392,6 +404,8 @@ export default function AttendancePage() {
         date: today,
         status,
         checkInTime: status === 'Present' ? new Date().toISOString() : undefined,
+        latitude: geo ? String(geo.latitude) : undefined,
+        longitude: geo ? String(geo.longitude) : undefined,
       });
       toast({
         title: "Attendance Marked",

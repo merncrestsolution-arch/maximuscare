@@ -512,9 +512,20 @@ export const inPatientApi = {
   delete: (id: string) => apiRequest<{ message: string }>(`/inpatients/${id}`, {
     method: 'DELETE',
   }),
-  readmit: (admissionId: string) => apiRequest<any>(`/inpatients/${admissionId}/readmit`, {
+  readmit: (admissionId: string, admitDate?: string) => apiRequest<any>(`/inpatients/${admissionId}/readmit`, {
     method: 'POST',
+    body: JSON.stringify(admitDate ? { admitDate } : {}),
   }),
+  updateAdmitDate: (id: string, admitDate: string) => apiRequest<any>(`/inpatients/${id}/admit-date`, {
+    method: 'PATCH',
+    body: JSON.stringify({ admitDate }),
+  }),
+  transfer: (id: string, data: { targetBranchId: string; transferDate?: string; transferNote?: string }) =>
+    apiRequest<any>(`/inpatients/${id}/transfer`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getTransfers: (id: string) => apiRequest<any[]>(`/inpatients/${id}/transfers`),
 
   // Sessions
   getSessions: (admissionId: string) => 

@@ -121,13 +121,14 @@ export default function BottomNav() {
 
           {user.role !== "Receptionist" && (
             <NavItem
-              href={["Physiotherapist", "Staff"].includes(user.role) ? "/salary" : "/reports"}
+              // Bug 19: Admin/MD don't use Reports — route them (and physio/staff) to Salary.
+              href={["Physiotherapist", "Staff", "Admin", "MD"].includes(user.role) ? "/salary" : "/reports"}
               active={
                 location.startsWith("/reports") ||
                 location.startsWith("/salary") ||
                 isActive("/physio-summary")
               }
-              label={["Physiotherapist", "Staff"].includes(user.role) ? "Salary" : "Reports"}
+              label={["Physiotherapist", "Staff", "Admin", "MD"].includes(user.role) ? "Salary" : "Reports"}
               icon={<BarChart3 {...navIconProps} />}
               testId="link-nav-reports"
             />

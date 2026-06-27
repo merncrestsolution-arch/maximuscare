@@ -127,7 +127,9 @@ export default function BookAppointment() {
           branch,
           status: "Active" as const,
           defaultVisitType: "Clinic" as const,
-        });
+          // Bug 7: allow booking even when this phone number already exists.
+          skipPhoneCheck: true,
+        } as any);
         patientId = created.id;
         patientName = created.name;
       } else {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Phone, MapPin, Calendar, User, Clock, Trash2, Edit, Plus, CreditCard, Receipt } from "lucide-react";
+import { ArrowLeft, Loader2, Phone, MapPin, Calendar, User, Clock, Trash2, Edit, Pencil, Plus, CreditCard, Receipt } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense } from "@/lib/types";
@@ -30,9 +30,12 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
 import { isManager, isBranchManager } from "@/lib/permissions";
+import { useBranches } from "@/hooks/useData";
 
 const EXPENSE_CATEGORIES = ["Food", "Nurse Visit", "Doctor Visit", "Speech Therapy", "Others"];
 
@@ -53,6 +56,14 @@ export default function InPatientProfilePage() {
   const { data: extraExpenseTotalData } = useInPatientExtraExpenseTotal(patientId);
   const deleteInPatient = useDeleteInPatient();
   const readmitInPatient = useReadmitInPatient();
+  const updateAdmitDate = useUpdateInPatientAdmitDate();
+  const transferInPatient = useTransferInPatient();
+  const { data: transferLogs = [] } = useInPatientTransfers(patientId);
+  // Bug 4: transfer destinations span every active branch in the org (real DB ids).
+  const { data: allBranches = [] } = useBranches();
+  const transferBranchChoices = (allBranches as any[])
+    .filter((b) => b.isActive !== false && b.isActive !== 0)
+    .map((b) => ({ id: b.id, label: b.name }));
   const createPayment = useCreateInPatientPayment();
   const updateInPatient = useUpdateInPatient();
   const createExtraExpense = useCreateInPatientExtraExpense();
@@ -101,12 +112,27 @@ export default function InPatientProfilePage() {
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null);
   const [deleteSessionId, setSessionToDelete] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  // Bug 9: admit-date inline editing (Admin/MD) and re-admit date selection.
+  const [editingAdmitDate, setEditingAdmitDate] = useState(false);
+  const [admitDateDraft, setAdmitDateDraft] = useState("");
+  const [readmitDate, setReadmitDate] = useState("");
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  // Bug 4: branch transfer dialog state.
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferBranchId, setTransferBranchId] = useState("");
+  const [transferDate, setTransferDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [transferNote, setTransferNote] = useState("");
 
   const isAdminMD = user?.role === "Admin" || user?.role === "MD";
   const isReceptionist = user?.role === "Receptionist";
-  const canViewPayments = isAdminMD || isReceptionist;
-  /** Billing summary + billing PDF — Admin & MD only (hidden from physiotherapy staff). */
-  const canViewBillingSummary = isAdminMD;
+  // Bug 10: Managers / Branch Managers / Nexus MD may VIEW in-patient bills (branch-scoped,
+  // read-only — no amount edits). Editing of amounts/caretaker rate stays Admin/MD only.
+  const isBranchLead = ["Manager", "Branch Manager", "Nexus MD"].includes(user?.role || "");
+  // Bug 4: Admin/MD and branch leads can transfer an in-patient to another branch.
+  const canTransfer = isAdminMD || isBranchLead;
+  const canViewPayments = isAdminMD || isReceptionist || isBranchLead;
+  /** Billing summary + billing PDF — Admin, MD, and branch leads (view-only for leads). */
+  const canViewBillingSummary = isAdminMD || isBranchLead;
   const canEditInPatientSession =
     isAdminMD ||
     isManager(user?.role) ||
@@ -185,12 +211,52 @@ export default function InPatientProfilePage() {
 
   const handleReadmit = async () => {
     try {
-      await readmitInPatient.mutateAsync(patientId);
+      await readmitInPatient.mutateAsync({ admissionId: patientId, admitDate: readmitDate || undefined });
       toast({ title: "Success", description: "Patient re-admitted" });
     } catch (error) {
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to re-admit",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleSaveAdmitDate = async () => {
+    if (!admitDateDraft) return;
+    try {
+      await updateAdmitDate.mutateAsync({ id: patientId, admitDate: admitDateDraft });
+      toast({ title: "Admit date updated" });
+      setEditingAdmitDate(false);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update admit date",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!transferBranchId) {
+      toast({ title: "Select a branch", description: "Please choose a destination branch.", variant: "destructive" });
+      return;
+    }
+    try {
+      await transferInPatient.mutateAsync({
+        id: patientId,
+        targetBranchId: transferBranchId,
+        transferDate,
+        transferNote: transferNote.trim() || undefined,
+      });
+      toast({ title: "Patient transferred", description: "The in-patient was moved to the selected branch." });
+      setTransferOpen(false);
+      setTransferBranchId("");
+      setTransferNote("");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to transfer patient",
         variant: "destructive",
       });
     }
@@ -489,12 +555,46 @@ export default function InPatientProfilePage() {
             <span className="text-muted-foreground">Address:</span>
             <span className="font-medium" data-testid="text-address">{patient.address}</span>
           </div>
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <Calendar className="h-4 w-4 text-muted-foreground" />
             <span className="text-muted-foreground">Admitted:</span>
-            <span className="font-medium" data-testid="text-admit-date">
-              {format(new Date(patient.admitDate), "dd MMM yyyy")}
-            </span>
+            {editingAdmitDate ? (
+              <span className="flex items-center gap-2">
+                {/* Bug 9: admit date editable by Admin/MD; future dates disabled, past allowed. */}
+                <Input
+                  type="date"
+                  value={admitDateDraft}
+                  max={todayStr}
+                  onChange={(e) => setAdmitDateDraft(e.target.value)}
+                  className="h-8 w-40"
+                  data-testid="input-edit-admit-date"
+                />
+                <Button size="sm" className="h-8" onClick={handleSaveAdmitDate} disabled={updateAdmitDate.isPending} data-testid="button-save-admit-date">
+                  {updateAdmitDate.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-8" onClick={() => setEditingAdmitDate(false)}>Cancel</Button>
+              </span>
+            ) : (
+              <>
+                <span className="font-medium" data-testid="text-admit-date">
+                  {format(new Date(patient.admitDate), "dd MMM yyyy")}
+                </span>
+                {isAdminMD && (
+                  <button
+                    type="button"
+                    className="p-1 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+                    onClick={() => {
+                      setAdmitDateDraft(format(new Date(patient.admitDate), "yyyy-MM-dd"));
+                      setEditingAdmitDate(true);
+                    }}
+                    aria-label="Edit admit date"
+                    data-testid="button-edit-admit-date"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </>
+            )}
           </div>
           <div className="text-sm">
             <span className="text-muted-foreground">Condition: </span>
@@ -587,87 +687,87 @@ export default function InPatientProfilePage() {
               <Receipt className="h-4 w-4" />
               Billing Summary
             </h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center">
-                <span className="text-muted-foreground">Stay Days:</span>
-                <span className="font-medium" data-testid="text-stay-days">{stayDays} day{stayDays > 1 ? "s" : ""}</span>
-              </div>
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center">
-                <span className="text-muted-foreground break-words min-w-0">Room Charges ({amountPerDay.toLocaleString()} × {stayDays}):</span>
-                <span className="font-medium shrink-0" data-testid="text-room-charges">LKR {roomCharges.toLocaleString()}</span>
-              </div>
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center">
-                <span className="text-muted-foreground break-words min-w-0">
-                  Caretaker Charges ({careTakerRate.toLocaleString()} × {careTakerDays}):
-                </span>
-                <span className="font-medium shrink-0" data-testid="text-caretaker-charges">
-                  LKR {caretakerCharges.toLocaleString()}
-                </span>
-              </div>
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center">
-                <span className="text-muted-foreground">Extra Expenses:</span>
-                <span className="font-medium" data-testid="text-extra-expenses-total">LKR {extraExpenseTotal.toLocaleString()}</span>
-              </div>
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center border-t pt-2 mt-2">
-                <span className="font-semibold">Grand Total:</span>
-                <span className="font-bold" data-testid="text-grand-total">LKR {grandTotal.toLocaleString()}</span>
-              </div>
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center">
-                <span className="text-muted-foreground">Total Paid:</span>
-                <span className="font-medium text-green-700" data-testid="text-total-paid">LKR {paymentTotal.toLocaleString()}</span>
-              </div>
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:justify-between sm:items-center border-t pt-2 mt-2">
-                <span className="font-semibold">Balance Due:</span>
-                <span className={`font-bold ${balanceDue > 0 ? "text-red-600" : "text-green-700"}`} data-testid="text-balance-due">
-                  LKR {balanceDue.toLocaleString()}
-                </span>
-              </div>
-            </div>
+            {/* Bug 3: use a real table so description (left) and LKR amounts (right) stay
+                aligned across screen sizes and in print, instead of collapsing flex rows. */}
+            <table className="w-full text-sm border-collapse">
+              <tbody>
+                <tr>
+                  <td className="py-1 text-left text-muted-foreground align-top">Stay Days</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-stay-days">{stayDays} day{stayDays > 1 ? "s" : ""}</td>
+                </tr>
+                <tr>
+                  <td className="py-1 text-left text-muted-foreground align-top">Room Charges ({amountPerDay.toLocaleString()} × {stayDays})</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-room-charges">LKR {roomCharges.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td className="py-1 text-left text-muted-foreground align-top">Caretaker Charges ({careTakerRate.toLocaleString()} × {careTakerDays})</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-caretaker-charges">LKR {caretakerCharges.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td className="py-1 text-left text-muted-foreground align-top">Extra Expenses</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-extra-expenses-total">LKR {extraExpenseTotal.toLocaleString()}</td>
+                </tr>
+                <tr className="border-t border-border/60">
+                  <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
+                  <td className="pt-2 text-right font-bold whitespace-nowrap" data-testid="text-grand-total">LKR {grandTotal.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td className="py-1 text-left text-muted-foreground align-top">Total Paid</td>
+                  <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap" data-testid="text-total-paid">LKR {paymentTotal.toLocaleString()}</td>
+                </tr>
+                <tr className="border-t border-border/60">
+                  <td className="pt-2 text-left font-semibold align-top">Balance Due</td>
+                  <td className={`pt-2 text-right font-bold whitespace-nowrap ${balanceDue > 0 ? "text-red-600" : "text-green-700"}`} data-testid="text-balance-due">LKR {balanceDue.toLocaleString()}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           {discharge && (
             <div className="bg-blue-50 rounded-lg p-4" data-testid="discharge-summary">
               <h3 className="font-semibold mb-3">Discharge Summary</h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Discharge Date:</span>
-                  <span className="font-medium">{format(new Date(discharge.dischargeDate), "dd MMM yyyy")}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Days Stayed:</span>
-                  <span className="font-medium">{discharge.daysCount} days</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Stay Amount:</span>
-                  <span className="font-medium">LKR {discharge.stayAmount}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Other Charges:</span>
-                  <span className="font-medium">LKR {discharge.otherTotal}</span>
-                </div>
-                <div className="flex justify-between border-t pt-2 mt-2">
-                  <span className="font-semibold">Grand Total:</span>
-                  <span className="font-bold">LKR {discharge.grandTotal}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Amount Paid:</span>
-                  <span className="font-medium text-green-700">LKR {discharge.amountPaid}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Balance:</span>
-                  <span className={`font-medium ${parseFloat(discharge.balance) > 0 ? "text-red-600" : "text-green-700"}`}>
-                    LKR {discharge.balance}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Payment Status:</span>
-                  <span className={`px-2 py-0.5 rounded text-xs ${
-                    discharge.paymentStatus === "Paid" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                  }`}>
-                    {discharge.paymentStatus}
-                  </span>
-                </div>
-              </div>
+              <table className="w-full text-sm border-collapse">
+                <tbody>
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Discharge Date</td>
+                    <td className="py-1 text-right font-medium whitespace-nowrap">{format(new Date(discharge.dischargeDate), "dd MMM yyyy")}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Days Stayed</td>
+                    <td className="py-1 text-right font-medium whitespace-nowrap">{discharge.daysCount} days</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Stay Amount</td>
+                    <td className="py-1 text-right font-medium whitespace-nowrap">LKR {discharge.stayAmount}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Other Charges</td>
+                    <td className="py-1 text-right font-medium whitespace-nowrap">LKR {discharge.otherTotal}</td>
+                  </tr>
+                  <tr className="border-t border-border/60">
+                    <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
+                    <td className="pt-2 text-right font-bold whitespace-nowrap">LKR {discharge.grandTotal}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Amount Paid</td>
+                    <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap">LKR {discharge.amountPaid}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Balance</td>
+                    <td className={`py-1 text-right font-medium whitespace-nowrap ${parseFloat(discharge.balance) > 0 ? "text-red-600" : "text-green-700"}`}>LKR {discharge.balance}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Payment Status</td>
+                    <td className="py-1 text-right">
+                      <span className={`px-2 py-0.5 rounded text-xs ${
+                        discharge.paymentStatus === "Paid" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                      }`}>
+                        {discharge.paymentStatus}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -755,15 +855,18 @@ export default function InPatientProfilePage() {
                 fileBaseName={`inpatient-sessions-${patientId.substring(0, 8)}`}
                 columns={[
                   { label: "Date", key: "date" },
+                  { label: "Time", key: "time" },
                   { label: "Session #", key: "sessionNumber" },
                   { label: "Treatment", key: "treatmentProvided" },
                   { label: "Therapist", key: "treatingStaffName" },
-                  { label: "Notes", key: "improvements" },
+                  { label: "Improvements", key: "improvements" },
                 ]}
                 rows={(sessions || []).map(s => ({
                   ...s,
                   date: format(new Date(s.sessionDate), "yyyy-MM-dd"),
-                  improvements: (s as any).notes || s.improvements || "-",
+                  // Bug 2: show session time, surface Improvements, and drop the Notes field.
+                  time: [s.startTime, s.endTime].filter(Boolean).join(" - ") || "-",
+                  improvements: s.improvements || "-",
                 }))}
                 logoUri={logoUri}
               />
@@ -903,6 +1006,94 @@ export default function InPatientProfilePage() {
           </Button>
         )}
 
+        {/* Bug 4: transfer the in-patient to another branch (Admin/MD + branch leads). */}
+        {canTransfer && patient?.status === "Admitted" && (
+          <Button
+            className="w-full h-12"
+            variant="outline"
+            onClick={() => setTransferOpen(true)}
+            data-testid="button-transfer-branch"
+          >
+            Transfer to Branch
+          </Button>
+        )}
+
+        <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Transfer to another branch</DialogTitle>
+              <DialogDescription>
+                The patient's full treatment history stays intact — only the current branch changes.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label>Destination Branch</Label>
+                <Select value={transferBranchId} onValueChange={setTransferBranchId}>
+                  <SelectTrigger data-testid="select-transfer-branch">
+                    <SelectValue placeholder="Select branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {transferBranchChoices
+                      .filter((b) => b.id !== patient?.branchId)
+                      .map((b) => (
+                        <SelectItem key={b.id} value={b.id}>{b.label}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="transfer-date">Transfer Date</Label>
+                <Input
+                  id="transfer-date"
+                  type="date"
+                  value={transferDate}
+                  max={todayStr}
+                  onChange={(e) => setTransferDate(e.target.value)}
+                  className="h-11"
+                  data-testid="input-transfer-date"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="transfer-note">Note (optional)</Label>
+                <Textarea
+                  id="transfer-note"
+                  value={transferNote}
+                  onChange={(e) => setTransferNote(e.target.value)}
+                  placeholder="Reason for transfer"
+                  data-testid="input-transfer-note"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setTransferOpen(false)}>Cancel</Button>
+              <Button onClick={handleTransfer} disabled={transferInPatient.isPending} data-testid="button-confirm-transfer">
+                {transferInPatient.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Transfer"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bug 4: branch transfer history timeline. */}
+        {(transferLogs as any[]).length > 0 && (
+          <div className="rounded-lg border border-border/60 bg-white p-4">
+            <h3 className="font-semibold mb-3 text-sm">Branch Transfer History</h3>
+            <div className="space-y-2">
+              {(transferLogs as any[]).map((t) => (
+                <div key={t.id} className="text-sm border-b border-border/40 pb-2 last:border-0 last:pb-0">
+                  <div className="font-medium">
+                    {t.fromBranchName || "—"} → {t.toBranchName}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {t.transferDate}{t.transferredByName ? ` · by ${t.transferredByName}` : ""}
+                    {t.transferNote ? ` · ${t.transferNote}` : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {canReadmit && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -923,11 +1114,23 @@ export default function InPatientProfilePage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Re-admit this patient?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will set the patient back to Admitted and remove the existing
-                  discharge record so new sessions can be added. You can discharge
-                  them again later.
+                  This will set the patient back to Admitted so new sessions can be added.
+                  Choose the admit date (today or a past date).
                 </AlertDialogDescription>
               </AlertDialogHeader>
+              {/* Bug 9: re-admit allows selecting a past/present admit date (no future). */}
+              <div className="space-y-2">
+                <Label htmlFor="readmit-date">Admit Date</Label>
+                <Input
+                  id="readmit-date"
+                  type="date"
+                  value={readmitDate || todayStr}
+                  max={todayStr}
+                  onChange={(e) => setReadmitDate(e.target.value)}
+                  className="h-11"
+                  data-testid="input-readmit-date"
+                />
+              </div>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                 <AlertDialogAction onClick={handleReadmit}>Re-admit</AlertDialogAction>

@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link, useRoute } from "wouter";
 import { addDays, format, parseISO } from "date-fns";
 import { useAuth } from "@/context/auth-context";
-import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange, usePayrollReport, useStaffStats } from "@/hooks/useData";
+import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange, useStaffStats, useBranches } from "@/hooks/useData";
+import { BRANCH_OPTIONS } from "@/lib/branches";
 import { staffApi } from "@/lib/api";
 import { format as fmt, startOfMonth, endOfMonth } from "date-fns";
 import { formatLkr } from "@/lib/reportDatePresets";
@@ -12,6 +13,7 @@ import { ArrowLeft, Edit2, CalendarCheck, Stethoscope, Pencil } from "lucide-rea
 import { isVisitForStaff } from "@/lib/visitAccess";
 import { canViewStaffList, canManageStaff, isManager, isBranchManager } from "@/lib/permissions";
 import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
+import { SalaryDetailSection } from "@/components/staff/salary-detail-section";
 
 export default function StaffProfilePage() {
   const [match, params] = useRoute("/staff/:id");
@@ -24,13 +26,12 @@ export default function StaffProfilePage() {
     !!staffId
   );
   const { data: profileUser, isLoading: staffLoading, error: staffError } = useStaffMember(staffId);
+  const { data: allBranches = [] } = useBranches();
   const { data: allVisits = [] } = useVisits();
   const { data: patients = [] } = usePatients();
   const { data: staffAttendance = [] } = useAttendance({ staffId });
   const monthStart = fmt(startOfMonth(new Date()), "yyyy-MM-dd");
   const monthEnd = fmt(endOfMonth(new Date()), "yyyy-MM-dd");
-  const { data: payrollReport } = usePayrollReport({ startDate: monthStart, endDate: monthEnd, staffId });
-  const payrollSummary = payrollReport?.summaries?.[0];
   const { data: hrmStats } = useStaffStats(staffId, { startDate: monthStart, endDate: monthEnd }, !!staffId);
   const [photoUploading, setPhotoUploading] = useState(false);
 
@@ -54,6 +55,21 @@ export default function StaffProfilePage() {
   if (staffError || !profileUser) {
     return <div className="p-4 text-muted-foreground">Staff member not found.</div>;
   }
+
+  // Bug 16: resolve the staff member's assigned branches to actual branch names instead
+  // of the placeholder "Both"/"All". A staff record may store a single branch name, a
+  // comma-separated list, or the legacy "Both"/"All Branches" sentinel meaning every branch.
+  const allBranchNames =
+    (allBranches as any[]).length > 0
+      ? (allBranches as any[]).map((b) => b.branchName ?? b.name).filter(Boolean)
+      : BRANCH_OPTIONS.map((b) => b.value);
+  const rawBranch = String((profileUser as any).branch ?? "").trim();
+  const isAllBranches = ["both", "all", "all branches"].includes(rawBranch.toLowerCase());
+  const assignedBranchNames: string[] = !rawBranch
+    ? ["Head Office"]
+    : isAllBranches
+    ? allBranchNames
+    : rawBranch.split(",").map((s) => s.trim()).filter(Boolean);
 
   const staffVisits = allVisits
     .filter((v) => isVisitForStaff(v, profileUser))
@@ -146,9 +162,15 @@ export default function StaffProfilePage() {
           <div className="px-3 py-1 rounded-full bg-black text-white text-xs font-semibold" data-testid="badge-staff-role">
             {profileUser.role}
           </div>
-          <div className="px-3 py-1 rounded-full bg-muted/20 text-foreground text-xs font-semibold" data-testid="badge-staff-branch">
-            {profileUser.branch || "Head Office"}
-          </div>
+          {assignedBranchNames.map((branchName) => (
+            <div
+              key={branchName}
+              className="px-3 py-1 rounded-full bg-muted/20 text-foreground text-xs font-semibold"
+              data-testid="badge-staff-branch"
+            >
+              {branchName}
+            </div>
+          ))}
           <div className={`px-3 py-1 rounded-full text-xs font-semibold ${(profileUser as any).isActive !== false ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>
             {(profileUser as any).isActive !== false ? "Active" : "Inactive"}
           </div>
@@ -214,22 +236,12 @@ export default function StaffProfilePage() {
         </Card>
       </div>
 
-      {payrollSummary && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Financial Summary (This Month)</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-            <div><span className="text-muted-foreground">Basic</span><div className="font-semibold">{formatLkr(payrollSummary.basicSalary)}</div></div>
-            <div><span className="text-muted-foreground">Incentives</span><div className="font-semibold">{formatLkr(payrollSummary.incentiveTotal)}</div></div>
-            <div><span className="text-muted-foreground">Home Visits</span><div className="font-semibold">{formatLkr(payrollSummary.homeIncome)}</div></div>
-            <div><span className="text-muted-foreground">OT</span><div className="font-semibold">{formatLkr(payrollSummary.otIncome)}</div></div>
-            <div><span className="text-muted-foreground">Fines</span><div className="font-semibold">{formatLkr(payrollSummary.finesTotal)}</div></div>
-            <div><span className="text-muted-foreground">Extra Holidays</span><div className="font-semibold">{formatLkr(payrollSummary.extraHolidayDeduction)}</div></div>
-            <div className="col-span-2"><span className="text-muted-foreground">Final Salary</span><div className="font-bold text-lg">{formatLkr(payrollSummary.finalSalary)}</div></div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Bug 14/15/17: full salary breakdown with date range, PDF, and Admin/MD edit. */}
+      <SalaryDetailSection
+        staffId={staffId}
+        staffName={profileUser.name}
+        canEdit={["Admin", "MD"].includes(currentUser.role)}
+      />
 
       <Card className="bg-white border border-border/60 shadow-sm">
         <CardHeader>

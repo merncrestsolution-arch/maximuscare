@@ -52,9 +52,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <SidebarInset className="flex min-h-svh min-w-0 w-full flex-1 flex-col overflow-hidden">
         <Header
           before={
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 shrink-0">
               <PageBackButton />
-              <SidebarTrigger className="-ml-1 text-white md:text-foreground" aria-label="Open menu" />
+              {/* Bug 1: fixed 40x40 touch target for the menu button so it doesn't render oversized on mobile. */}
+              <SidebarTrigger
+                className="-ml-1 h-10 w-10 shrink-0 text-white md:text-foreground [&_svg]:h-5 [&_svg]:w-5"
+                aria-label="Open menu"
+              />
             </div>
           }
         />

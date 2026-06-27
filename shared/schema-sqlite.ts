@@ -204,6 +204,10 @@ export const attendance = sqliteTable("attendance", {
   checkOutTime: integer("check_out_time", { mode: "timestamp" }),
   overtimeHours: text("overtime_hours"),
   branch: text("branch"),
+  // Bug 6: real GPS coordinates captured from the device at check-in time.
+  latitude: text("latitude"),
+  longitude: text("longitude"),
+  locationLabel: text("location_label"),
   notes: text("notes"),
   attendanceDate: text("attendance_date"),
   remarks: text("remarks"),
@@ -362,6 +366,21 @@ export const updateInPatientExtraExpenseSchema = insertInPatientExtraExpenseSche
 export type InsertInPatientExtraExpense = z.infer<typeof insertInPatientExtraExpenseSchema>;
 export type UpdateInPatientExtraExpense = z.infer<typeof updateInPatientExtraExpenseSchema>;
 export type InPatientExtraExpense = typeof inPatientExtraExpenses.$inferSelect;
+
+// Bug 4: audit trail for in-patient branch transfers.
+export const patientTransferLogs = sqliteTable("patient_transfer_logs", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  admissionId: text("admission_id").notNull(),
+  patientName: text("patient_name"),
+  fromBranchId: text("from_branch_id"),
+  toBranchId: text("to_branch_id").notNull(),
+  transferDate: text("transfer_date").notNull(),
+  transferNote: text("transfer_note"),
+  transferredByStaffId: text("transferred_by_staff_id"),
+  transferredByName: text("transferred_by_name"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+export type PatientTransferLog = typeof patientTransferLogs.$inferSelect;
 
 // Expenses table
 export const expenses = sqliteTable("expenses", {

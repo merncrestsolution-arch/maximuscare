@@ -23,19 +23,23 @@ import {
 export default function ExpensesListPage() {
   const { user } = useAuth();
   const isMgmt = isManagementRole(user?.role);
+  // Bug 12: Managers / Branch Managers / Nexus MD can VIEW all branch expenses, but
+  // editing/deleting/adding stays with Admin & MD (view-only for branch leads).
+  const isBranchLead = ["Manager", "Branch Manager", "Nexus MD"].includes(user?.role || "");
+  const canSeeAllExpenses = isMgmt || isBranchLead;
   const today = new Date();
   const [startDate, setStartDate] = useState(format(startOfMonth(today), "yyyy-MM-dd"));
   const [endDate, setEndDate] = useState(format(endOfMonth(today), "yyyy-MM-dd"));
 
   const { data: mgmtExpenses = [], isLoading: loadingMgmt } = useExpenses(
     { startDate, endDate },
-    isMgmt
+    canSeeAllExpenses
   );
-  const { data: myExpenses = [], isLoading: loadingMine } = useMyExpenses(!isMgmt);
+  const { data: myExpenses = [], isLoading: loadingMine } = useMyExpenses(!canSeeAllExpenses);
   const deleteExpense = useDeleteExpense();
 
-  const expenses = isMgmt ? mgmtExpenses : myExpenses;
-  const isLoading = isMgmt ? loadingMgmt : loadingMine;
+  const expenses = canSeeAllExpenses ? mgmtExpenses : myExpenses;
+  const isLoading = canSeeAllExpenses ? loadingMgmt : loadingMine;
 
   const total = useMemo(
     () => expenses.reduce((sum: number, e: any) => sum + Number(e.amount || 0), 0),
@@ -46,14 +50,16 @@ export default function ExpensesListPage() {
     <div className="space-y-4 p-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Expenses</h1>
-        <Button asChild>
-          <Link href="/expenses/add">
-            <Plus className="h-4 w-4 mr-1" /> Add
-          </Link>
-        </Button>
+        {!isBranchLead && (
+          <Button asChild>
+            <Link href="/expenses/add">
+              <Plus className="h-4 w-4 mr-1" /> Add
+            </Link>
+          </Button>
+        )}
       </div>
 
-      {isMgmt && (
+      {canSeeAllExpenses && (
         <div className="flex flex-wrap gap-2">
           <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
@@ -84,7 +90,7 @@ export default function ExpensesListPage() {
                       {e.expenseDate} · LKR {Number(e.amount).toLocaleString()}
                       {e.description ? ` · ${e.description}` : ""}
                     </div>
-                    {isMgmt && (
+                    {canSeeAllExpenses && (
                       <div className="text-xs text-muted-foreground">By {e.createdByName}</div>
                     )}
                   </div>

@@ -52,13 +52,34 @@ export function canViewAllVisits(role: string | undefined): boolean {
   return hasPermission(role, "visits.view_all");
 }
 
+/**
+ * Roles allowed to edit ANY visit/session within their branch scope.
+ * Note: although "Staff" carries `visits.view_all` (so they can *see* the full
+ * visit list), normal staff and physiotherapists may only EDIT their own visits
+ * (Bug 13). Management + operational leads (Manager/Branch Manager/Nexus MD) may
+ * edit all visits in their branch (Bug 11).
+ */
+const EDIT_ALL_VISITS_ROLES = new Set([
+  "Admin",
+  "MD",
+  "Manager",
+  "Branch Manager",
+  "Nexus MD",
+  "Receptionist",
+]);
+
+export function canEditAllVisits(role: string | undefined): boolean {
+  return EDIT_ALL_VISITS_ROLES.has(String(role ?? "").trim());
+}
+
 export function canEditVisit(
   role: string | undefined,
   userStaffId: string,
   visit: { treatingStaffId: string; createdByStaffId: string }
 ): boolean {
-  if (hasPermission(role, "visits.view_all")) return true;
+  if (canEditAllVisits(role)) return true;
   if (hasPermission(role, "visits.manage")) {
+    // Staff / Physiotherapist: own visits only.
     return visit.treatingStaffId === userStaffId || visit.createdByStaffId === userStaffId;
   }
   return false;
