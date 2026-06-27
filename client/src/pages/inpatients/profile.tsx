@@ -128,8 +128,8 @@ export default function InPatientProfilePage() {
   // Bug 10: Managers / Branch Managers / Nexus MD may VIEW in-patient bills (branch-scoped,
   // read-only — no amount edits). Editing of amounts/caretaker rate stays Admin/MD only.
   const isBranchLead = ["Manager", "Branch Manager", "Nexus MD"].includes(user?.role || "");
-  // Bug 4: Admin/MD and branch leads can transfer an in-patient to another branch.
-  const canTransfer = isAdminMD || isBranchLead;
+  // Bug 4 (final spec): only Admin/MD may transfer an in-patient to another branch.
+  const canTransfer = isAdminMD;
   const canViewPayments = isAdminMD || isReceptionist || isBranchLead;
   /** Billing summary + billing PDF — Admin, MD, and branch leads (view-only for leads). */
   const canViewBillingSummary = isAdminMD || isBranchLead;

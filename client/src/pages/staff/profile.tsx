@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useRoute } from "wouter";
 import { addDays, format, parseISO } from "date-fns";
 import { useAuth } from "@/context/auth-context";
-import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange, useStaffStats, useBranches } from "@/hooks/useData";
+import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange, useStaffStats, useBranches, usePayrollReport } from "@/hooks/useData";
 import { BRANCH_OPTIONS } from "@/lib/branches";
 import { staffApi } from "@/lib/api";
 import { format as fmt, startOfMonth, endOfMonth } from "date-fns";
@@ -32,8 +32,13 @@ export default function StaffProfilePage() {
   const { data: staffAttendance = [] } = useAttendance({ staffId });
   const monthStart = fmt(startOfMonth(new Date()), "yyyy-MM-dd");
   const monthEnd = fmt(endOfMonth(new Date()), "yyyy-MM-dd");
+  const { data: payrollReport } = usePayrollReport({ startDate: monthStart, endDate: monthEnd, staffId }, !!staffId);
+  const payrollSummary = payrollReport?.summaries?.[0];
   const { data: hrmStats } = useStaffStats(staffId, { startDate: monthStart, endDate: monthEnd }, !!staffId);
   const [photoUploading, setPhotoUploading] = useState(false);
+  // Bug 17: the detailed breakdown is an additive panel, toggled on demand —
+  // the quick monthly summary below stays exactly as it was.
+  const [showSalaryDetail, setShowSalaryDetail] = useState(false);
 
   if (!match || !params || !currentUser) return null;
 
@@ -236,12 +241,35 @@ export default function StaffProfilePage() {
         </Card>
       </div>
 
-      {/* Bug 14/15/17: full salary breakdown with date range, PDF, and Admin/MD edit. */}
-      <SalaryDetailSection
-        staffId={staffId}
-        staffName={profileUser.name}
-        canEdit={["Admin", "MD"].includes(currentUser.role)}
-      />
+      {payrollSummary && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-base">Financial Summary (This Month)</CardTitle>
+            {/* Bug 17: opens the full date-ranged breakdown as a separate panel. */}
+            <Button size="sm" variant="outline" onClick={() => setShowSalaryDetail((v) => !v)} data-testid="button-toggle-salary-detail">
+              {showSalaryDetail ? "Hide Detail" : "Salary Detail"}
+            </Button>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><span className="text-muted-foreground">Basic</span><div className="font-semibold">{formatLkr(payrollSummary.basicSalary)}</div></div>
+            <div><span className="text-muted-foreground">Incentives</span><div className="font-semibold">{formatLkr(payrollSummary.incentiveTotal)}</div></div>
+            <div><span className="text-muted-foreground">Home Visits</span><div className="font-semibold">{formatLkr(payrollSummary.homeIncome)}</div></div>
+            <div><span className="text-muted-foreground">OT</span><div className="font-semibold">{formatLkr(payrollSummary.otIncome)}</div></div>
+            <div><span className="text-muted-foreground">Fines</span><div className="font-semibold">{formatLkr(payrollSummary.finesTotal)}</div></div>
+            <div><span className="text-muted-foreground">Extra Holidays</span><div className="font-semibold">{formatLkr(payrollSummary.extraHolidayDeduction)}</div></div>
+            <div className="col-span-2"><span className="text-muted-foreground">Final Salary</span><div className="font-bold text-lg">{formatLkr(payrollSummary.finalSalary)}</div></div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Bug 14/15/17: full date-ranged breakdown with PDF export and Admin/MD inline edit. */}
+      {showSalaryDetail && (
+        <SalaryDetailSection
+          staffId={staffId}
+          staffName={profileUser.name}
+          canEdit={["Admin", "MD"].includes(currentUser.role)}
+        />
+      )}
 
       <Card className="bg-white border border-border/60 shadow-sm">
         <CardHeader>
