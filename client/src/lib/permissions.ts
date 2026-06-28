@@ -86,8 +86,12 @@ export function canViewReports(role: string | undefined): boolean {
  * exclusion, which wrongly hid Reports from Staff and Receptionist.
  */
 export function canViewReportsHub(role: string | undefined): boolean {
+  // The Reports hub is the single place to view & download every report type
+  // (revenue, salary, incentive, attendance, expenses, sessions, unpaid,
+  // patient export, branch dashboards). It is available to every authenticated
+  // role; individual cards inside the hub still respect financial/salary gating.
   const r = String(role ?? "").trim();
-  return r.length > 0 && r !== "Admin" && r !== "MD";
+  return r.length > 0;
 }
 
 export function canExportPatients(role: string | undefined): boolean {
