@@ -45,7 +45,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     <SidebarProvider defaultOpen={!isTablet} className="min-h-svh w-full">
       <Sidebar
         collapsible="icon"
-        className="[&_[data-sidebar=sidebar]]:border-white/10 [&_[data-sidebar=sidebar]]:bg-black [&_[data-sidebar=sidebar]]:text-white [&_svg]:text-white [&_.text-sidebar-foreground]:text-white/95"
+        className="[&_[data-sidebar=sidebar]]:border-[var(--sidebar-border)] [&_[data-sidebar=sidebar]]:bg-[var(--sidebar-bg)] [&_[data-sidebar=sidebar]]:text-[var(--sidebar-text)] [&_svg]:text-white/80"
       >
         <AppSidebarNav />
       </Sidebar>

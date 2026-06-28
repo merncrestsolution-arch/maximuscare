@@ -215,8 +215,8 @@ export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
   const expenseBreakdown: ExpenseCategory[] = data?.expenseBreakdown?.byCategory ?? [];
   const expenseTotal: number = data?.expenseBreakdown?.total ?? kpis?.totalExpenses ?? 0;
   const chartData = buildChartData(org, comparison, kpis);
-  const incomeColor = isMaximus ? "#2563eb" : "#f59e0b";
-  const patientsColor = isMaximus ? "#9333ea" : "#d97706";
+  const incomeColor = isMaximus ? "#1873A8" : "#F45627";
+  const patientsColor = isMaximus ? "#105691" : "#EE862D";
 
   return (
     <PageShell
@@ -296,11 +296,11 @@ export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
                   <Tooltip formatter={chartTooltipFormatter} />
                   <Legend />
                   <Bar dataKey="income" name="Income" fill={incomeColor} />
-                  <Bar dataKey="expenses" name="Expenses" fill="#ef4444" />
-                  <Bar dataKey="revenue" name="Revenue" fill="#16a34a" />
+                  <Bar dataKey="expenses" name="Expenses" fill="#DC2626" />
+                  <Bar dataKey="revenue" name="Revenue" fill="#16A34A" />
                   <Bar dataKey="patients" name="Patients" fill={patientsColor} />
-                  <Bar dataKey="visits" name="Visits" fill="#0ea5e9" />
-                  <Bar dataKey="sessions" name="Sessions" fill="#64748b" />
+                  <Bar dataKey="visits" name="Visits" fill="#1873A8" />
+                  <Bar dataKey="sessions" name="Sessions" fill="#6495B6" />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>

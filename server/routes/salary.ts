@@ -18,6 +18,9 @@ import {
   getSalaryHistory,
   getSalaryExportRows,
 } from "../services/salaryService";
+import { loadPayrollSettings } from "../services/payrollService";
+import { loadBranchContext } from "../middleware/branchContext";
+import { normalizeBranchName } from "@shared/branches";
 
 const {
   insertStaffDeductionSchema,
@@ -50,6 +53,125 @@ export function registerSalaryRoutes(app: Express) {
       const preview = await previewSalary(storage, staffId, periodStart, periodEnd);
       if (!preview) return errorResponse(res, "Staff not found", 404);
       return successResponse(res, preview);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ── Salary detail breakdown (Bug 6) ──
+  // Full salary breakdown for the Reports page. Access:
+  //   • Staff / Physiotherapist → their OWN report only
+  //   • Manager / Branch Manager → any staff in their branch
+  //   • Admin / MD / Nexus MD → any staff
+  app.get("/api/staff/:id/salary/detail", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const role = String(user.role ?? "").trim();
+      const allowedRoles = [
+        "Admin",
+        "MD",
+        "Nexus MD",
+        "Manager",
+        "Branch Manager",
+        "Staff",
+        "Physiotherapist",
+      ];
+      if (!allowedRoles.includes(role)) {
+        return errorResponse(res, "Access denied", 403);
+      }
+
+      const targetId = param(req, "id");
+      // Staff / physiotherapists may only see their own breakdown.
+      if ((role === "Staff" || role === "Physiotherapist") && targetId !== user.staffId) {
+        return errorResponse(res, "Access denied", 403);
+      }
+
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) {
+        return errorResponse(res, "startDate and endDate are required", 400);
+      }
+
+      const preview = await previewSalary(storage, targetId, startDate, endDate);
+      if (!preview) return errorResponse(res, "Staff not found", 404);
+
+      // Branch leads are scoped to staff within their allowed branches.
+      if (role === "Manager" || role === "Branch Manager") {
+        const ctx = await loadBranchContext(req as any);
+        const allowedNames = new Set(
+          (ctx?.allowedBranches ?? []).map((b: any) =>
+            normalizeBranchName(b.branchName ?? b.name).toLowerCase()
+          )
+        );
+        const targetBranch = normalizeBranchName(preview.staff.branch ?? "").toLowerCase();
+        if (targetBranch && !allowedNames.has(targetBranch)) {
+          return errorResponse(res, "Access denied", 403);
+        }
+      }
+
+      const settings = await loadPayrollSettings(storage);
+      const s = preview.summary as any;
+
+      const colomboHolidayCount = Number(s.holidayHomeVisits || 0);
+      const colomboHomeTotal = Number(s.colomboHome || 0);
+      const colomboRegularCount = Math.max(0, colomboHomeTotal - colomboHolidayCount);
+      const otherHomeCount = Number(s.bandaragamaHome || 0);
+      const otherAdjustments = Number(s.otherAdjustments || 0);
+      const additionsAmount = Number(s.incentiveTotal || 0) + (otherAdjustments > 0 ? otherAdjustments : 0);
+      const staffDeductionsTotal = Number(s.staffDeductionsTotal || 0);
+      const otherDecrements = staffDeductionsTotal + (otherAdjustments < 0 ? Math.abs(otherAdjustments) : 0);
+
+      const breakdown = {
+        staff: {
+          id: preview.staff.id,
+          name: preview.staff.name,
+          role: preview.staff.role,
+          branch: preview.staff.branch,
+        },
+        period: { startDate, endDate },
+        basicSalary: Number(s.basicSalary || 0),
+        homeVisits: {
+          colomboRegular: {
+            count: colomboRegularCount,
+            rate: settings.homeColombo,
+            amount: colomboRegularCount * settings.homeColombo,
+          },
+          colomboHoliday: {
+            count: colomboHolidayCount,
+            rate: settings.holidayHome,
+            amount: Number(s.holidayHomeIncome || 0),
+          },
+          otherBranches: {
+            count: otherHomeCount,
+            rate: settings.homeBandaragama,
+            amount: otherHomeCount * settings.homeBandaragama,
+          },
+          total: Number(s.homeIncome || 0),
+        },
+        ot: {
+          hours: Number(s.totalOt || 0),
+          rate: settings.otPerHour,
+          amount: Number(s.otIncome || 0),
+        },
+        additions: {
+          incentives: Number(s.incentiveTotal || 0),
+          bonuses: otherAdjustments > 0 ? otherAdjustments : 0,
+          amount: additionsAmount,
+        },
+        deductions: {
+          fines: { amount: Number(s.finesTotal || 0) },
+          extraHolidays: {
+            days: Number(s.extraHolidays || 0),
+            rate: settings.extraHolidayDeduction,
+            amount: Number(s.extraHolidayDeduction || 0),
+          },
+          other: { amount: otherDecrements },
+          total: Number(s.finesTotal || 0) + Number(s.extraHolidayDeduction || 0) + otherDecrements,
+        },
+        finalSalary: Number(s.finalSalary || 0),
+      };
+
+      return successResponse(res, breakdown);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);
     }

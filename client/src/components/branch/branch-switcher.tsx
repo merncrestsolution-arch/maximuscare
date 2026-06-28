@@ -13,8 +13,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
+// Bug 7: on phones the branch trigger must shrink (and truncate its label) so it
+// never crowds out the logo/user identity or overflow the header. It keeps its
+// comfortable fixed width from the `md` breakpoint up.
 const triggerClasses = cn(
-  "flex h-11 min-w-[11rem] max-w-[14rem] items-center gap-2 rounded-lg border-2 border-[#c5c0b8]",
+  "flex h-11 min-w-0 max-w-[9rem] items-center gap-2 rounded-lg border-2 border-[#c5c0b8]",
+  "md:min-w-[11rem] md:max-w-[14rem]",
   "bg-white px-3 py-2 text-sm font-bold leading-none shadow-md",
   "text-[#1a2332] hover:bg-[#f5f5f3]",
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2d9d8b] focus-visible:ring-offset-2"
@@ -59,7 +63,7 @@ export function BranchSwitcher() {
         className={triggerClasses}
       >
         <Building2 className="h-4 w-4 shrink-0 text-[#1a2332]" />
-        <span className="shrink-0 whitespace-nowrap text-[#1a2332]">{selectedBranchName}</span>
+        <span className="truncate text-[#1a2332]">{selectedBranchName}</span>
       </button>
     );
   }
@@ -79,7 +83,7 @@ export function BranchSwitcher() {
             ) : (
               <Building2 className="h-4 w-4 shrink-0 text-[#1a2332]" aria-hidden />
             )}
-            <span className="shrink-0 whitespace-nowrap text-[#1a2332]">{workspaceLabel}</span>
+            <span className="truncate text-[#1a2332]">{workspaceLabel}</span>
             <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-[#1a2332]" aria-hidden />
           </button>
         </DropdownMenuTrigger>

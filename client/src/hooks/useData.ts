@@ -1007,6 +1007,19 @@ export function useSalaryApprovalActions() {
   };
 }
 
+// Bug 6: full salary breakdown for the Reports page salary section.
+export function useSalaryDetail(
+  staffId: string,
+  params: { startDate: string; endDate: string },
+  enabled = true
+) {
+  return useQuery({
+    queryKey: ['salary-detail', staffId, params],
+    queryFn: () => salaryApi.detail(staffId, params),
+    enabled,
+  });
+}
+
 export function useStaffDeductions(params?: { staffId?: string; startDate?: string; endDate?: string }) {
   return useQuery({
     queryKey: ['staff-deductions', params],

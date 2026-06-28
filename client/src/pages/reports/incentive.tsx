@@ -64,7 +64,7 @@ function IncentiveReportContent() {
                 <XAxis type="number" />
                 <YAxis type="category" dataKey="staffName" width={80} tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Bar dataKey="incentiveCount" fill="hsl(var(--primary))" name="Incentive Count" />
+                <Bar dataKey="incentiveCount" fill="#1873A8" name="Incentive Count" />
               </BarChart>
             </ResponsiveContainer>
           </div>

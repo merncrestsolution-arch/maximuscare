@@ -32,29 +32,33 @@ export function StatCard({
   className,
   testId,
 }: Props) {
-  const a = accentMap[accent];
   return (
     <Card
       className={cn(
-        "min-w-0 overflow-hidden border-l-4 shadow-sm hover:shadow-md transition-all duration-200 animate-in fade-in-0 slide-in-from-bottom-1",
-        a.border,
+        "min-w-0 overflow-hidden shadow-md hover:shadow-lg transition-all duration-200 animate-in fade-in-0 slide-in-from-bottom-1 text-white border-0",
         className,
       )}
+      style={{
+        background: "linear-gradient(135deg, #1873A8 0%, #105691 100%)"
+      }}
       data-testid={testId}
     >
       <CardContent className="p-4 sm:p-5">
+        {/* Accent line on stat card */}
+        <div className="w-10 h-1 bg-[#F45627] rounded-sm mb-3" />
+        
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-sm font-medium text-muted-foreground leading-snug">{title}</p>
-            <div className={cn("text-2xl sm:text-3xl font-extrabold tracking-tight tabular-nums", a.value)}>
+            <p className="text-[0.75rem] font-bold text-white/80 uppercase tracking-wider leading-snug">{title}</p>
+            <div className="text-2xl sm:text-3xl font-extrabold tracking-tight tabular-nums text-white">
               {value}
             </div>
             {subtitle && (
-              <div className="text-xs text-muted-foreground pt-0.5">{subtitle}</div>
+              <div className="text-xs text-white/70 pt-0.5">{subtitle}</div>
             )}
           </div>
           {icon && (
-            <div className={cn("shrink-0 rounded-xl p-2.5", a.icon)}>
+            <div className="shrink-0 rounded-xl p-2.5 bg-white/10 text-white">
               {icon}
             </div>
           )}

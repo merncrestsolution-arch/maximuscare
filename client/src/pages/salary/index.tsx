@@ -80,7 +80,7 @@ function SalaryHubContent() {
                     <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(v: number) => formatLkr(v)} />
-                    <Line type="monotone" dataKey="amount" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="amount" stroke="#1873A8" strokeWidth={2.5} dot={{ fill: '#F45627', r: 4 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -93,7 +93,7 @@ function SalaryHubContent() {
                     <XAxis dataKey="branch" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(v: number) => formatLkr(v)} />
-                    <Bar dataKey="amount" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="amount" fill="#1873A8" />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>

@@ -34,20 +34,23 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative flex min-h-dvh touch-manipulation flex-col bg-white px-safe safe-top">
+    <div
+      className="relative flex min-h-dvh touch-manipulation flex-col px-safe safe-top"
+      style={{ background: "linear-gradient(135deg, #105691 0%, #1873A8 60%, #1B7EB7 100%)" }}
+    >
       {loading && (
         <LoginStyleSplash message="Signing you in…" data-testid="login-loading-overlay" />
       )}
       <div className="flex flex-1 items-center justify-center p-4">
-      <Card className="w-full max-w-md overflow-hidden border-2 border-black bg-white shadow-lg">
+      <Card className="w-full max-w-md overflow-hidden border border-border/40 bg-white shadow-xl rounded-2xl">
         <CardHeader className="space-y-1 pb-2 text-center">
           <div className="mb-4 flex justify-center">
-            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border-2 border-black bg-white shadow-md">
+            <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-[#EEF5FB] bg-white shadow-md">
               <img src={logoUri} alt="Maximus Care logo" className="h-full w-full object-contain p-1" data-testid="img-logo" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold text-black">Maximus Care</CardTitle>
-          <CardDescription className="text-base text-black/80">Physio &amp; Rehab Unit Management</CardDescription>
+          <CardTitle className="text-2xl font-bold text-[#105691]">Maximus Care</CardTitle>
+          <CardDescription className="text-base text-muted-foreground">Physio &amp; Rehab Unit Management</CardDescription>
         </CardHeader>
         <CardContent className="pt-2">
           <form onSubmit={handleLogin} className="space-y-4">
@@ -58,7 +61,7 @@ export default function LoginPage() {
                 value={email} 
                 onChange={(e) => setEmail(e.target.value)}
                 required 
-                className="h-12 rounded-xl border-black/80 bg-white text-black placeholder:text-neutral-400"
+                className="h-12 rounded-xl border-[#6495B6] bg-white text-black placeholder:text-neutral-400"
                 data-testid="input-email"
               />
             </div>
@@ -68,7 +71,7 @@ export default function LoginPage() {
                 value={password} 
                 onChange={(e) => setPassword(e.target.value)}
                 required 
-                className="h-12 rounded-xl border-black/80 bg-white text-black placeholder:text-neutral-400"
+                className="h-12 rounded-xl border-[#6495B6] bg-white text-black placeholder:text-neutral-400"
                 data-testid="input-password"
               />
             </div>
@@ -79,8 +82,7 @@ export default function LoginPage() {
             )}
             <Button
               type="submit"
-              variant="outline"
-              className="h-12 w-full border-2 border-black bg-white text-base font-semibold text-black hover:bg-neutral-50"
+              className="h-12 w-full bg-[#F45627] hover:bg-[#D94020] text-base font-semibold text-white border-0 shadow-md rounded-xl transition-colors duration-150"
               disabled={loading}
               data-testid="button-login"
             >

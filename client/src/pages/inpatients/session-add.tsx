@@ -44,6 +44,7 @@ export default function AddInPatientSessionPage() {
   });
 
   const { data: nextSessionData } = useNextSessionNumber(admissionId, formData.sessionDate);
+  const [errors, setErrors] = useState<{ treatmentProvided?: string }>({});
 
   // Use the same clinical-staff resolver as the outpatient flow so physiotherapists
   // (which in this clinic are often stored under the "Staff" role) are listed, with a
@@ -72,6 +73,7 @@ export default function AddInPatientSessionPage() {
       return;
     }
     if (!formData.treatmentProvided.trim()) {
+      setErrors((prev) => ({ ...prev, treatmentProvided: "Treatment provided is required" }));
       toast({ title: "Error", description: "Treatment provided is required", variant: "destructive" });
       return;
     }
@@ -236,11 +238,19 @@ export default function AddInPatientSessionPage() {
             <Textarea
               id="treatmentProvided"
               value={formData.treatmentProvided}
-              onChange={(e) => updateField("treatmentProvided", e.target.value)}
+              onChange={(e) => {
+                updateField("treatmentProvided", e.target.value);
+                if (errors.treatmentProvided) setErrors((prev) => ({ ...prev, treatmentProvided: undefined }));
+              }}
               placeholder="Describe the treatment provided..."
               rows={3}
+              style={{ borderColor: errors.treatmentProvided ? "red" : undefined }}
+              aria-invalid={!!errors.treatmentProvided}
               data-testid="input-treatment"
             />
+            {errors.treatmentProvided && (
+              <p style={{ color: "red", fontSize: "0.75rem", marginTop: "4px" }}>{errors.treatmentProvided}</p>
+            )}
           </div>
 
           <div className="space-y-2">

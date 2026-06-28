@@ -86,6 +86,19 @@ export default function Dashboard() {
   const { data: revenueSummary, isLoading: loadingRevenue } = useRevenueSummary(dateParams, showFinancialDashboard);
   const { data: expenses = [], isLoading: loadingExpenses } = useExpenses(dateParams, showFinancialDashboard);
   const { data: dashboardKpis, isLoading: loadingKpis } = useDashboardKpis(dateParams, showFinancialDashboard || showManagerDashboard);
+
+  // Bug 8 diagnostics: log the Revenue Trend payload received from the API so an
+  // empty chart can be traced to data vs. rendering. Remove once verified.
+  useEffect(() => {
+    if (!dashboardKpis) return;
+    const trend = dashboardKpis?.charts?.revenueTrend;
+    console.log("[RevenueTrend] data received:", {
+      dateParams,
+      length: trend?.length ?? 0,
+      nonZero: (trend ?? []).filter((d: any) => Number(d.revenue) > 0).length,
+      sample: (trend ?? []).slice(0, 3),
+    });
+  }, [dashboardKpis]);
   
   // My expenses hook (for staff to view their own expenses)
   const { data: myExpenses = [], isLoading: loadingMyExpenses } = useMyExpenses(isStaff);
@@ -340,7 +353,7 @@ export default function Dashboard() {
                         <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                         <YAxis tick={{ fontSize: 11 }} width={48} />
                         <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                        <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" dot={{ r: 2 }} />
+                        <Line type="monotone" dataKey="revenue" stroke="#1873A8" strokeWidth={2.5} dot={{ fill: '#F45627', r: 4 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   )}
@@ -356,10 +369,10 @@ export default function Dashboard() {
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="present" stackId="a" fill="#22c55e" />
-                      <Bar dataKey="absent" stackId="a" fill="#ef4444" />
-                      <Bar dataKey="leave" stackId="a" fill="#3b82f6" />
-                      <Bar dataKey="holiday" stackId="a" fill="#f59e0b" />
+                      <Bar dataKey="present" stackId="a" fill="#16A34A" />
+                      <Bar dataKey="absent" stackId="a" fill="#DC2626" />
+                      <Bar dataKey="leave" stackId="a" fill="#1873A8" />
+                      <Bar dataKey="holiday" stackId="a" fill="#EE862D" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -374,9 +387,9 @@ export default function Dashboard() {
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="clinic" stackId="v" fill="#2563eb" name="Clinic" />
-                      <Bar dataKey="home" stackId="v" fill="#16a34a" name="Home" />
-                      <Bar dataKey="sessions" stackId="v" fill="#f59e0b" name="Sessions" />
+                      <Bar dataKey="clinic" stackId="v" fill="#1873A8" name="Clinic" />
+                      <Bar dataKey="home" stackId="v" fill="#16A34A" name="Home" />
+                      <Bar dataKey="sessions" stackId="v" fill="#EE862D" name="Sessions" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -390,7 +403,7 @@ export default function Dashboard() {
                       <XAxis dataKey="branch" />
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                      <Bar dataKey="revenue" fill="hsl(var(--primary))" />
+                      <Bar dataKey="revenue" fill="#1873A8" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -424,7 +437,7 @@ export default function Dashboard() {
                     cursor={{ fill: 'transparent' }}
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
                   />
-                  <Bar dataKey="visits" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="visits" fill="#1873A8" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -477,10 +490,10 @@ export default function Dashboard() {
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="present" stackId="a" fill="#22c55e" />
-                      <Bar dataKey="absent" stackId="a" fill="#ef4444" />
-                      <Bar dataKey="leave" stackId="a" fill="#3b82f6" />
-                      <Bar dataKey="holiday" stackId="a" fill="#f59e0b" />
+                      <Bar dataKey="present" stackId="a" fill="#16A34A" />
+                      <Bar dataKey="absent" stackId="a" fill="#DC2626" />
+                      <Bar dataKey="leave" stackId="a" fill="#1873A8" />
+                      <Bar dataKey="holiday" stackId="a" fill="#EE862D" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -495,9 +508,9 @@ export default function Dashboard() {
                       <YAxis tick={{ fontSize: 10 }} />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="clinic" stackId="v" fill="#2563eb" name="Clinic" />
-                      <Bar dataKey="home" stackId="v" fill="#16a34a" name="Home" />
-                      <Bar dataKey="sessions" stackId="v" fill="#f59e0b" name="Sessions" />
+                      <Bar dataKey="clinic" stackId="v" fill="#1873A8" name="Clinic" />
+                      <Bar dataKey="home" stackId="v" fill="#16A34A" name="Home" />
+                      <Bar dataKey="sessions" stackId="v" fill="#EE862D" name="Sessions" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -514,7 +527,7 @@ export default function Dashboard() {
                   <XAxis dataKey="name" stroke="#888888" fontSize={10} tickLine={false} axisLine={false} />
                   <YAxis stroke="#888888" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${value}`} />
                   <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                  <Bar dataKey="visits" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="visits" fill="#1873A8" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>

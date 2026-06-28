@@ -52,6 +52,7 @@ export default function NewVisit() {
   });
 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ treatment?: string }>({});
   // Keep the branch field aligned with the active branch context until the user
   // changes it manually (the active branch can load after this form mounts).
   const branchTouchedRef = useRef(false);
@@ -120,6 +121,12 @@ export default function NewVisit() {
     try {
       if (!formData.branch) {
         toast({ title: "Branch is required", variant: "destructive" });
+        return;
+      }
+      // Bug 3: "Treatment provided" is mandatory.
+      if (!formData.treatment || formData.treatment.trim() === "") {
+        setErrors((prev) => ({ ...prev, treatment: "Treatment provided is required" }));
+        toast({ title: "Treatment provided is required", variant: "destructive" });
         return;
       }
       // Find name for selected treating staff ID
@@ -287,13 +294,21 @@ export default function NewVisit() {
             </div>
 
             <div className="space-y-3">
-              <Label className="text-base font-semibold">Treatment Provided</Label>
+              <Label className="text-base font-semibold">Treatment Provided <span className="text-red-500">*</span></Label>
               <Textarea 
                 placeholder="Details of therapy..."
                 value={formData.treatment}
-                onChange={(e) => setFormData({...formData, treatment: e.target.value})}
+                onChange={(e) => {
+                  setFormData({...formData, treatment: e.target.value});
+                  if (errors.treatment) setErrors((prev) => ({ ...prev, treatment: undefined }));
+                }}
                 className="min-h-[120px] text-base bg-card p-4 leading-relaxed"
+                style={{ borderColor: errors.treatment ? "red" : undefined }}
+                aria-invalid={!!errors.treatment}
               />
+              {errors.treatment && (
+                <p style={{ color: "red", fontSize: "0.75rem", marginTop: "4px" }}>{errors.treatment}</p>
+              )}
             </div>
 
             <div className="space-y-3">

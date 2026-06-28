@@ -39,6 +39,7 @@ export default function EditVisit() {
 
   const [formData, setFormData] = useState<any>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [errors, setErrors] = useState<{ treatment?: string }>({});
 
   // Re-populate whenever the loaded visit changes (incl. navigating directly
   // from one visit's edit page to another), keyed on the record id so a
@@ -113,6 +114,13 @@ export default function EditVisit() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
+
+    // Bug 3: "Treatment provided" is mandatory.
+    if (!formData.treatment || String(formData.treatment).trim() === "") {
+      setErrors((prev) => ({ ...prev, treatment: "Treatment provided is required" }));
+      toast({ title: "Treatment provided is required", variant: "destructive" });
+      return;
+    }
 
     try {
       const treatingStaff = staff.find(s => s.id === formData.treatingStaffId);
@@ -282,13 +290,21 @@ export default function EditVisit() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-semibold text-black">Treatment Provided</Label>
+              <Label className="text-sm font-semibold text-black">Treatment Provided <span className="text-red-500">*</span></Label>
               <Textarea
                 value={formData.treatment}
-                onChange={(e) => setFormData({...formData, treatment: e.target.value})}
+                onChange={(e) => {
+                  setFormData({...formData, treatment: e.target.value});
+                  if (errors.treatment) setErrors((prev) => ({ ...prev, treatment: undefined }));
+                }}
                 className="min-h-[100px] text-base bg-white border-gray-300 text-black p-3 leading-relaxed"
+                style={{ borderColor: errors.treatment ? "red" : undefined }}
+                aria-invalid={!!errors.treatment}
                 data-testid="input-edit-visit-treatment"
               />
+              {errors.treatment && (
+                <p style={{ color: "red", fontSize: "0.75rem", marginTop: "4px" }}>{errors.treatment}</p>
+              )}
             </div>
 
             <div className="space-y-2">

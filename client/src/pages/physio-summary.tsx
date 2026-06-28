@@ -309,7 +309,7 @@ function PhysioSummaryContent() {
         columns={summaryColumns}
         rows={summaryRows}
         logoUri={logoUri}
-        themeColor="#2563EB"
+        themeColor="#105691"
         meta={[
           { label: "From", value: rangeFrom },
           { label: "To", value: rangeTo },
@@ -633,7 +633,7 @@ function PhysioSummaryContent() {
                     reportTitle={`${s.name} Staff Report`}
                     fileBaseName={`staff-report-${s.name}-${rangeFrom}-to-${rangeTo}`}
                     logoUri={logoUri}
-                    themeColor="#2563EB"
+                    themeColor="#105691"
                     meta={[
                       { label: "Staff", value: s.name },
                       { label: "From", value: rangeFrom },

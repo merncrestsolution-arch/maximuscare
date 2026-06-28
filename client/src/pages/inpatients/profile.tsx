@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Loader2, Phone, MapPin, Calendar, User, Clock, Trash2, Edit, Pencil, Plus, CreditCard, Receipt } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
+import { formatMoney } from "@/lib/reportDatePresets";
 import { useToast } from "@/hooks/use-toast";
 import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense } from "@/lib/types";
 import {
@@ -470,12 +471,12 @@ export default function InPatientProfilePage() {
     { key: "amount", label: "Amount LKR" },
   ];
   const billingRows = [
-    { item: "Room Charges", quantity: String(stayDays), rate: String(amountPerDay), amount: String(roomCharges) },
-    { item: "Caretaker Charges", quantity: String(careTakerDays), rate: String(careTakerRate), amount: String(caretakerCharges) },
-    { item: "Extra Expenses", quantity: "-", rate: "-", amount: String(extraExpenseTotal) },
-    { item: "Grand Total", quantity: "-", rate: "-", amount: String(grandTotal) },
-    { item: "Total Paid", quantity: "-", rate: "-", amount: String(paymentTotal) },
-    { item: "Balance Due", quantity: "-", rate: "-", amount: String(balanceDue) },
+    { item: "Room Charges", quantity: String(stayDays), rate: formatMoney(amountPerDay), amount: formatMoney(roomCharges) },
+    { item: "Caretaker Charges", quantity: String(careTakerDays), rate: formatMoney(careTakerRate), amount: formatMoney(caretakerCharges) },
+    { item: "Extra Expenses", quantity: "-", rate: "-", amount: formatMoney(extraExpenseTotal) },
+    { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(grandTotal) },
+    { item: "Total Paid", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
+    { item: "Balance Due", quantity: "-", rate: "-", amount: formatMoney(balanceDue) },
   ];
 
   return (
@@ -658,7 +659,7 @@ export default function InPatientProfilePage() {
           columns={billingColumns}
           rows={billingRows}
           logoUri={logoUri}
-          themeColor="#0F766E"
+          themeColor="#105691"
           meta={[
             { label: "Patient", value: patient.patientName },
             { label: "Patient ID", value: patient.id },
@@ -682,42 +683,46 @@ export default function InPatientProfilePage() {
             </div>
           </div>
 
-          <div className="bg-blue-50 rounded-lg p-4" data-testid="billing-summary">
+          <div className="bg-[#EEF5FB] rounded-lg p-4" data-testid="billing-summary">
             <h3 className="font-semibold mb-3 flex items-center gap-2">
               <Receipt className="h-4 w-4" />
               Billing Summary
             </h3>
             {/* Bug 3: use a real table so description (left) and LKR amounts (right) stay
                 aligned across screen sizes and in print, instead of collapsing flex rows. */}
-            <table className="w-full text-sm border-collapse">
+            <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: "65%" }} />
+                <col style={{ width: "35%" }} />
+              </colgroup>
               <tbody>
                 <tr>
                   <td className="py-1 text-left text-muted-foreground align-top">Stay Days</td>
                   <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-stay-days">{stayDays} day{stayDays > 1 ? "s" : ""}</td>
                 </tr>
                 <tr>
-                  <td className="py-1 text-left text-muted-foreground align-top">Room Charges ({amountPerDay.toLocaleString()} × {stayDays})</td>
-                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-room-charges">LKR {roomCharges.toLocaleString()}</td>
+                  <td className="py-1 text-left text-muted-foreground align-top">Room Charges ({formatMoney(amountPerDay)} × {stayDays})</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-room-charges">LKR {formatMoney(roomCharges)}</td>
                 </tr>
                 <tr>
-                  <td className="py-1 text-left text-muted-foreground align-top">Caretaker Charges ({careTakerRate.toLocaleString()} × {careTakerDays})</td>
-                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-caretaker-charges">LKR {caretakerCharges.toLocaleString()}</td>
+                  <td className="py-1 text-left text-muted-foreground align-top">Caretaker Charges ({formatMoney(careTakerRate)} × {careTakerDays})</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-caretaker-charges">LKR {formatMoney(caretakerCharges)}</td>
                 </tr>
                 <tr>
                   <td className="py-1 text-left text-muted-foreground align-top">Extra Expenses</td>
-                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-extra-expenses-total">LKR {extraExpenseTotal.toLocaleString()}</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-extra-expenses-total">LKR {formatMoney(extraExpenseTotal)}</td>
                 </tr>
                 <tr className="border-t border-border/60">
                   <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
-                  <td className="pt-2 text-right font-bold whitespace-nowrap" data-testid="text-grand-total">LKR {grandTotal.toLocaleString()}</td>
+                  <td className="pt-2 text-right font-bold whitespace-nowrap" data-testid="text-grand-total">LKR {formatMoney(grandTotal)}</td>
                 </tr>
                 <tr>
                   <td className="py-1 text-left text-muted-foreground align-top">Total Paid</td>
-                  <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap" data-testid="text-total-paid">LKR {paymentTotal.toLocaleString()}</td>
+                  <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap" data-testid="text-total-paid">LKR {formatMoney(paymentTotal)}</td>
                 </tr>
                 <tr className="border-t border-border/60">
                   <td className="pt-2 text-left font-semibold align-top">Balance Due</td>
-                  <td className={`pt-2 text-right font-bold whitespace-nowrap ${balanceDue > 0 ? "text-red-600" : "text-green-700"}`} data-testid="text-balance-due">LKR {balanceDue.toLocaleString()}</td>
+                  <td className={`pt-2 text-right font-bold whitespace-nowrap ${balanceDue > 0 ? "text-red-600" : "text-green-700"}`} data-testid="text-balance-due">LKR {formatMoney(balanceDue)}</td>
                 </tr>
               </tbody>
             </table>
@@ -726,7 +731,11 @@ export default function InPatientProfilePage() {
           {discharge && (
             <div className="bg-blue-50 rounded-lg p-4" data-testid="discharge-summary">
               <h3 className="font-semibold mb-3">Discharge Summary</h3>
-              <table className="w-full text-sm border-collapse">
+              <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
+                <colgroup>
+                  <col style={{ width: "65%" }} />
+                  <col style={{ width: "35%" }} />
+                </colgroup>
                 <tbody>
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Discharge Date</td>
@@ -738,23 +747,23 @@ export default function InPatientProfilePage() {
                   </tr>
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Stay Amount</td>
-                    <td className="py-1 text-right font-medium whitespace-nowrap">LKR {discharge.stayAmount}</td>
+                    <td className="py-1 text-right font-medium whitespace-nowrap">LKR {formatMoney(Number(discharge.stayAmount))}</td>
                   </tr>
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Other Charges</td>
-                    <td className="py-1 text-right font-medium whitespace-nowrap">LKR {discharge.otherTotal}</td>
+                    <td className="py-1 text-right font-medium whitespace-nowrap">LKR {formatMoney(Number(discharge.otherTotal))}</td>
                   </tr>
                   <tr className="border-t border-border/60">
                     <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
-                    <td className="pt-2 text-right font-bold whitespace-nowrap">LKR {discharge.grandTotal}</td>
+                    <td className="pt-2 text-right font-bold whitespace-nowrap">LKR {formatMoney(Number(discharge.grandTotal))}</td>
                   </tr>
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Amount Paid</td>
-                    <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap">LKR {discharge.amountPaid}</td>
+                    <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap">LKR {formatMoney(Number(discharge.amountPaid))}</td>
                   </tr>
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Balance</td>
-                    <td className={`py-1 text-right font-medium whitespace-nowrap ${parseFloat(discharge.balance) > 0 ? "text-red-600" : "text-green-700"}`}>LKR {discharge.balance}</td>
+                    <td className={`py-1 text-right font-medium whitespace-nowrap ${parseFloat(discharge.balance) > 0 ? "text-red-600" : "text-green-700"}`}>LKR {formatMoney(Number(discharge.balance))}</td>
                   </tr>
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Payment Status</td>

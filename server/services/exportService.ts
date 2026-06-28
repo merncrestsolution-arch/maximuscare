@@ -47,21 +47,40 @@ export async function rowsToPdfBuffer(
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: columns.length > 5 ? "landscape" : "portrait" });
   const pageWidth = doc.internal.pageSize.getWidth();
-  let y = 14;
+  
+  // 1. Navy blue header band
+  doc.setFillColor(16, 86, 145); // #105691 (Blue Dark)
+  doc.rect(0, 0, pageWidth, 20, "F");
+  
+  // White title text
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
-  doc.text(title, 14, y);
-  y += 8;
+  doc.text(title, 14, 13);
+  
+  // 2. Orange accent line below
+  doc.setFillColor(244, 86, 39); // #F45627
+  doc.rect(0, 20, pageWidth, 3, "F");
+  
+  let y = 30;
   doc.setFontSize(8);
   const colWidth = (pageWidth - 28) / columns.length;
+  
+  // Column headers in Deep Navy
   doc.setFont("helvetica", "bold");
+  doc.setTextColor(16, 86, 145); // #105691
   columns.forEach((col, i) => doc.text(col.label, 14 + i * colWidth, y));
+  
   y += 5;
   doc.setFont("helvetica", "normal");
+  doc.setTextColor(51, 65, 85); // Slate-700
+  
   for (const row of rows) {
     if (y > doc.internal.pageSize.getHeight() - 12) {
       doc.addPage();
       y = 14;
     }
+    doc.setTextColor(51, 65, 85); // Slate-700 / Grey Dark
     columns.forEach((col, i) => {
       const text = String(row[col.key] ?? "").slice(0, 24);
       doc.text(text, 14 + i * colWidth, y);

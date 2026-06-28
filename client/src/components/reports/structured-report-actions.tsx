@@ -48,7 +48,7 @@ export function StructuredReportActions({
   rows,
   meta = [],
   logoUri,
-  themeColor = "#2D9D8B",
+  themeColor = "#105691",
 }: StructuredReportActionsProps) {
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);

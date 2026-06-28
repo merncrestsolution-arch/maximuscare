@@ -769,6 +769,11 @@ export const salaryApi = {
     const q = new URLSearchParams(params);
     return apiRequest<any>(`/salary/preview?${q.toString()}`).then(unwrapApiData);
   },
+  // Bug 6: full salary breakdown for the Reports page (staff own / manager branch staff).
+  detail: (staffId: string, params: { startDate: string; endDate: string }) => {
+    const q = new URLSearchParams(params as Record<string, string>);
+    return apiRequest<any>(`/staff/${staffId}/salary/detail?${q.toString()}`).then(unwrapApiData);
+  },
   generate: (data: {
     staffId?: string;
     staffIds?: string[];

@@ -901,7 +901,7 @@ export default function AttendancePage() {
                 columns={attendanceColumns}
                 rows={toAttendanceRows(filteredMonthRecords)}
                 logoUri={logoUri}
-                themeColor="#2D9D8B"
+                themeColor="#105691"
                 meta={[
                   { label: "Month", value: monthLabel },
                   { label: "Staff", value: staffOptions.find((s) => s.id === (isManagement ? selectedStaffId : user.id))?.name ?? user.name },
@@ -944,7 +944,7 @@ export default function AttendancePage() {
             columns={attendanceColumns}
             rows={toAttendanceRows(myHistory)}
             logoUri={logoUri}
-            themeColor="#2D9D8B"
+            themeColor="#105691"
             meta={[
               { label: "Staff", value: user.name },
               { label: "Generated", value: reportGeneratedAt },
@@ -986,7 +986,7 @@ export default function AttendancePage() {
               columns={attendanceColumns}
               rows={toAttendanceRows(allHistory)}
               logoUri={logoUri}
-              themeColor="#2D9D8B"
+              themeColor="#105691"
               meta={[
                 { label: "Month", value: selectedMonth },
                 { label: "Generated", value: reportGeneratedAt },

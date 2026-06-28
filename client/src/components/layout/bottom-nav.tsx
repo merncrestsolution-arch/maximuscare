@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Users, CalendarCheck, CalendarDays, Plus, UserCircle, BarChart3 } from "lucide-react";
+import { LayoutDashboard, Users, CalendarCheck, CalendarDays, Plus, BarChart3 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { QuickAddSheet } from "@/components/layout/quick-add-sheet";
 import { useNavigateHome } from "@/hooks/use-navigate-home";
-import { canViewStaffList } from "@/lib/permissions";
+import { canViewReportsHub } from "@/lib/permissions";
 
 const navIconProps = { className: "h-5 w-5 shrink-0", strokeWidth: 2.25 as const };
 
@@ -26,18 +26,18 @@ function NavItem({
   return (
     <Link href={href} onClick={onClick} className="flex min-w-0 flex-1 justify-center touch-manipulation">
       <div
-        className="relative flex max-w-full flex-col items-center justify-end gap-0.5 pb-0.5 text-white/90 transition-colors"
+        className="relative flex max-w-full flex-col items-center justify-end gap-0.5 pb-0.5 transition-colors"
         data-testid={testId}
       >
-        <div className={`shrink-0 ${active ? "text-white" : "text-white/85"}`}>{icon}</div>
+        <div className={`shrink-0 ${active ? "text-[#F45627]" : "text-white/80"}`}>{icon}</div>
         <span
-          className={`max-w-full truncate px-0.5 text-center text-xs font-semibold leading-tight text-white ${active ? "" : "text-white/80"}`}
+          className={`max-w-full truncate px-0.5 text-center text-xs font-semibold leading-tight ${active ? "text-[#F45627]" : "text-white/80"}`}
         >
           {label}
         </span>
         {active && (
           <div
-            className="absolute bottom-0 h-0.5 w-6 rounded-full bg-white"
+            className="absolute bottom-0 h-0.5 w-6 rounded-full bg-[#F45627]"
             data-testid={`${testId}-active`}
           />
         )}
@@ -70,16 +70,12 @@ export default function BottomNav() {
 
   if (isEditOrNew) return null;
 
-  const staffHref = canViewStaffList(user.role) ? "/staff" : "/profile";
-  const staffLabel = canViewStaffList(user.role) ? "Staff" : "Profile";
-  const staffActive = isActive("/staff") || isActive("/profile");
-
   return (
     <>
       <QuickAddSheet open={openQuickAdd} onOpenChange={setOpenQuickAdd} />
 
       <div
-        className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-black text-white safe-area-bottom border-t border-white/15 pb-2 pt-1.5 shadow-[0_-4px_24px_rgba(0,0,0,0.35)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]"
+        className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-[#105691] text-white safe-area-bottom border-t border-white/10 pb-2 pt-1.5 shadow-[0_-4px_24px_rgba(16,86,145,0.3)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]"
         data-testid="nav-bottom"
       >
         <div className="flex min-h-[3.5rem] min-w-0 items-end justify-between gap-0.5 px-1">
@@ -119,16 +115,17 @@ export default function BottomNav() {
             </button>
           </div>
 
-          {user.role !== "Receptionist" && (
+          {canViewReportsHub(user.role) && (
             <NavItem
-              // Bug 19: Admin/MD don't use Reports — route them (and physio/staff) to Salary.
-              href={["Physiotherapist", "Staff", "Admin", "MD"].includes(user.role) ? "/salary" : "/reports"}
+              // Salary now lives inside the Reports hub (Salary Report), so the bottom
+              // nav exposes a single "Reports" entry for every role that can view it.
+              href="/reports"
               active={
                 location.startsWith("/reports") ||
                 location.startsWith("/salary") ||
                 isActive("/physio-summary")
               }
-              label={["Physiotherapist", "Staff", "Admin", "MD"].includes(user.role) ? "Salary" : "Reports"}
+              label="Reports"
               icon={<BarChart3 {...navIconProps} />}
               testId="link-nav-reports"
             />
@@ -140,14 +137,6 @@ export default function BottomNav() {
             label="Attendance"
             icon={<CalendarCheck {...navIconProps} />}
             testId="link-nav-attendance"
-          />
-
-          <NavItem
-            href={staffHref}
-            active={staffActive}
-            label={staffLabel}
-            icon={<UserCircle {...navIconProps} />}
-            testId="link-nav-staff"
           />
         </div>
       </div>

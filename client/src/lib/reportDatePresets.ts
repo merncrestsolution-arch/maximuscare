@@ -52,3 +52,15 @@ export const DATE_PRESET_LABELS: { id: DatePreset; label: string }[] = [
 export function formatLkr(amount: number) {
   return new Intl.NumberFormat("en-LK", { style: "currency", currency: "LKR", minimumFractionDigits: 0 }).format(amount);
 }
+
+/**
+ * Bug 1: bill/invoice amounts must always show exactly 2 decimal places so the
+ * amount column stays aligned. Returns a thousands-separated value WITHOUT the
+ * currency symbol (callers that show a "LKR" label prefix it themselves).
+ */
+export function formatMoney(amount: number) {
+  return new Intl.NumberFormat("en-LK", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}

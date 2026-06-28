@@ -55,7 +55,7 @@ function PatientDashboardContent() {
                 <XAxis dataKey="branch" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Bar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" fill="#1873A8" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

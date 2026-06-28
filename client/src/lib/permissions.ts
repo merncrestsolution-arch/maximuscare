@@ -70,19 +70,24 @@ export function canAccessNexusOverview(role: string | undefined): boolean {
 }
 
 export function canViewReports(role: string | undefined): boolean {
+  // Report-backed screens (attendance, sessions, patient dashboard, home visits,
+  // unpaid visits) are reachable by every authenticated operational role. Admin/MD
+  // reach them directly from their dashboards; Manager/Staff/Receptionist reach them
+  // via the Reports hub. Card-level financial filtering happens inside each page.
   const r = String(role ?? "").trim();
-  return r !== "Receptionist" && r !== "Staff";
+  return r.length > 0;
 }
 
 /**
- * Bug 19: the Reports hub page + nav item are hidden from Admin and MD (they use the
- * dashboards/overviews instead). This is intentionally narrower than `canViewReports`
- * so individual report-backed screens (patient dashboard, home visits, session report)
- * remain reachable for Admin/MD.
+ * The Reports hub page + nav item are hidden from Admin and MD only (they use the
+ * dashboards/overviews instead). Every other operational role — Manager, Staff,
+ * Receptionist, Physiotherapist, Branch Manager, Nexus MD — sees the hub. Bug 4:
+ * the previous implementation inherited `canViewReports`' Receptionist/Staff
+ * exclusion, which wrongly hid Reports from Staff and Receptionist.
  */
 export function canViewReportsHub(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
-  return canViewReports(r) && r !== "Admin" && r !== "MD";
+  return r.length > 0 && r !== "Admin" && r !== "MD";
 }
 
 export function canExportPatients(role: string | undefined): boolean {
@@ -92,6 +97,22 @@ export function canExportPatients(role: string | undefined): boolean {
 
 export function canViewManagementReports(role: string | undefined): boolean {
   return isManagementRole(role);
+}
+
+/**
+ * Bug 5: branch leads (Manager / Branch Manager / Nexus MD) can VIEW expense
+ * reports for their branch, mirroring the Expenses module's view-only access
+ * (`canSeeAllExpenses`). Editing/deleting stays with Admin & MD. Staff are
+ * excluded because they only see their own expenses, not branch-wide reports.
+ */
+export function canViewExpenseReports(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return (
+    isManagementRole(r) ||
+    r === "Manager" ||
+    r === "Branch Manager" ||
+    r === "Nexus MD"
+  );
 }
 
 export function canManageSettings(role: string | undefined): boolean {

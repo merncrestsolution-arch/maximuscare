@@ -47,6 +47,7 @@ import AttendanceReportPage from "@/pages/reports/attendance-report";
 import ExpenseReportPage from "@/pages/reports/expense-report";
 import UnpaidVisitsPage from "@/pages/reports/unpaid-visits";
 import StaffReportPage from "@/pages/reports/staff-report";
+import SalaryReportPage from "@/pages/reports/salary-report";
 import SettingsPage from "@/pages/settings/index";
 import AuditLogPage from "@/pages/audit/index";
 import ExpensesListPage from "@/pages/expenses/list";
@@ -202,6 +203,9 @@ function Router() {
       </Route>
       <Route path="/reports/sessions">
         <ProtectedRoute component={SessionReportPage} />
+      </Route>
+      <Route path="/reports/salary">
+        <ProtectedRoute component={SalaryReportPage} />
       </Route>
       <Route path="/physio-summary">
         <ProtectedRoute component={PhysioSummaryPage} />

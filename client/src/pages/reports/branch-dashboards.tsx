@@ -53,10 +53,10 @@ function BranchDashboardsContent() {
               <YAxis />
               <Tooltip />
               <Legend />
-              <Bar dataKey="clinicVisits" name="Clinic visits" fill="#2563eb" />
-              <Bar dataKey="homeVisits" name="Home visits" fill="#16a34a" />
-              <Bar dataKey="sessions" name="IP sessions" fill="#f59e0b" />
-              <Bar dataKey="revenue" name="Revenue (LKR)" fill="#8b5cf6" />
+              <Bar dataKey="clinicVisits" name="Clinic visits" fill="#1873A8" />
+              <Bar dataKey="homeVisits" name="Home visits" fill="#16A34A" />
+              <Bar dataKey="sessions" name="IP sessions" fill="#F45627" />
+              <Bar dataKey="revenue" name="Revenue (LKR)" fill="#105691" />
             </BarChart>
           </ResponsiveContainer>
           </>

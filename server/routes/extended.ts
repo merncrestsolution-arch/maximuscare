@@ -451,9 +451,21 @@ export function registerExtendedRoutes(app: Express) {
       const explicitFilter = ctx?.selectedBranchName;
       const branchFilter = explicitFilter || (ctx?.allowedBranches ? ctx.allowedBranches.map((b: any) => b.branchName ?? b.name) : null);
       const cacheKey = `dashboard:${startDate}:${endDate}:${user.staffId}:${explicitFilter ?? "none"}`;
+      // Bug 8 diagnostics: trace who is calling, the resolved date range, and the
+      // branch scope so an empty Revenue Trend can be pinpointed. Remove once verified.
+      console.log("[RevenueTrend] dashboard-kpis called by:", {
+        userId: user?.staffId,
+        role: user?.role,
+        startDate,
+        endDate,
+        branchFilter,
+      });
       const kpis = await cacheGetOrSet(cacheKey, 120, () =>
         computeDashboardKpis(storage, startDate, endDate, staffFilter, branchFilter)
       );
+      console.log("[RevenueTrend] points:", kpis?.charts?.revenueTrend?.length ?? 0,
+        "non-zero:", (kpis?.charts?.revenueTrend ?? []).filter((d: any) => Number(d.revenue) > 0).length,
+        "sample:", (kpis?.charts?.revenueTrend ?? []).slice(0, 3));
       return successResponse(res, kpis);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);

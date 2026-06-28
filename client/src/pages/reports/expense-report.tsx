@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canViewManagementReports, isManagementRole } from "@/lib/permissions";
+import { canViewExpenseReports, isManagementRole } from "@/lib/permissions";
 import { useExpenseReport, useDeleteExpense } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
@@ -92,7 +92,7 @@ function ExpenseReportContent() {
 
 export default function ExpenseReportPage() {
   return (
-    <RoleProtectedRoute allowed={canViewManagementReports}>
+    <RoleProtectedRoute allowed={canViewExpenseReports}>
       <ExpenseReportContent />
     </RoleProtectedRoute>
   );

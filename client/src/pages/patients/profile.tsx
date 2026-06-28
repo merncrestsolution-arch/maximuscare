@@ -34,6 +34,28 @@ import { isManagementRole, isManager, isBranchManager, isNexusManagingDirector, 
 import { Banknote, Plus } from "lucide-react";
 import { openAuthenticatedFile, patientsApiExtended } from "@/lib/api";
 
+/**
+ * Bug 2: visits store a Sri Lanka clinic-time "HH:mm" string (startTime). Render it
+ * in 12-hour form so the visit history shows the time, not just the date.
+ */
+function formatClinicTime(time?: string | null): string {
+  if (!time) return "";
+  const [hRaw, mRaw] = String(time).split(":");
+  const hour = Number(hRaw);
+  const minute = Number(mRaw);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return "";
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${String(h12).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${ampm}`;
+}
+
+/** Combined "15 Jun 2025, 09:30 AM" label for a visit's date + start time. */
+function formatVisitDateTime(visitDate: string, startTime?: string | null): string {
+  const datePart = format(new Date(visitDate), "dd MMM yyyy");
+  const timePart = formatClinicTime(startTime);
+  return timePart ? `${datePart}, ${timePart}` : datePart;
+}
+
 export default function PatientProfile() {
   const [match, params] = useRoute("/patients/:id");
   const [, setLocation] = useLocation();
@@ -87,7 +109,7 @@ export default function PatientProfile() {
   const patientVisits = allVisits
     .sort((a: any, b: any) => new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime());
   const visitColumns = [
-    { key: "date", label: "Date" },
+    { key: "date", label: "Date & Time" },
     { key: "session", label: "Session" },
     { key: "condition", label: "Condition" },
     { key: "treatment", label: "Treatment" },
@@ -106,7 +128,7 @@ export default function PatientProfile() {
   const totalBalanceDue = patientVisits.reduce((sum: number, v: any) => sum + visitOutstanding(v), 0);
   const unpaidVisitCount = patientVisits.filter((v: any) => visitOutstanding(v) > 0).length;
   const visitRows = patientVisits.map((v: any) => ({
-    date: format(new Date(v.visitDate), "yyyy-MM-dd"),
+    date: formatVisitDateTime(v.visitDate, v.startTime),
     session: String(v.sessionNumber),
     condition: v.condition || "",
     treatment: v.treatment || "",
@@ -219,7 +241,7 @@ export default function PatientProfile() {
       </div>
 
       {/* Info Card */}
-      <Card className="bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20 shadow-none">
+      <Card className="bg-gradient-to-br from-[#1873A8]/5 to-[#1873A8]/10 border-[#1873A8]/20 shadow-none">
         <CardContent className="p-5 space-y-3">
           <div className="flex justify-between items-start">
             <div>
@@ -400,7 +422,7 @@ export default function PatientProfile() {
         columns={visitColumns}
         rows={visitRows}
         logoUri={logoUri}
-        themeColor="#7C3AED"
+        themeColor="#105691"
         meta={[
           { label: "Patient", value: patient.name },
           { label: "Patient ID", value: patient.id },
@@ -493,7 +515,8 @@ export default function PatientProfile() {
                       </button>
                     )}
                     <span className="text-xs font-medium text-muted-foreground bg-muted/10 px-2 py-1 rounded-md whitespace-nowrap">
-                      {format(new Date(visit.visitDate), 'dd MMM yyyy')}
+                      {formatVisitDateTime(visit.visitDate, (visit as any).startTime)}
+                      {(visit as any).endTime ? ` – ${formatClinicTime((visit as any).endTime)}` : ""}
                     </span>
                   </div>
                 </div>

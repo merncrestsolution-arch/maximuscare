@@ -76,10 +76,10 @@ function AttendanceReportContent() {
                 <YAxis />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="present" fill="#22c55e" name="Present" />
-                <Bar dataKey="absent" fill="#ef4444" name="Absent" />
-                <Bar dataKey="leave" fill="#3b82f6" name="Leave" />
-                <Bar dataKey="holiday" fill="#f59e0b" name="Holiday" />
+                <Bar dataKey="present" fill="#16A34A" name="Present" />
+                <Bar dataKey="absent" fill="#DC2626" name="Absent" />
+                <Bar dataKey="leave" fill="#1873A8" name="Leave" />
+                <Bar dataKey="holiday" fill="#EE862D" name="Holiday" />
               </BarChart>
             </ResponsiveContainer>
           </div>

@@ -6,49 +6,37 @@
    ============================================ */
 
 @theme inline {
-  /* Core palette - warm slate & sage.
-     NOTE: Tailwind v4 uses these --color-* tokens directly as color values
-     (and wraps them in color-mix() for opacity modifiers like text-foreground/70).
-     They MUST be complete colors — a bare HSL triple is invalid CSS and makes
-     opacity-modified text collapse to transparent ("ghost text"). Keep hsl(). */
-  --color-background: hsl(40 20% 98%);           /* Warm off-white #FAFAF8 */
-  --color-foreground: hsl(220 25% 12%);          /* Deep slate #1A2332 */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
   
-  --color-card: hsl(0 0% 100%);                  /* Pure white cards */
-  --color-card-foreground: hsl(220 25% 12%);
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
   
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(220 25% 12%);
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
   
-  /* Primary - trusted teal (healthcare) */
-  --color-primary: hsl(174 58% 39%);             /* #2D9D8B - Calm teal */
-  --color-primary-foreground: hsl(0 0% 100%);
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
   
-  /* Secondary - warm coral accent */
-  --color-secondary: hsl(12 76% 61%);            /* #E07B5B - Warm coral */
-  --color-secondary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
   
-  /* Muted - soft sage gray */
-  --color-muted: hsl(40 15% 92%);               /* #EBE9E4 */
-  --color-muted-foreground: hsl(220 15% 45%);    /* #5C6B7A */
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
   
-  /* Accent - soft teal tint */
-  --color-accent: hsl(174 40% 94%);              /* #E8F5F3 */
-  --color-accent-foreground: hsl(174 58% 29%);
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
   
-  /* Semantic */
-  --color-destructive: hsl(0 72% 51%);           /* #E53935 */
+  --color-destructive: hsl(0 72% 51%);
   --color-destructive-foreground: hsl(0 0% 100%);
   
-  --color-success: hsl(152 69% 40%);             /* #22C55E */
-  --color-warning: hsl(38 92% 50%);             /* #F59E0B */
+  --color-success: hsl(152 69% 40%);
+  --color-warning: hsl(38 92% 50%);
 
-  /* Borders & inputs */
-  --color-border: hsl(40 15% 88%);               /* #E2DFD9 */
-  --color-input: hsl(40 15% 88%);
-  --color-ring: hsl(174 58% 39%);
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
   
-  /* Radius scale - softer, friendlier */
   --radius-sm: 0.5rem;
   --radius-md: 0.625rem;
   --radius-lg: 0.875rem;
@@ -56,24 +44,22 @@
   --radius-2xl: 1.5rem;
   
   /* Sidebar */
-  --color-sidebar: hsl(0 0% 100%);
-  --color-sidebar-foreground: hsl(220 25% 12%);
-  --color-sidebar-accent: hsl(174 40% 94%);
-  --color-sidebar-accent-foreground: hsl(174 58% 29%);
-  --color-sidebar-border: hsl(40 15% 90%);
-  --color-sidebar-ring: hsl(174 58% 39%);
+  --color-sidebar: hsl(207 80% 32%);                   /* #105691 (Blue Dark) */
+  --color-sidebar-foreground: hsl(0 0% 100%);
+  --color-sidebar-accent: hsl(202 75% 38%);            /* #1873A8 (Blue Primary) */
+  --color-sidebar-accent-foreground: hsl(0 0% 100%);
+  --color-sidebar-border: hsla(0, 0%, 100%, 0.15);
+  --color-sidebar-ring: hsl(14 91% 55%);                /* #F45627 */
   
-  /* Component-specific */
-  --button-outline: 40 15% 80%;
-  --primary-border: 174 58% 35%;
-  --secondary-border: 12 76% 55%;
-  --destructive-border: 0 72% 45%;
-  --badge-outline: 40 15% 85%;
-  
-  /* Shadows - subtle depth */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.04);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+  /* Brand Specific Mapped Colors for Tailwind */
+  --color-brand-blue-dark: #105691;
+  --color-brand-blue-primary: #1873A8;
+  --color-brand-blue-mid: #1B7EB7;
+  --color-brand-blue-light: #6495B6;
+  --color-brand-blue-pale: #EEF5FB;
+  --color-brand-orange: #F45627;
+  --color-brand-orange-warm: #EE862D;
+  --color-brand-orange-light: #F19F39;
 }
 
 @layer base {
@@ -221,4 +207,165 @@
     stroke-dashoffset: -420;
   }
 }
+
+/* Bug 1/7: keep bills, invoices and report tables aligned when printed from the
+   browser. Amount columns stay right-aligned, columns keep explicit borders, and
+   anything marked .no-print / print:hidden is removed from the printout. */
+@media print {
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  td,
+  th {
+    padding: 6px 8px;
+    border: 1px solid #ddd;
+  }
+  th {
+    text-align: left;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
+   MAXIMUS CARE — BRAND THEME SYSTEM (CSS Overrides & Custom Classes)
+   ========================================================================== */
+
+/* Active Sidebar Overrides */
+[data-sidebar="sidebar"] [data-slot="sidebar-menu-button"][data-active="true"] {
+  background-color: var(--sidebar-active-bg) !important;
+  color: #FFFFFF !important;
+  border-left: 3.5px solid var(--color-orange-primary) !important;
+  font-weight: 600;
+  border-radius: 0 !important;
+}
+
+[data-sidebar="sidebar"] [data-slot="sidebar-menu-button"][data-active="true"] svg {
+  color: var(--color-orange-primary) !important;
+}
+
+/* Sidebar Logo Area and Nav Item general classes */
+.sidebar-logo-area {
+  padding: 20px 16px;
+  border-bottom: 1px solid var(--sidebar-border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  color: rgba(255,255,255,0.85);
+  font-size: 0.9rem;
+  font-weight: 500;
+  border-radius: 0;
+  transition: background-color var(--transition-fast);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sidebar-nav-item:hover {
+  background-color: var(--sidebar-hover-bg);
+  color: #FFFFFF;
+}
+
+/* Buttons */
+.btn-primary,
+button[type="submit"].btn-primary-accent {
+  background-color: var(--btn-primary-bg) !important;
+  color: var(--btn-primary-text) !important;
+  border: none !important;
+  border-radius: var(--btn-radius);
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), transform 100ms;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-primary:hover,
+button[type="submit"].btn-primary-accent:hover {
+  background-color: var(--btn-primary-hover) !important;
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background-color: transparent !important;
+  color: var(--color-blue-primary) !important;
+  border: 2px solid var(--color-blue-primary) !important;
+  border-radius: var(--btn-radius);
+  padding: 8px 18px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-height: 40px;
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-blue-pale) !important;
+  border-color: var(--color-blue-dark) !important;
+}
+
+.btn-ghost-brand {
+  background-color: transparent !important;
+  color: var(--color-blue-primary) !important;
+  border: none !important;
+  padding: 8px 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-ghost-brand:hover {
+  background-color: var(--color-blue-pale) !important;
+  border-radius: 6px;
+}
+
+/* Tables */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.data-table thead tr {
+  background-color: var(--table-header-bg);
+  color: var(--table-header-text);
+}
+
+.data-table thead th {
+  padding: 12px 14px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.data-table tbody tr:nth-child(even) {
+  background-color: var(--table-row-even);
+}
+
+.data-table tbody tr:hover {
+  background-color: var(--table-row-hover);
+}
+
+.data-table tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--table-border);
+  color: var(--color-black);
+  vertical-align: middle;
+}
+
 

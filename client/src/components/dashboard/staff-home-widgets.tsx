@@ -34,7 +34,7 @@ export function StaffHomeWidgets() {
 
   return (
     <div className="space-y-4">
-      <Card className="bg-gradient-to-br from-slate-900 to-slate-800 text-white border-0">
+      <Card className="bg-gradient-to-br from-[#105691] via-[#1873A8] to-[#1B7EB7] text-white border-0">
         <CardContent className="p-5 flex items-center gap-4">
           {(user as any).photoUri ? (
             <img src={(user as any).photoUri} alt="" className="h-14 w-14 rounded-full object-cover border-2 border-white/20" />

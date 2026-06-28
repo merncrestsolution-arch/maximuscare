@@ -1209,6 +1209,14 @@ export async function registerRoutes(
       if (!incoming.treatingStaffId) {
         return res.status(400).json({ message: "Staff assignment is required." });
       }
+      // Bug 3: "Treatment provided" is mandatory for every visit (clinic and home).
+      if (!incoming.treatment || String(incoming.treatment).trim() === "") {
+        return res.status(400).json({
+          success: false,
+          message: "Treatment provided is required",
+          field: "treatment",
+        });
+      }
       if (incoming.patientId) {
         const existing = await storage.getVisitsByPatient(String(incoming.patientId));
         incoming.sessionNumber = computeNextSessionNumber(existing.map((v) => v.sessionNumber));
@@ -1289,6 +1297,15 @@ export async function registerRoutes(
         delete (incoming as any).treatingStaffId;
         delete (incoming as any).treatingStaffName;
         delete (incoming as any).createdByStaffId;
+      }
+
+      // Bug 3: when the treatment field is being updated it may not be blanked out.
+      if (incoming.treatment !== undefined && String(incoming.treatment).trim() === "") {
+        return res.status(400).json({
+          success: false,
+          message: "Treatment provided is required",
+          field: "treatment",
+        });
       }
 
       const receivedPaymentAmount = incoming.paymentAmount;
@@ -2104,6 +2121,14 @@ export async function registerRoutes(
       }
 
       const sd = parsed.data;
+      // Bug 3: "Treatment provided" is mandatory for every in-patient session.
+      if (!sd.treatmentProvided || String(sd.treatmentProvided).trim() === "") {
+        return res.status(400).json({
+          success: false,
+          message: "Treatment provided is required",
+          field: "treatmentProvided",
+        });
+      }
       const treatingStaff = await storage.getStaff(sd.treatingStaffId);
       // Persist branch attribution so the session can be scoped/filtered by
       // organisation & branch. Admissions carry no branch, so the reliable
@@ -2163,6 +2188,14 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid data", errors: parsed.error.flatten() });
       }
       let patch: Record<string, unknown> = { ...parsed.data };
+      // Bug 3: when treatment is being updated it may not be blanked out.
+      if (patch.treatmentProvided !== undefined && String(patch.treatmentProvided).trim() === "") {
+        return res.status(400).json({
+          success: false,
+          message: "Treatment provided is required",
+          field: "treatmentProvided",
+        });
+      }
       // Never allow re-scoping a session across branch via raw body (RBAC server-side only).
       delete (patch as any).branchId;
       // Staff cannot reassign sessions to other clinicians.
