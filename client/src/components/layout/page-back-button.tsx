@@ -1,6 +1,5 @@
 import { ArrowLeft } from "lucide-react";
 import { useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
 
 /** Parent route fallbacks when browser history is empty. */
 function getFallbackParent(path: string): string {
@@ -19,6 +18,10 @@ function getFallbackParent(path: string): string {
   return "/dashboard";
 }
 
+/**
+ * Content-area back control. Lives at the top of the page body (not the header)
+ * so it's available on every page without crowding the brand header.
+ */
 export function PageBackButton() {
   const [location, setLocation] = useLocation();
 
@@ -31,15 +34,15 @@ export function PageBackButton() {
   };
 
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
-      size="icon"
       onClick={handleBack}
-      className="h-11 w-11 shrink-0 text-[#105691] hover:bg-[#EEF5FB] md:text-foreground md:hover:bg-muted"
+      className="group mb-3 inline-flex items-center gap-1.5 rounded-lg border border-[#D6E8F5] bg-white px-3 py-1.5 text-sm font-semibold text-[#105691] shadow-sm transition-all hover:border-[#1873A8] hover:bg-[#EEF5FB] active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1873A8]/40"
       aria-label="Go back"
+      data-testid="button-page-back"
     >
-      <ArrowLeft className="h-5 w-5" />
-    </Button>
+      <ArrowLeft className="h-4 w-4 shrink-0 transition-transform group-hover:-translate-x-0.5" />
+      Back
+    </button>
   );
 }

@@ -17,8 +17,11 @@ import {
   LayoutGrid,
   Sparkles,
   ScrollText,
+  LogOut,
+  ChevronRight,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
+import { useBranding } from "@/context/branding-context";
 import { useBranch } from "@/context/branch-context";
 import {
   canAccessMaximusOverview,
@@ -32,6 +35,7 @@ import { useNavigateHome } from "@/hooks/use-navigate-home";
 import { useGoToBranchSelect } from "@/hooks/use-go-to-branch-select";
 import {
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -42,15 +46,22 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { QuickAddSheet } from "./quick-add-sheet";
+import defaultLogo from "@assets/215e8e36-1d78-4eeb-b7c3-eb908ab749e8_1769436217800.jpeg";
 
 export function AppSidebarNav() {
   const [location, setLocation] = useLocation();
-  const { user } = useAuth();
-  const { selectedBranchId, selectedContext, selectContext } = useBranch();
+  const { user, logout } = useAuth();
+  const { logoUri } = useBranding();
+  const { selectedBranchId, selectedContext, selectContext, selectedBranchName } = useBranch();
   const { isMobile, setOpenMobile } = useSidebar();
   const [openQuickAdd, setOpenQuickAdd] = useState(false);
 
   if (!user) return null;
+
+  const initials = (user.name?.trim().split(/\s+/) ?? [])
+    .slice(0, 2)
+    .map((p) => p.charAt(0).toUpperCase())
+    .join("") || "U";
 
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false);
@@ -75,17 +86,36 @@ export function AppSidebarNav() {
   return (
     <>
       <QuickAddSheet open={openQuickAdd} onOpenChange={setOpenQuickAdd} />
-      <SidebarHeader className="border-b border-sidebar-border">
+      <SidebarHeader className="border-b border-white/10 p-2">
         <button
           type="button"
           onClick={() => {
             closeMobile();
             void goToBranchSelect();
           }}
-          className="flex w-full items-center gap-2 px-2 py-3 rounded-md text-left outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          className="group flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[#F45627]"
           aria-label="Choose branch or workspace"
         >
-          <span className="font-bold text-sidebar-foreground text-base">Maximus Care</span>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/20 bg-white p-1 shadow-sm">
+            <img
+              src={logoUri}
+              alt="Maximus Care logo"
+              className="max-h-full max-w-full object-contain"
+              onError={(e) => {
+                e.currentTarget.src = defaultLogo;
+              }}
+            />
+          </div>
+          <div className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate text-base font-extrabold tracking-tight">
+              <span className="text-white">Maximus</span>
+              <span className="text-[#F8B59B]"> Care</span>
+            </span>
+            <span className="flex items-center gap-1 truncate text-[0.7rem] font-medium text-white/60">
+              {selectedBranchName?.trim() || "Choose workspace"}
+              <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-hover:translate-x-0.5" />
+            </span>
+          </div>
         </button>
       </SidebarHeader>
       <SidebarContent className="touch-manipulation">
@@ -268,6 +298,34 @@ export function AppSidebarNav() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="border-t border-white/10 p-2">
+        <Link
+          href="/profile"
+          onClick={closeMobile}
+          className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-white/10"
+          data-testid="sidebar-user"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 text-sm font-bold text-white ring-2 ring-[#F45627]">
+            {initials}
+          </div>
+          <div className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate text-sm font-semibold text-white">{user.name}</span>
+            <span className="truncate text-[0.7rem] text-white/60">{user.role}</span>
+          </div>
+        </Link>
+        <button
+          type="button"
+          onClick={() => {
+            closeMobile();
+            logout();
+          }}
+          className="mt-1 flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-white/90 transition-colors hover:bg-[#DC2626] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F45627]"
+          data-testid="sidebar-logout"
+        >
+          <LogOut className="h-5 w-5 shrink-0" />
+          <span>Log out</span>
+        </button>
+      </SidebarFooter>
     </>
   );
 }

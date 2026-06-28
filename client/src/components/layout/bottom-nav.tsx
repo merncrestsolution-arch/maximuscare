@@ -17,6 +17,7 @@ import {
   Settings,
   Activity,
   LayoutGrid,
+  LogOut,
 } from "lucide-react";
 import { useAuth } from "@/context/auth-context";
 import { QuickAddSheet } from "@/components/layout/quick-add-sheet";
@@ -78,7 +79,7 @@ function NavItem({
 
 export default function BottomNav() {
   const [location] = useLocation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const goHome = useNavigateHome();
   const [openQuickAdd, setOpenQuickAdd] = useState(false);
   const [openMore, setOpenMore] = useState(false);
@@ -168,6 +169,20 @@ export default function BottomNav() {
                 </span>
               </Link>
             ))}
+          </div>
+          <div className="px-4 pb-[calc(env(safe-area-inset-bottom,16px)+16px)] pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setOpenMore(false);
+                logout();
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-sm font-semibold text-[#DC2626] transition-colors hover:bg-[#FEE2E2] active:scale-[0.99] touch-manipulation"
+              data-testid="more-nav-logout"
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              Log out
+            </button>
           </div>
         </DrawerContent>
       </Drawer>

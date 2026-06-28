@@ -14,6 +14,7 @@ import Header from "./header";
 import BottomNav from "./bottom-nav";
 import { AppSidebarNav } from "./app-sidebar-nav";
 import { useNotificationSocket } from "@/hooks/use-notification-socket";
+import { PageBackButton } from "./page-back-button";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const { user } = useAuth();
@@ -36,6 +37,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     location === "/visits/new";
     
   const showBottomNav = isMobile && !isEditOrNew;
+  // Back control on every page except the top-level landings (where "back" would
+  // otherwise jump to the branch-selection screen).
+  const isLandingPage = ["/dashboard", "/maximus-overview", "/nexus-overview"].includes(location);
+  const showBack = !isLandingPage;
 
   if (!user) {
     return <div className="flex min-h-screen w-full flex-col bg-background">{children}</div>;
@@ -69,6 +74,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             className="mx-auto w-full max-w-[1600px] min-w-0"
           >
+            {showBack && <PageBackButton />}
             {children}
           </motion.div>
         </div>

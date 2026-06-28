@@ -363,6 +363,43 @@
   color: var(--color-orange-primary) !important;
 }
 
+/* Smooth hover micro-interaction on sidebar items */
+[data-sidebar="sidebar"] [data-slot="sidebar-menu-button"] {
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease, border-color 160ms ease;
+}
+[data-sidebar="sidebar"] [data-slot="sidebar-menu-button"]:not([data-active="true"]):hover {
+  transform: translateX(3px);
+}
+
+/* Staggered entrance for the mobile sidebar drawer */
+@keyframes sidebar-item-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-header"],
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"],
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-footer"] {
+  animation: sidebar-item-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(1) { animation-delay: 40ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(2) { animation-delay: 70ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(3) { animation-delay: 100ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(4) { animation-delay: 130ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(5) { animation-delay: 160ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(6) { animation-delay: 190ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(7) { animation-delay: 220ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(8) { animation-delay: 250ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(9) { animation-delay: 280ms; }
+[data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"]:nth-child(n+10) { animation-delay: 310ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-header"],
+  [data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-menu-item"],
+  [data-sidebar="sidebar"][data-mobile="true"] [data-slot="sidebar-footer"] {
+    animation: none;
+  }
+}
+
 /* Sidebar Logo Area and Nav Item general classes */
 .sidebar-logo-area {
   padding: 20px 16px;

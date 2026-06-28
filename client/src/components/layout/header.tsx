@@ -3,8 +3,6 @@ import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
 import { useBranch } from "@/context/branch-context";
 import { useNavigateHome } from "@/hooks/use-navigate-home";
-import { LogOut } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { BranchSwitcher } from "@/components/branch/branch-switcher";
 import defaultLogo from "@assets/215e8e36-1d78-4eeb-b7c3-eb908ab749e8_1769436217800.jpeg";
@@ -19,7 +17,7 @@ function Wordmark({ className }: { className?: string }) {
 }
 
 export default function Header({ before }: { before?: ReactNode }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { logoUri } = useBranding();
   const { selectedBranchName } = useBranch();
   const goHome = useNavigateHome();
@@ -74,9 +72,6 @@ export default function Header({ before }: { before?: ReactNode }) {
               </span>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={logout} className="text-[#94A3B8] hover:text-[#DC2626] hover:bg-[#FEF2F2] rounded-lg h-10 w-10" aria-label="Log out" data-testid="button-logout-header">
-            <LogOut className="h-5 w-5" />
-          </Button>
         </div>
       </div>
 
@@ -103,9 +98,6 @@ export default function Header({ before }: { before?: ReactNode }) {
         <div className="flex items-center gap-0.5 shrink-0">
           <BranchSwitcher />
           <NotificationBell />
-          <Button variant="ghost" size="icon" onClick={logout} className="h-10 w-10 text-[#94A3B8] hover:text-[#DC2626] hover:bg-[#FEF2F2] rounded-lg" aria-label="Log out" data-testid="button-logout-mobile">
-            <LogOut className="h-5 w-5" />
-          </Button>
         </div>
       </div>
     </header>
