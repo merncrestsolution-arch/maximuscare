@@ -78,8 +78,8 @@ export default function Header({ before }: { before?: ReactNode }) {
             aria-label="Go to dashboard"
             data-testid="link-home-logo-mobile"
           >
-            <div className="h-9 w-9 max-w-[36px] rounded-lg overflow-hidden border border-[#EEF5FB] bg-white shadow-sm flex items-center justify-center shrink-0">
-              <img src={logoUri} alt="Logo" className="w-full h-full object-contain p-0.5" onError={(e) => { e.currentTarget.src = defaultLogo; }} />
+            <div className="h-10 w-10 rounded-xl overflow-hidden border border-[#EEF5FB] bg-white shadow-sm flex items-center justify-center shrink-0 p-1">
+              <img src={logoUri} alt="Maximus Care logo" className="max-h-full max-w-full object-contain" onError={(e) => { e.currentTarget.src = defaultLogo; }} />
             </div>
           </button>
           {/* Bug 18: show the logged-in user's first name + role clearly on mobile. */}
