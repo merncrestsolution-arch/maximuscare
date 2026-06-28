@@ -17,11 +17,11 @@ import { cn } from "@/lib/utils";
 // never crowds out the logo/user identity or overflow the header. It keeps its
 // comfortable fixed width from the `md` breakpoint up.
 const triggerClasses = cn(
-  "flex h-11 min-w-0 max-w-[9rem] items-center gap-2 rounded-lg border-2 border-[#c5c0b8]",
-  "md:min-w-[11rem] md:max-w-[14rem]",
-  "bg-white px-3 py-2 text-sm font-bold leading-none shadow-md",
-  "text-[#1a2332] hover:bg-[#f5f5f3]",
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2d9d8b] focus-visible:ring-offset-2"
+  "flex h-10 min-w-0 max-w-[8.5rem] items-center gap-1.5 rounded-lg border border-[#D6E8F5]",
+  "md:h-10 md:min-w-[10rem] md:max-w-[14rem] md:gap-2",
+  "bg-[#EEF5FB] px-2.5 py-2 text-sm font-semibold leading-none shadow-sm",
+  "text-[#105691] hover:bg-white hover:border-[#1873A8]",
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1873A8] focus-visible:ring-offset-1"
 );
 
 function workspaceLabelText(selectedBranchName: string | null | undefined): string {
@@ -62,8 +62,8 @@ export function BranchSwitcher() {
         data-testid="branch-switcher-trigger"
         className={triggerClasses}
       >
-        <Building2 className="h-4 w-4 shrink-0 text-[#1a2332]" />
-        <span className="truncate text-[#1a2332]">{selectedBranchName}</span>
+        <Building2 className="h-4 w-4 shrink-0 text-[#1873A8]" />
+        <span className="truncate text-[#105691]">{selectedBranchName}</span>
       </button>
     );
   }
@@ -79,12 +79,12 @@ export function BranchSwitcher() {
             aria-label={`Branch: ${workspaceLabel}`}
           >
             {selectedContext ? (
-              <LayoutGrid className="h-4 w-4 shrink-0 text-[#1a2332]" aria-hidden />
+              <LayoutGrid className="h-4 w-4 shrink-0 text-[#1873A8]" aria-hidden />
             ) : (
-              <Building2 className="h-4 w-4 shrink-0 text-[#1a2332]" aria-hidden />
+              <Building2 className="h-4 w-4 shrink-0 text-[#1873A8]" aria-hidden />
             )}
-            <span className="truncate text-[#1a2332]">{workspaceLabel}</span>
-            <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-[#1a2332]" aria-hidden />
+            <span className="truncate text-[#105691]">{workspaceLabel}</span>
+            <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-[#1873A8]" aria-hidden />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-72 bg-white">
