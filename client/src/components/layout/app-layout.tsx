@@ -56,7 +56,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <PageBackButton />
               {/* Bug 1: fixed 40x40 touch target for the menu button so it doesn't render oversized on mobile. */}
               <SidebarTrigger
-                className="-ml-1 h-10 w-10 shrink-0 text-white md:text-foreground [&_svg]:h-5 [&_svg]:w-5"
+                className="-ml-1 h-10 w-10 shrink-0 text-[#105691] hover:bg-[#EEF5FB] md:text-foreground md:hover:bg-muted [&_svg]:h-5 [&_svg]:w-5"
                 aria-label="Open menu"
               />
             </div>

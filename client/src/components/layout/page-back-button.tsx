@@ -36,7 +36,7 @@ export function PageBackButton() {
       variant="ghost"
       size="icon"
       onClick={handleBack}
-      className="h-11 w-11 shrink-0 text-white hover:bg-white/10 md:text-foreground md:hover:bg-muted"
+      className="h-11 w-11 shrink-0 text-[#105691] hover:bg-[#EEF5FB] md:text-foreground md:hover:bg-muted"
       aria-label="Go back"
     >
       <ArrowLeft className="h-5 w-5" />
