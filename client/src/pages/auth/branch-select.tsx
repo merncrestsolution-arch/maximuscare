@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import {
@@ -22,13 +22,12 @@ import { LoginStyleSplash } from "@/components/auth/login-style-splash";
 import { BRANCH_SELECTION_CARDS } from "@shared/branchAccess";
 import type { OverviewContext } from "@shared/branchAccess";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+} from "@/components/ui/drawer";
 import { canViewAuditLogs, canManageSettings } from "@/lib/permissions";
 import { SendNotificationDialog } from "@/components/notifications/send-notification-dialog";
 
@@ -79,6 +78,14 @@ export default function BranchSelectPage() {
 
   const showAdminMenu = canViewAuditLogs(user?.role) || canManageSettings(user?.role);
   const [openSend, setOpenSend] = useState(false);
+  const [openAdmin, setOpenAdmin] = useState(false);
+
+  const adminItems: Array<{ label: string; desc: string; icon: ReactNode; onClick: () => void; show: boolean }> = [
+    { label: "Send Notification", desc: "Push an alert to staff", icon: <Send className="h-5 w-5" />, onClick: () => { setOpenAdmin(false); setOpenSend(true); }, show: true },
+    { label: "Notifications", desc: "View recent notifications", icon: <Bell className="h-5 w-5" />, onClick: () => setLocation("/notifications"), show: true },
+    { label: "Activity Log", desc: "System audit trail", icon: <ScrollText className="h-5 w-5" />, onClick: () => setLocation("/audit"), show: canViewAuditLogs(user?.role) },
+    { label: "Settings", desc: "Manage configuration", icon: <Settings className="h-5 w-5" />, onClick: () => setLocation("/settings"), show: canManageSettings(user?.role) },
+  ];
 
   const initials = (user?.name?.trim().split(/\s+/) ?? [])
     .slice(0, 2)
@@ -166,6 +173,38 @@ export default function BranchSelectPage() {
     >
       <SendNotificationDialog open={openSend} onOpenChange={setOpenSend} />
 
+      <Drawer open={openAdmin} onOpenChange={setOpenAdmin}>
+        <DrawerContent className="bg-white">
+          <DrawerHeader className="text-left">
+            <DrawerTitle className="text-[#105691]">Admin tools</DrawerTitle>
+            <DrawerDescription>Manage notifications, logs and settings</DrawerDescription>
+          </DrawerHeader>
+          <div className="flex flex-col gap-2 px-4 pb-[calc(env(safe-area-inset-bottom,16px)+16px)]">
+            {adminItems.filter((it) => it.show).map((it) => (
+              <button
+                key={it.label}
+                type="button"
+                onClick={() => {
+                  setOpenAdmin(false);
+                  it.onClick();
+                }}
+                className="group flex items-center gap-3 rounded-xl border border-[#D6E8F5] bg-white px-3 py-3 text-left transition-colors hover:bg-[#EEF5FB] active:scale-[0.99] touch-manipulation"
+                data-testid={`admin-tool-${it.label.toLowerCase().replace(/\s+/g, "-")}`}
+              >
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#EEF5FB] text-[#105691]">
+                  {it.icon}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-[#1E293B]">{it.label}</span>
+                  <span className="block text-xs text-[#64748B]">{it.desc}</span>
+                </span>
+                <ArrowRight className="h-4 w-4 shrink-0 text-[#94A3B8] transition-transform group-hover:translate-x-0.5" />
+              </button>
+            ))}
+          </div>
+        </DrawerContent>
+      </Drawer>
+
       {/* Decorative brand glow */}
       <div className="pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full bg-[#F45627]/20 blur-3xl" aria-hidden />
       <div className="pointer-events-none absolute top-1/3 -left-24 h-80 w-80 rounded-full bg-[#1B7EB7]/30 blur-3xl" aria-hidden />
@@ -204,41 +243,15 @@ export default function BranchSelectPage() {
               </div>
             )}
             {showAdminMenu && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F45627]"
-                    aria-label="Admin tools"
-                  >
-                    <MoreVertical className="h-5 w-5" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 rounded-xl">
-                  <DropdownMenuLabel>Admin tools</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setOpenSend(true)}>
-                    <Send className="h-4 w-4" />
-                    Send Notification
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setLocation("/notifications")}>
-                    <Bell className="h-4 w-4" />
-                    Notifications
-                  </DropdownMenuItem>
-                  {canViewAuditLogs(user?.role) && (
-                    <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setLocation("/audit")}>
-                      <ScrollText className="h-4 w-4" />
-                      Activity Log
-                    </DropdownMenuItem>
-                  )}
-                  {canManageSettings(user?.role) && (
-                    <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setLocation("/settings")}>
-                      <Settings className="h-4 w-4" />
-                      Settings
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <button
+                type="button"
+                onClick={() => setOpenAdmin(true)}
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F45627]"
+                aria-label="Admin tools"
+                data-testid="button-admin-tools"
+              >
+                <MoreVertical className="h-5 w-5" />
+              </button>
             )}
             <button
               type="button"
@@ -262,7 +275,7 @@ export default function BranchSelectPage() {
             transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
             className="mb-7 text-center sm:mb-9"
           >
-            <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Choose your workspace</h2>
+            <h2 className="text-2xl font-extrabold tracking-tight text-white sm:text-3xl">Choose your workspace</h2>
             <p className="mt-2 text-sm text-white/70 sm:text-base">
               Pick the clinic location you're working in today. Records and KPIs are isolated per branch.
             </p>
@@ -349,7 +362,7 @@ export default function BranchSelectPage() {
             <div className="mt-9">
               <div className="mb-3 flex items-center gap-2 text-white/85">
                 <LayoutGrid className="h-5 w-5" />
-                <h3 className="text-sm font-bold uppercase tracking-wider">Overview Dashboards</h3>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-white">Overview Dashboards</h3>
               </div>
               <motion.div
                 variants={containerVariants}
@@ -396,7 +409,7 @@ export default function BranchSelectPage() {
           {!hasOptions && (
             <div className="mx-auto mt-6 max-w-md rounded-2xl border border-white/30 bg-white/10 p-8 text-center backdrop-blur-md">
               <Building2 className="mx-auto h-10 w-10 text-white/80" />
-              <h3 className="mt-3 text-lg font-bold">No Access</h3>
+              <h3 className="mt-3 text-lg font-bold text-white">No Access</h3>
               <p className="mt-1 text-sm text-white/70">
                 No branches assigned. Contact your administrator.
               </p>

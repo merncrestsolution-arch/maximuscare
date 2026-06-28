@@ -39,7 +39,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const showBottomNav = isMobile && !isEditOrNew;
   // Back control on every page except the top-level landings (where "back" would
   // otherwise jump to the branch-selection screen).
-  const isLandingPage = ["/dashboard", "/maximus-overview", "/nexus-overview"].includes(location);
+  const isLandingPage = ["/dashboard"].includes(location);
   const showBack = !isLandingPage;
 
   if (!user) {
