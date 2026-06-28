@@ -1,14 +1,13 @@
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
+import { motion } from "framer-motion";
 import {
   MapPin,
   LayoutGrid,
   Sparkles,
   LogOut,
-  ChevronRight,
+  ArrowRight,
   Building2,
-  Users,
-  Activity,
   Loader2,
   MoreVertical,
   ScrollText,
@@ -22,8 +21,6 @@ import { useBranding } from "@/context/branding-context";
 import { LoginStyleSplash } from "@/components/auth/login-style-splash";
 import { BRANCH_SELECTION_CARDS } from "@shared/branchAccess";
 import type { OverviewContext } from "@shared/branchAccess";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,64 +33,34 @@ import { canViewAuditLogs, canManageSettings } from "@/lib/permissions";
 import { SendNotificationDialog } from "@/components/notifications/send-notification-dialog";
 
 const BRANCH_HEADER: Record<string, string> = {
-  DEHIWALA: "DEHIWALA",
-  BANDARAGAMA: "BANDARAGAMA",
-  NEURO: "NEURO REHABILITATION",
-  NEXUS: "NEXUS PHYSIO",
+  DEHIWALA: "Dehiwala",
+  BANDARAGAMA: "Bandaragama",
+  NEURO: "Neuro Rehabilitation",
+  NEXUS: "Nexus Physio",
 };
 
-const BRANCH_ACCENT: Record<
-  string,
-  { border: string; text: string; pill: string; icon: string }
-> = {
-  DEHIWALA: {
-    border: "border-l-[#2563eb]",
-    text: "text-[#2563eb]",
-    pill: "bg-blue-50 text-blue-700",
-    icon: "text-[#2563eb]",
-  },
-  BANDARAGAMA: {
-    border: "border-l-[#16a34a]",
-    text: "text-[#16a34a]",
-    pill: "bg-green-50 text-green-700",
-    icon: "text-[#16a34a]",
-  },
-  NEURO: {
-    border: "border-l-[#9333ea]",
-    text: "text-[#9333ea]",
-    pill: "bg-purple-50 text-purple-700",
-    icon: "text-[#9333ea]",
-  },
-  NEXUS: {
-    border: "border-l-[#f59e0b]",
-    text: "text-[#f59e0b]",
-    pill: "bg-amber-50 text-amber-800",
-    icon: "text-[#f59e0b]",
-  },
+type Accent = { color: string; tint: string };
+
+const BRANCH_ACCENT: Record<string, Accent> = {
+  DEHIWALA: { color: "#1873A8", tint: "rgba(24,115,168,0.12)" },
+  BANDARAGAMA: { color: "#16A34A", tint: "rgba(22,163,74,0.12)" },
+  NEURO: { color: "#7C3AED", tint: "rgba(124,58,237,0.12)" },
+  NEXUS: { color: "#EE862D", tint: "rgba(238,134,45,0.12)" },
 };
 
-function BranchKpiPreview({
-  label,
-  value,
-  accentClass,
-}: {
-  label: string;
-  value: string;
-  accentClass: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-xl border-2 border-black bg-white px-3 py-3 sm:px-4 sm:py-4",
-        "border-l-[5px]",
-        accentClass
-      )}
-    >
-      <p className="text-xs font-medium text-muted-foreground leading-snug">{label}</p>
-      <p className="mt-1 text-lg font-extrabold tracking-tight text-foreground sm:text-xl">{value}</p>
-    </div>
-  );
-}
+const containerVariants = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.07, delayChildren: 0.08 } },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 18 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.42, ease: [0.22, 1, 0.36, 1] as const },
+  },
+};
 
 export default function BranchSelectPage() {
   const [, setLocation] = useLocation();
@@ -112,6 +79,11 @@ export default function BranchSelectPage() {
 
   const showAdminMenu = canViewAuditLogs(user?.role) || canManageSettings(user?.role);
   const [openSend, setOpenSend] = useState(false);
+
+  const initials = (user?.name?.trim().split(/\s+/) ?? [])
+    .slice(0, 2)
+    .map((p) => p.charAt(0).toUpperCase())
+    .join("") || "U";
 
   const branchCards = useMemo(() => {
     const allowedCodes = new Set(
@@ -161,7 +133,7 @@ export default function BranchSelectPage() {
     subtitle: string;
     path: string;
     icon: React.ReactNode;
-    accent: (typeof BRANCH_ACCENT)[string];
+    accent: Accent;
   }[] = [];
 
   if (canAccessMaximusOverview) {
@@ -188,38 +160,61 @@ export default function BranchSelectPage() {
   const hasOptions = branchCards.length > 0 || overviewCards.length > 0;
 
   return (
-    <div className="min-h-dvh bg-[#f0f0f0] flex flex-col">
+    <div
+      className="relative min-h-dvh flex flex-col overflow-hidden text-white px-safe safe-top"
+      style={{ background: "linear-gradient(135deg, #0d4a7e 0%, #105691 45%, #1873A8 100%)" }}
+    >
       <SendNotificationDialog open={openSend} onOpenChange={setOpenSend} />
-      {/* Top header — matches dashboard chrome */}
-      <header className="sticky top-0 z-10 border-b-2 border-black bg-white px-4 py-3 sm:px-6">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+
+      {/* Decorative brand glow */}
+      <div className="pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full bg-[#F45627]/20 blur-3xl" aria-hidden />
+      <div className="pointer-events-none absolute top-1/3 -left-24 h-80 w-80 rounded-full bg-[#1B7EB7]/30 blur-3xl" aria-hidden />
+
+      {/* Header */}
+      <motion.header
+        initial={{ opacity: 0, y: -16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 px-4 py-3 sm:px-6"
+      >
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-black bg-white">
-              <img src={logoUri} alt="" className="h-full w-full object-contain p-0.5" />
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-1 shadow-lg">
+              <img src={logoUri} alt="Maximus Care logo" className="max-h-full max-w-full object-contain" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-lg font-bold text-black sm:text-xl">Maximus Care</h1>
-              <p className="truncate text-xs text-muted-foreground sm:text-sm">
-                Select your workspace
-              </p>
+              <h1 className="truncate text-lg font-extrabold tracking-tight sm:text-xl">
+                <span className="text-white">Maximus</span>
+                <span className="text-[#F8B59B]"> Care</span>
+              </h1>
+              <p className="truncate text-xs text-white/70">Physio &amp; Rehab Unit</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+
+          <div className="flex items-center gap-2 shrink-0">
             {user && (
-              <div className="hidden sm:block text-right">
-                <p className="text-sm font-semibold text-foreground">{user.name}</p>
-                <p className="text-xs text-muted-foreground">{user.role}</p>
+              <div className="hidden items-center gap-2 rounded-full bg-white/10 py-1 pl-1 pr-3 backdrop-blur-sm sm:flex">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-xs font-bold ring-2 ring-[#F45627]">
+                  {initials}
+                </div>
+                <div className="text-left leading-tight">
+                  <p className="text-sm font-semibold">{user.name}</p>
+                  <p className="text-[0.7rem] text-white/70">{user.role}</p>
+                </div>
               </div>
             )}
             {showAdminMenu && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-10 border-2 border-black rounded-xl font-medium">
-                    <MoreVertical className="h-4 w-4 sm:mr-1.5" />
-                    <span className="hidden sm:inline">More</span>
-                  </Button>
+                  <button
+                    type="button"
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F45627]"
+                    aria-label="Admin tools"
+                  >
+                    <MoreVertical className="h-5 w-5" />
+                  </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 border-2 border-black rounded-xl">
+                <DropdownMenuContent align="end" className="w-56 rounded-xl">
                   <DropdownMenuLabel>Admin tools</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem className="cursor-pointer gap-2" onClick={() => setOpenSend(true)}>
@@ -245,187 +240,164 @@ export default function BranchSelectPage() {
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-10 border-2 border-black rounded-xl font-medium"
+            <button
+              type="button"
               onClick={() => logout()}
+              className="flex h-10 items-center gap-1.5 rounded-full bg-white/10 px-3 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-[#DC2626] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F45627]"
+              aria-label="Log out"
             >
-              <LogOut className="h-4 w-4 sm:mr-1.5" />
+              <LogOut className="h-4 w-4" />
               <span className="hidden sm:inline">Logout</span>
-            </Button>
+            </button>
           </div>
         </div>
-      </header>
+      </motion.header>
 
-      <main className="flex-1 px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mx-auto max-w-6xl space-y-8">
-          <div className="flex items-start gap-2">
-            <Building2 className="mt-0.5 h-5 w-5 shrink-0 text-foreground" />
-            <div>
-              <h2 className="text-xl font-bold text-foreground sm:text-2xl">Choose a Branch</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Pick the clinic location you are working in today. KPIs and records are isolated per
-                branch.
-              </p>
-            </div>
-          </div>
+      {/* Main */}
+      <main className="relative z-10 flex-1 px-4 pb-10 pt-4 sm:px-6 sm:pt-8">
+        <div className="mx-auto max-w-5xl">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+            className="mb-7 text-center sm:mb-9"
+          >
+            <h2 className="text-2xl font-extrabold tracking-tight sm:text-3xl">Choose your workspace</h2>
+            <p className="mt-2 text-sm text-white/70 sm:text-base">
+              Pick the clinic location you're working in today. Records and KPIs are isolated per branch.
+            </p>
+          </motion.div>
 
           {error && (
-            <div className="rounded-xl border-2 border-red-500 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="mx-auto mb-6 max-w-xl rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-center text-sm font-medium text-red-700">
               {error}
             </div>
           )}
 
-          {branchCards.map((card) => {
-            const accent = BRANCH_ACCENT[card.code] ?? BRANCH_ACCENT.DEHIWALA;
-            const isSubmitting = submitting === card.branchId;
-
-            return (
-              <section key={card.code} className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <MapPin className={cn("h-5 w-5", accent.icon)} />
-                  <h3 className="text-base font-bold uppercase tracking-wide text-foreground sm:text-lg">
-                    {BRANCH_HEADER[card.code] ?? card.code}
-                  </h3>
-                  <span
-                    className={cn(
-                      "rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                      accent.pill
-                    )}
+          {/* Branch cards */}
+          {branchCards.length > 0 && (
+            <motion.div
+              variants={containerVariants}
+              initial="hidden"
+              animate="show"
+              className="grid grid-cols-1 gap-4 sm:grid-cols-2"
+            >
+              {branchCards.map((card) => {
+                const accent = BRANCH_ACCENT[card.code] ?? BRANCH_ACCENT.DEHIWALA;
+                const isSubmitting = submitting === card.branchId;
+                return (
+                  <motion.button
+                    key={card.code}
+                    type="button"
+                    variants={itemVariants}
+                    whileHover={{ y: -4 }}
+                    whileTap={{ scale: 0.99 }}
+                    disabled={!!submitting}
+                    onClick={() => handleSelectBranch(card.branchId)}
+                    style={{ borderLeftColor: accent.color }}
+                    className={`group relative overflow-hidden rounded-2xl border border-[#D6E8F5] border-l-[5px] bg-white p-5 text-left shadow-[0_8px_30px_rgba(16,86,145,0.12)] transition-shadow hover:shadow-[0_14px_40px_rgba(16,86,145,0.22)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F45627] focus-visible:ring-offset-2 disabled:cursor-not-allowed ${isSubmitting ? "opacity-70" : ""}`}
+                    data-testid={`branch-card-${card.code.toLowerCase()}`}
                   >
-                    {card.label}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={!!submitting}
-                  onClick={() => handleSelectBranch(card.branchId)}
-                  className={cn(
-                    "group w-full rounded-2xl border-2 border-black bg-white p-4 text-left shadow-sm transition-all sm:p-5",
-                    "hover:shadow-md hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
-                    "border-l-[6px]",
-                    accent.border,
-                    isSubmitting && "opacity-70 pointer-events-none"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3 mb-4">
-                    <div>
-                      <p className={cn("text-lg font-extrabold sm:text-xl", accent.text)}>
-                        {card.subtitle}
-                      </p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Open branch dashboard — visits, patients, attendance &amp; reports
-                      </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span
+                          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
+                          style={{ backgroundColor: accent.tint, color: accent.color }}
+                        >
+                          <MapPin className="h-6 w-6" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-lg font-extrabold tracking-tight text-[#105691]">
+                            {BRANCH_HEADER[card.code] ?? card.code}
+                          </p>
+                          <span
+                            className="mt-0.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                            style={{ backgroundColor: accent.tint, color: accent.color }}
+                          >
+                            {card.label}
+                          </span>
+                        </div>
+                      </div>
+                      <span
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition-transform group-hover:translate-x-0.5"
+                        style={{ backgroundColor: accent.color }}
+                      >
+                        {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                      </span>
                     </div>
-                    <span
-                      className={cn(
-                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-black bg-white transition group-hover:bg-muted",
-                        accent.icon
-                      )}
-                    >
-                      {isSubmitting ? (
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                      ) : (
-                        <ChevronRight className="h-5 w-5" />
-                      )}
-                    </span>
-                  </div>
+                    <p className="mt-3 text-sm text-[#64748B]">
+                      Open the branch dashboard — visits, patients, attendance &amp; reports.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-1.5">
+                      {["Patients", "Visits", "Attendance", "Reports"].map((chip) => (
+                        <span
+                          key={chip}
+                          className="rounded-md bg-[#EEF5FB] px-2 py-1 text-[11px] font-semibold text-[#105691]"
+                        >
+                          {chip}
+                        </span>
+                      ))}
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </motion.div>
+          )}
 
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-                    <BranchKpiPreview
-                      label="Workspace"
-                      value="Branch"
-                      accentClass={accent.border}
-                    />
-                    <BranchKpiPreview
-                      label="Module"
-                      value="Patients"
-                      accentClass={accent.border}
-                    />
-                    <BranchKpiPreview
-                      label="Module"
-                      value="Visits"
-                      accentClass={accent.border}
-                    />
-                    <BranchKpiPreview
-                      label="Status"
-                      value="Active"
-                      accentClass={accent.border}
-                    />
-                  </div>
-
-                  <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-foreground">
-                    Tap to enter →
-                  </p>
-                </button>
-              </section>
-            );
-          })}
-
+          {/* Overview cards */}
           {overviewCards.length > 0 && (
-            <section className="space-y-3 pt-2">
-              <div className="flex items-center gap-2">
-                <LayoutGrid className="h-5 w-5 text-foreground" />
-                <h3 className="text-base font-bold uppercase tracking-wide text-foreground sm:text-lg">
-                  Overview Dashboards
-                </h3>
+            <div className="mt-9">
+              <div className="mb-3 flex items-center gap-2 text-white/85">
+                <LayoutGrid className="h-5 w-5" />
+                <h3 className="text-sm font-bold uppercase tracking-wider">Overview Dashboards</h3>
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <motion.div
+                variants={containerVariants}
+                initial="hidden"
+                animate="show"
+                className="grid grid-cols-1 gap-4 sm:grid-cols-2"
+              >
                 {overviewCards.map((card) => {
                   const isSubmitting = submitting === card.id;
                   return (
-                    <button
+                    <motion.button
                       key={card.id}
                       type="button"
+                      variants={itemVariants}
+                      whileHover={{ y: -4 }}
+                      whileTap={{ scale: 0.99 }}
                       disabled={!!submitting}
                       onClick={() => handleSelectOverview(card.id, card.path)}
-                      className={cn(
-                        "group flex items-center gap-4 rounded-2xl border-2 border-black bg-white p-5 text-left shadow-sm transition-all",
-                        "border-l-[6px]",
-                        card.accent.border,
-                        "hover:shadow-md hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-                        isSubmitting && "opacity-70"
-                      )}
+                      style={{ borderLeftColor: card.accent.color }}
+                      className={`group flex items-center gap-4 rounded-2xl border border-white/30 border-l-[5px] bg-white/10 p-5 text-left backdrop-blur-md transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#F45627] ${isSubmitting ? "opacity-70" : ""}`}
+                      data-testid={`overview-card-${card.id}`}
                     >
                       <span
-                        className={cn(
-                          "flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border-2 border-black bg-white",
-                          card.accent.icon
-                        )}
+                        className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-white"
+                        style={{ backgroundColor: card.accent.color }}
                       >
-                        {isSubmitting ? (
-                          <Loader2 className="h-6 w-6 animate-spin" />
-                        ) : (
-                          card.icon
-                        )}
+                        {isSubmitting ? <Loader2 className="h-6 w-6 animate-spin" /> : card.icon}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className={cn("block text-lg font-extrabold", card.accent.text)}>
-                          {card.title}
-                        </span>
-                        <span className="mt-0.5 block text-sm text-muted-foreground">
-                          {card.subtitle}
-                        </span>
-                        <span className="mt-2 flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground group-hover:text-foreground">
-                          <Users className="h-3.5 w-3.5" />
+                        <span className="block text-lg font-extrabold text-white">{card.title}</span>
+                        <span className="mt-0.5 block text-sm text-white/70">{card.subtitle}</span>
+                        <span className="mt-2 flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-white/60">
                           Multi-branch analytics
-                          <Activity className="ml-auto h-4 w-4" />
+                          <ArrowRight className="ml-auto h-4 w-4 transition-transform group-hover:translate-x-1" />
                         </span>
                       </span>
-                    </button>
+                    </motion.button>
                   );
                 })}
-              </div>
-            </section>
+              </motion.div>
+            </div>
           )}
 
           {!hasOptions && (
-            <div className="rounded-2xl border-2 border-black bg-white p-8 text-center shadow-sm">
-              <MapPin className="mx-auto h-10 w-10 text-muted-foreground" />
-              <h3 className="mt-3 text-lg font-bold text-foreground">No Access</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
+            <div className="mx-auto mt-6 max-w-md rounded-2xl border border-white/30 bg-white/10 p-8 text-center backdrop-blur-md">
+              <Building2 className="mx-auto h-10 w-10 text-white/80" />
+              <h3 className="mt-3 text-lg font-bold">No Access</h3>
+              <p className="mt-1 text-sm text-white/70">
                 No branches assigned. Contact your administrator.
               </p>
             </div>
