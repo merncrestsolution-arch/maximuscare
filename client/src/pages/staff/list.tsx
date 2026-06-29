@@ -184,7 +184,7 @@ export default function StaffListPage() {
                       <>
                         <span className="text-white/20">•</span>
                         <span className="flex items-center gap-1 text-xs" data-testid={`text-staff-branch-${member.id}`}>
-                          <MapPin className="h-3 w-3" /> {member.branch}
+                          <MapPin className="h-3 w-3" /> {String(member.branch).toLowerCase() === "both" ? "Dehiwala & Neuro Rehabilitation" : ["all", "all branches"].includes(String(member.branch).toLowerCase()) ? "All Branches" : member.branch}
                         </span>
                       </>
                     )}

@@ -317,7 +317,6 @@ export function registerPatientRoutes(app: Express) {
       const rate = homeVisitRate(visitType as any, {
         homeColombo: Number(settings?.homeRateColombo ?? 1000),
         homeBandaragama: Number(settings?.homeRateBandaragama ?? 500),
-        holidayHome: Number(settings?.holidayHomeRate ?? 1500),
       });
       const record = await storage.createHomeVisit({
         ...data,
@@ -355,7 +354,6 @@ export function registerPatientRoutes(app: Express) {
       const rate = homeVisitRate(visitType as any, {
         homeColombo: Number(settings?.homeRateColombo ?? 1000),
         homeBandaragama: Number(settings?.homeRateBandaragama ?? 500),
-        holidayHome: Number(settings?.holidayHomeRate ?? 1500),
       });
 
       const record = await storage.updateHomeVisit(id, {

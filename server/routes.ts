@@ -24,6 +24,7 @@ import {
 } from "./middleware/secureApi";
 import { filterByBranchName, resolveBranchIdByName } from "./services/branchService";
 import { normalizeBranchName } from "@shared/branches";
+import { hasFullBranchAccess } from "@shared/branchAccess";
 import { registerAutoFineJobs, startScheduledJobs } from "./jobs/scheduler";
 import { clinicDateString, clinicYesterdayString, clinicDateOffset } from "./clinicTime";
 import { registerHrmRoutes } from "./routes/hrm";
@@ -595,6 +596,32 @@ export async function registerRoutes(
           const { filterStaffByBranchAccess } = await import("./services/staffService");
           filtered = await filterStaffByBranchAccess(storage, filtered, branchFilter);
         }
+
+        // Scope Managers/Branch Managers/Receptionists to their allowed branches (Bug 6)
+        const { hasFullBranchAccess } = await import("./shared/branchAccess");
+        if (!hasFullBranchAccess(currentUser.role)) {
+          const { getAllowedBranchesForStaff } = await import("./services/branchService");
+          const allowed = await getAllowedBranchesForStaff(storage, currentUser.staffId, currentUser.role);
+          const allowedNames = allowed.map((b) => b.branchName ?? b.name).filter(Boolean);
+          const allowedIds = new Set(allowed.map((b) => b.id));
+          const { staffMatchesBranch } = await import("./services/staffService");
+
+          const scoped: any[] = [];
+          for (const s of filtered) {
+            const matchesByName = allowedNames.some((name) => staffMatchesBranch(s, name));
+            if (matchesByName) {
+              scoped.push(s);
+              continue;
+            }
+            const targetPermissions = await storage.getUserBranchPermissions(s.id);
+            const intersects = targetPermissions.some((p) => allowedIds.has(p.branchId));
+            if (intersects) {
+              scoped.push(s);
+            }
+          }
+          filtered = scoped;
+        }
+
         return res.json(filtered.map(sanitize));
       } else {
         const selfStaff = await storage.getStaff(currentUser.staffId);
@@ -632,7 +659,7 @@ export async function registerRoutes(
     try {
       const id = param(req, "id");
       const currentUser = (req as any).user;
-      
+
       // Allow user to view own profile, or staff-viewers (management/leads) to view any profile
       if (currentUser.staffId !== id && !canViewStaff(currentUser.role)) {
         return res.status(403).json({ message: "Forbidden" });
@@ -643,6 +670,22 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Staff not found" });
       }
       const branchPermissions = await storage.getUserBranchPermissions(id);
+
+      // Bug 6: branch-scope non-management viewers (Manager/Branch Manager). They may only
+      // view staff within their allowed branch(es); other-branch profiles return 403.
+      if (currentUser.staffId !== id && !hasFullBranchAccess(currentUser.role)) {
+        const { getAllowedBranchesForStaff } = await import("./services/branchService");
+        const allowed = await getAllowedBranchesForStaff(storage, currentUser.staffId, currentUser.role);
+        const allowedIds = new Set(allowed.map((b) => b.id));
+        const targetBranchIds = branchPermissions.map((p) => p.branchId);
+        const intersectsByPermission = targetBranchIds.some((t) => allowedIds.has(t));
+        const { staffMatchesBranch } = await import("./services/staffService");
+        const matchesByName = allowed.some((b) => staffMatchesBranch(staff, b.branchName ?? b.name));
+        if (!intersectsByPermission && !matchesByName) {
+          return res.status(403).json({ message: "You don't have access to this staff profile." });
+        }
+      }
+
       const { password: _, ...staffWithoutPassword } = staff;
       return res.json({
         ...staffWithoutPassword,
@@ -940,7 +983,8 @@ export async function registerRoutes(
   app.get("/api/patients/next-id", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const registeredDate = String(req.query.date ?? "").trim() || undefined;
-      const patientCode = await generatePatientCode(storage, registeredDate);
+      const branch = String(req.query.branch ?? "").trim() || undefined;
+      const patientCode = await generatePatientCode(storage, branch, registeredDate);
       return res.json({ patientCode });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1000,7 +1044,7 @@ export async function registerRoutes(
         undefined,
         { skipPhoneCheck }
       );
-      const patientCode = await generateUniquePatientCode(storage, validatedData.registeredDate);
+      const patientCode = await generateUniquePatientCode(storage, validatedData.branch, validatedData.registeredDate);
       const patient = await storage.createPatient({ ...validatedData, patientCode, fullName: validatedData.name } as any);
       const actor = await auditActor(req);
       await logAudit(storage, {
@@ -2417,7 +2461,17 @@ export async function registerRoutes(
       }
 
       const fromBranchId = admission.branchId ?? null;
-      const updated = await storage.updateInPatientAdmission(id, { branchId: targetBranchId } as any);
+      const updated = await storage.updateInPatientAdmission(id, { status: "Transferred" } as any);
+
+      const { id: _, branchId: __, status: ___, createdAt: ____, updatedAt: _____, admitDate: ______, ...rest } = admission;
+      await storage.createInPatientAdmission({
+        ...rest,
+        admitDate: rawDate,
+        branchId: targetBranchId,
+        status: "Admitted",
+        reportsAttachments: admission.reportsAttachments ? JSON.stringify(admission.reportsAttachments) : null,
+        idCopyAttachments: admission.idCopyAttachments ? JSON.stringify(admission.idCopyAttachments) : null,
+      } as any);
 
       const editor = await storage.getStaff(user.staffId);
       await db.insert((schema as any).patientTransferLogs).values({

@@ -63,6 +63,7 @@ export interface PayrollSummary {
   incentiveTotal: number;
   incentiveDays: IncentiveDay[];
   incentiveCount: number;
+  /** Bug 7: holiday home-visit rate removed — always 0, retained only for response-shape compatibility. */
   holidayHomeVisits: number;
   holidayHomeIncome: number;
   extraHolidays: number;
@@ -85,7 +86,6 @@ export async function loadPayrollSettings(storage: IStorage): Promise<PayrollSet
     autoFineAmount: Number(clinic?.autoFineAmount ?? DEFAULT_RATES.autoFineAmount),
     homeColombo: Number(clinic?.homeRateColombo ?? DEFAULT_RATES.homeColombo),
     homeBandaragama: Number(clinic?.homeRateBandaragama ?? DEFAULT_RATES.homeBandaragama),
-    holidayHome: Number(clinic?.holidayHomeRate ?? DEFAULT_RATES.holidayHome),
     otPerHour: Number(clinic?.otRatePerHour ?? DEFAULT_RATES.otPerHour),
     extraHolidayDeduction: Number(clinic?.extraHolidayDeduction ?? DEFAULT_RATES.extraHolidayDeduction),
     freeAbsentDays: clinic?.freeAbsentDays ?? DEFAULT_RATES.freeAbsentDays,
@@ -141,7 +141,6 @@ export function computePayrollForStaff(
     (a) => a.staffId === staff.id && inDateRange(a.date, rangeFrom, rangeTo)
   );
   const deduped = dedupeAttendanceByDate(rangeAttendance);
-  const attendanceByDate = new Map(deduped.map((a) => [a.date, a]));
   const presentDays = deduped.filter((a) => a.status === "Present").length;
   const absentDays = deduped.filter((a) => a.status === "Absent").length;
 
@@ -189,7 +188,7 @@ export function computePayrollForStaff(
   const incentiveCount = dailyIncentives.reduce((acc, d) => acc + d.count, 0);
 
   const homeVisits = physioVisits.filter((v) => v.visitType === "Home");
-  const homeBreakdown = computeHomeVisitBreakdown(homeVisits, attendanceByDate, settings);
+  const homeBreakdown = computeHomeVisitBreakdown(homeVisits, settings);
 
   const otIncome = computeOtAmount(totalOt, settings.otPerHour);
   const extraHolidays = computeExtraHolidayCount(absentDays, settings.freeAbsentDays);
@@ -230,8 +229,8 @@ export function computePayrollForStaff(
     incentiveTotal,
     incentiveDays,
     incentiveCount,
-    holidayHomeVisits: homeBreakdown.holidayVisits,
-    holidayHomeIncome: homeBreakdown.holidayVisits * settings.holidayHome,
+    holidayHomeVisits: 0,
+    holidayHomeIncome: 0,
     extraHolidays,
     extraHolidayDeduction,
     finesTotal,

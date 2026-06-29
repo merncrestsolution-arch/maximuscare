@@ -15,8 +15,8 @@ function AttendanceReportContent() {
   const { user } = useAuth();
   const { logoUri } = useBranding();
   const [preset, setPreset] = useState<DatePreset>("currentMonth");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [startDate, setStartDate] = useState(() => getDateRangeForPreset("currentMonth").startDate);
+  const [endDate, setEndDate] = useState(() => getDateRangeForPreset("currentMonth").endDate);
 
   useEffect(() => {
     const r = getDateRangeForPreset(preset, startDate, endDate);

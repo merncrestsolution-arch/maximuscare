@@ -133,6 +133,8 @@ export function useCreateAttendance() {
     mutationFn: attendanceApi.create,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      await queryClient.invalidateQueries({ queryKey: ['attendance-dashboard'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
       await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
       await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
     },
@@ -145,6 +147,8 @@ export function useUpdateAttendance() {
     mutationFn: ({ id, data }: { id: string; data: any }) => attendanceApi.update(id, data),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      await queryClient.invalidateQueries({ queryKey: ['attendance-dashboard'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
       await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
       await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
     },
@@ -157,6 +161,8 @@ export function useDeleteAttendance() {
     mutationFn: (id: string) => attendanceApi.delete(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      await queryClient.invalidateQueries({ queryKey: ['attendance-dashboard'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
       await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
       await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
     },

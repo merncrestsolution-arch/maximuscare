@@ -26,6 +26,15 @@ import { computeOutstanding } from "@/lib/paymentStatus";
 import { isManagementRole, canViewFinancialSummary, isManager, isBranchManager, canViewAllVisits } from "@/lib/permissions";
 import { StatCard, KpiGrid } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/layout/page-shell";
+import { clinicTodayString } from "@/lib/utils";
+
+const getVisitTypeBadge = (type: string | undefined | null) => {
+  const normalized = (type || '').toLowerCase();
+  if (normalized.includes('home')) {
+    return { label: 'Home Visit', bg: '#FFF3ED', color: '#F45627' };
+  }
+  return { label: 'Clinic', bg: '#EEF5FB', color: '#105691' };
+};
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-LK', { style: 'currency', currency: 'LKR', minimumFractionDigits: 0 }).format(amount);
@@ -66,6 +75,10 @@ export default function Dashboard() {
   const canSeeFinancials = canViewFinancialSummary(user?.role);
   const showFinancialDashboard = isManagement && canSeeFinancials;
   const showManagerDashboard = isManagerRole || isBranchManagerRole;
+  // Bug 4: managers (and branch managers) must also see the Attendance + Expenses widgets,
+  // not just admin/md. Their data is branch-scoped server-side via requireBranchContext().
+  const showAttendanceWidget = isManagement || showManagerDashboard;
+  const showExpensesWidget = isManagement || showManagerDashboard;
   const isStaff = role === "physiotherapist" || role === "receptionist" || role === "staff" || role === "manager";
 
   const selectedDate = new Date(selectedYear, selectedMonth, 1);
@@ -84,7 +97,7 @@ export default function Dashboard() {
 
   // Revenue and Expense hooks (only for management) - enabled flag prevents API calls for non-management users
   const { data: revenueSummary, isLoading: loadingRevenue } = useRevenueSummary(dateParams, showFinancialDashboard);
-  const { data: expenses = [], isLoading: loadingExpenses } = useExpenses(dateParams, showFinancialDashboard);
+  const { data: expenses = [], isLoading: loadingExpenses } = useExpenses(dateParams, showExpensesWidget);
   const { data: dashboardKpis, isLoading: loadingKpis } = useDashboardKpis(dateParams, showFinancialDashboard || showManagerDashboard);
 
   // Bug 8 diagnostics: log the Revenue Trend payload received from the API so an
@@ -196,7 +209,7 @@ export default function Dashboard() {
       : myVisits;
 
   const totalPatients = (isManagement || isManagerRole || isBranchManagerRole || canViewAllVisitsClient) ? patients.length : patients.filter(p => myVisits.some(v => v.patientId === p.id)).length;
-  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const todayStr = clinicTodayString();
   const todayVisits = (isManagement || isManagerRole || isBranchManagerRole)
     ? (dashboardKpis?.todayVisits ?? allMyVisits.filter((v) => v.visitDate === todayStr).length)
     : myVisits.filter((v) => v.visitDate === todayStr).length;
@@ -650,7 +663,17 @@ export default function Dashboard() {
             <div className="space-y-2">
               {selectedDayVisits.map((visit: any) => (
                 <div key={visit.id} className="grid grid-cols-1 md:grid-cols-4 gap-2 border rounded-lg p-3" data-testid={`row-selected-date-visit-${visit.id}`}>
-                  <div className="text-sm"><span className="font-medium">Pt:</span> {patientNameById.get(visit.patientId) || "Unknown"}</div>
+                  <div className="text-sm flex items-center gap-2">
+                    <span className="font-medium">Pt:</span> {patientNameById.get(visit.patientId) || "Unknown"}
+                    {(() => {
+                      const badge = getVisitTypeBadge(visit.visitType);
+                      return (
+                        <span style={{ backgroundColor: badge.bg, color: badge.color }} className="px-2 py-0.5 rounded text-xs font-semibold shrink-0">
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <div className="text-sm"><span className="font-medium">Condition:</span> {visit.condition}</div>
                   <div className="text-sm"><span className="font-medium">Physio:</span> {visit.treatingStaffName || "-"}</div>
                   <div className="flex justify-start md:justify-end gap-1">
@@ -790,8 +813,8 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* Expenses Section - MD/Admin Only */}
-      {isManagement && (
+      {/* Expenses Section - Admin/MD + Managers (Bug 4) */}
+      {showExpensesWidget && (
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Expenses</CardTitle>
@@ -858,8 +881,8 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* Admin Only: Attendance Summary */}
-      {isManagement && (
+      {/* Attendance Summary - Admin/MD + Managers (Bug 4) */}
+      {showAttendanceWidget && (
         <Card>
           <CardHeader>
             <CardTitle>Today's Attendance</CardTitle>
@@ -867,7 +890,7 @@ export default function Dashboard() {
           <CardContent>
             <div className="space-y-4">
                {attendance
-                 .filter(a => a.date === format(new Date(), 'yyyy-MM-dd'))
+                 .filter(a => a.date === todayStr)
                  .map(record => {
                    // Bug 6: show check-in time and a Google Maps link to the captured GPS location.
                    const lat = (record as any).latitude;
@@ -904,7 +927,7 @@ export default function Dashboard() {
                    </div>
                    );
                  })}
-               {attendance.filter(a => a.date === format(new Date(), 'yyyy-MM-dd')).length === 0 && (
+               {attendance.filter(a => a.date === todayStr).length === 0 && (
                  <div className="text-center text-sm text-muted-foreground py-4">No attendance marked today yet.</div>
                )}
             </div>

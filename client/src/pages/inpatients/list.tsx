@@ -25,7 +25,7 @@ export default function InPatientsListPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const deleteInPatient = useDeleteInPatient();
-  const [statusFilter, setStatusFilter] = useState<"Admitted" | "Discharged" | "all">("Admitted");
+  const [statusFilter, setStatusFilter] = useState<"Admitted" | "Discharged" | "Transferred" | "all">("Admitted");
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
@@ -108,8 +108,8 @@ export default function InPatientsListPage() {
           />
         </div>
 
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {(["Admitted", "Discharged", "all"] as const).map((status) => (
+        <div className="grid grid-cols-4 gap-2 mb-4">
+          {(["Admitted", "Discharged", "Transferred", "all"] as const).map((status) => (
             <Button
               key={status}
               variant={statusFilter === status ? "default" : "outline"}
@@ -148,6 +148,8 @@ export default function InPatientsListPage() {
                       <span className={`text-xs px-2 py-0.5 rounded ${
                         patient.status === "Admitted" 
                           ? "bg-green-100 text-green-800" 
+                          : patient.status === "Transferred"
+                          ? "bg-blue-100 text-blue-800"
                           : "bg-gray-100 text-gray-800"
                       }`} data-testid={`badge-status-${patient.id}`}>
                         {patient.status}

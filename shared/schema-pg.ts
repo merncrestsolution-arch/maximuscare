@@ -818,3 +818,32 @@ export const updateStaffOtEntrySchema = insertStaffOtEntrySchema.partial();
 export type InsertStaffOtEntry = z.infer<typeof insertStaffOtEntrySchema>;
 export type UpdateStaffOtEntry = z.infer<typeof updateStaffOtEntrySchema>;
 export type StaffOtEntry = typeof staffOtEntries.$inferSelect;
+
+// Staff Salary Adjustments table
+export const staffSalaryAdjustments = pgTable("staff_salary_adjustments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  staffId: varchar("staff_id").notNull().references(() => staff.id),
+  staffName: text("staff_name").notNull(),
+  type: text("type").notNull(), // 'addition' | 'decrement'
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  adjustmentDate: date("adjustment_date").notNull(),
+  reason: text("reason").notNull(),
+  createdByStaffId: varchar("created_by_staff_id"),
+  createdByName: text("created_by_name"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertStaffSalaryAdjustmentSchema = createInsertSchema(staffSalaryAdjustments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  amount: z.union([z.string(), z.number()]).transform((v) => String(v)),
+});
+export const updateStaffSalaryAdjustmentSchema = insertStaffSalaryAdjustmentSchema.partial();
+export type InsertStaffSalaryAdjustment = z.infer<typeof insertStaffSalaryAdjustmentSchema>;
+export type UpdateStaffSalaryAdjustment = z.infer<typeof updateStaffSalaryAdjustmentSchema>;
+export type StaffSalaryAdjustment = typeof staffSalaryAdjustments.$inferSelect;

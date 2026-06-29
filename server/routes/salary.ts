@@ -112,9 +112,8 @@ export function registerSalaryRoutes(app: Express) {
       const settings = await loadPayrollSettings(storage);
       const s = preview.summary as any;
 
-      const colomboHolidayCount = Number(s.holidayHomeVisits || 0);
-      const colomboHomeTotal = Number(s.colomboHome || 0);
-      const colomboRegularCount = Math.max(0, colomboHomeTotal - colomboHolidayCount);
+      // Bug 7: no holiday home-visit rate — the full Colombo home count is charged at the flat Colombo rate.
+      const colomboRegularCount = Number(s.colomboHome || 0);
       const otherHomeCount = Number(s.bandaragamaHome || 0);
       const otherAdjustments = Number(s.otherAdjustments || 0);
       const additionsAmount = Number(s.incentiveTotal || 0) + (otherAdjustments > 0 ? otherAdjustments : 0);
@@ -135,11 +134,6 @@ export function registerSalaryRoutes(app: Express) {
             count: colomboRegularCount,
             rate: settings.homeColombo,
             amount: colomboRegularCount * settings.homeColombo,
-          },
-          colomboHoliday: {
-            count: colomboHolidayCount,
-            rate: settings.holidayHome,
-            amount: Number(s.holidayHomeIncome || 0),
           },
           otherBranches: {
             count: otherHomeCount,

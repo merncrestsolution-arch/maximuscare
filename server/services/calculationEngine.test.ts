@@ -21,7 +21,6 @@ const rates = {
   incentivePerCount: 100,
   homeColombo: 1000,
   homeBandaragama: 500,
-  holidayHome: 1500,
   otPerHour: 250,
   extraHolidayDeduction: 1500,
   freeAbsentDays: 4,
@@ -53,30 +52,26 @@ describe("incentive engine", () => {
 });
 
 describe("home visit engine", () => {
-  it("computes monthly home visit income", () => {
-    expect(computeHomeVisitIncome(5, 4, 2, rates)).toBe(10000);
+  it("computes monthly home visit income (flat per-branch rate, no holiday)", () => {
+    expect(computeHomeVisitIncome(5, 4, rates)).toBe(5 * 1000 + 4 * 500);
   });
 
-  it("classifies absent-day home visit as holiday", () => {
-    // classifyHomeVisit is deprecated/unused for the new logic, but if retained it should probably be removed. We'll leave it as is or ignore.
+  it("classifies home visits by branch tier only (Bug 7: no holiday case)", () => {
+    expect(classifyHomeVisit("Dehiwala")).toBe("Colombo");
+    expect(classifyHomeVisit("Bandaragama")).toBe("Bandaragama");
   });
 
-  it("breakdown applies base rates and extra holiday allowance for Colombo Home", () => {
+  it("breakdown applies flat per-branch rate regardless of attendance (Bug 7)", () => {
     const breakdown = computeHomeVisitBreakdown(
       [
         { branch: "Colombo Home", visitDate: "2026-06-01" },
         { branch: "Bandaragama", visitDate: "2026-06-02" },
       ],
-      new Map([
-        ["2026-06-01", { date: "2026-06-01", status: "Absent" } as any],
-        ["2026-06-02", { date: "2026-06-02", status: "Present" } as any],
-      ]),
       rates
     );
-    expect(breakdown.holidayVisits).toBe(1);
-    expect(breakdown.colomboVisits).toBe(1); // gets base colombo rate
+    expect(breakdown.colomboVisits).toBe(1);
     expect(breakdown.bandaragamaVisits).toBe(1);
-    expect(breakdown.income).toBe(1000 + 1500 + 500); // base + allowance + bandaragama
+    expect(breakdown.income).toBe(1000 + 500);
   });
 });
 

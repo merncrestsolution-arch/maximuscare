@@ -50,9 +50,10 @@ export default function PatientEditPage() {
   );
 
   const registeredDateForId = String((formData as Patient).registeredDate ?? "").trim();
+  const branchForId = String((formData as Patient).branch ?? "").trim();
   const { data: nextPatientId } = useQuery({
-    queryKey: ["patient-next-id", registeredDateForId],
-    queryFn: () => patientApi.nextId(registeredDateForId || undefined),
+    queryKey: ["patient-next-id", registeredDateForId, branchForId],
+    queryFn: () => patientApi.nextId(registeredDateForId || undefined, branchForId || undefined),
     enabled: !isEdit,
   });
 

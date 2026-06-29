@@ -540,6 +540,18 @@ export default function InPatientProfilePage() {
           {patient.status}
         </div>
 
+        {/* Bug 13: discharge/transfer never remove the record — surface the status prominently. */}
+        {patient.status === "Discharged" && discharge && (
+          <div className="rounded-lg mb-4 px-4 py-2.5 text-sm" style={{ background: "#FEF2F2", color: "#DC2626" }} data-testid="banner-discharged">
+            ⚠️ Patient discharged on {format(new Date((discharge as any).dischargeDate), "dd MMM yyyy")}. The full admission history, sessions and bills below are retained.
+          </div>
+        )}
+        {(transferLogs as any[]).length > 0 && (
+          <div className="rounded-lg mb-4 px-4 py-2.5 text-sm" style={{ background: "#FFF3ED", color: "#F45627" }} data-testid="banner-transferred">
+            ↗ Patient transferred to {(transferLogs as any[])[0].toBranchName ?? "another branch"} on {format(new Date((transferLogs as any[])[0].transferDate), "dd MMM yyyy")}. Original records are retained at the previous branch.
+          </div>
+        )}
+
         <div className="bg-gray-50 rounded-lg p-4 mb-6 space-y-3">
           <div className="flex items-center gap-2 text-sm">
             <User className="h-4 w-4 text-muted-foreground" />
@@ -662,7 +674,7 @@ export default function InPatientProfilePage() {
           themeColor="#105691"
           meta={[
             { label: "Patient", value: patient.patientName },
-            { label: "Patient ID", value: patient.id },
+            { label: "Patient ID", value: (patient.patientIdNo?.trim() || `IP-${String(patient.id).slice(0, 8).toUpperCase()}`) },
             { label: "Admit Date", value: format(new Date(patient.admitDate), "dd MMM yyyy") },
             { label: "Generated", value: format(new Date(), "dd MMM yyyy hh:mm a") },
             { label: "Prepared By", value: user?.name || "System" },
@@ -679,7 +691,7 @@ export default function InPatientProfilePage() {
             </div>
             <div className="text-right text-xs text-muted-foreground">
               <div>{patient.patientName}</div>
-              <div>ID: {patient.id}</div>
+              <div className="font-mono">ID: {patient.patientIdNo?.trim() || `IP-${String(patient.id).slice(0, 8).toUpperCase()}`}</div>
             </div>
           </div>
 

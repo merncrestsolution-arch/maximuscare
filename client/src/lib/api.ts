@@ -402,9 +402,10 @@ export const patientApi = {
     return apiRequest<any[] | PaginatedResponse<any>>(`/patients${qs}`);
   },
   getOne: (id: string) => apiRequest<any>(`/patients/${id}`),
-  nextId: (registeredDate?: string) => {
+  nextId: (registeredDate?: string, branch?: string) => {
     const q = new URLSearchParams();
     if (registeredDate) q.set("date", registeredDate);
+    if (branch) q.set("branch", branch);
     const qs = q.toString() ? `?${q.toString()}` : "";
     return apiRequest<{ patientCode: string }>(`/patients/next-id${qs}`);
   },

@@ -1,29 +1,29 @@
 import type { IStorage } from "../storage";
 import type { Patient, Visit, InPatientSession } from "@shared/schema";
-import { nextPatientIdFromCodes } from "@shared/patientId";
+import { nextPatientCode, bumpPatientCode } from "@shared/patientId";
 import { computeOutstandingBalance, derivePaymentStatus } from "./calculationEngine";
 
+/** Bug 2/9: patient code MC/<BRANCH>/<DDMM>/<SEQ> — sequence resets per day per branch. */
 export async function generatePatientCode(
   storage: IStorage,
+  branch: string | null | undefined,
   registeredDate?: string | Date | null,
 ): Promise<string> {
   const all = await storage.getAllPatients();
-  return nextPatientIdFromCodes(
-    all.map((p) => p.patientCode),
-    registeredDate,
-  );
+  return nextPatientCode(all.map((p) => p.patientCode), branch, registeredDate);
 }
 
 export async function generateUniquePatientCode(
   storage: IStorage,
+  branch: string | null | undefined,
   registeredDate?: string | Date | null,
 ): Promise<string> {
   const all = await storage.getAllPatients();
   const codes = all.map((p) => p.patientCode);
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const code = nextPatientIdFromCodes(codes, registeredDate);
+  let code = nextPatientCode(codes, branch, registeredDate);
+  for (let attempt = 0; attempt < 50; attempt++) {
     if (!(await storage.isPatientCodeTaken(code))) return code;
-    codes.push(code);
+    code = bumpPatientCode(code);
   }
   throw new Error("Could not generate a unique patient ID. Please try again.");
 }

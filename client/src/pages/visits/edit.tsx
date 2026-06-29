@@ -161,7 +161,9 @@ export default function EditVisit() {
     }
   };
 
-  const patientName = patient?.name || visit.patientId;
+  const patientName = patient
+    ? `${patient.name} (${patient.patientCode || patient.id})`
+    : visit.patientId;
 
   return (
     <div className={`${pageBleed} pb-28 md:pb-10`}>

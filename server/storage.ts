@@ -70,6 +70,7 @@ const {
   homeVisits,
   userBranchAccess,
   userBranchPermissions,
+  staffSalaryAdjustments,
 } = schema;
 
 import type {

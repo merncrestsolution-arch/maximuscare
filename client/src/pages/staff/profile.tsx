@@ -68,10 +68,24 @@ export default function StaffProfilePage() {
     (allBranches as any[]).length > 0
       ? (allBranches as any[]).map((b) => b.branchName ?? b.name).filter(Boolean)
       : BRANCH_OPTIONS.map((b) => b.value);
+  // Bug 11: prefer the authoritative branch assignments (branchIds from user_branch_permissions)
+  // and map them to real branch names. Fall back to the legacy `branch` text column only when
+  // no permission rows exist, never displaying the raw "Both"/"All" sentinel.
+  const branchIds: string[] = Array.isArray((profileUser as any).branchIds)
+    ? (profileUser as any).branchIds
+    : [];
+  const branchNameById = new Map(
+    (allBranches as any[]).map((b) => [String(b.id), b.branchName ?? b.name]),
+  );
   const rawBranch = String((profileUser as any).branch ?? "").trim();
-  const isAllBranches = ["both", "all", "all branches"].includes(rawBranch.toLowerCase());
-  const assignedBranchNames: string[] = !rawBranch
+  const isBoth = rawBranch.toLowerCase() === "both";
+  const isAllBranches = ["all", "all branches"].includes(rawBranch.toLowerCase());
+  const assignedBranchNames: string[] = branchIds.length > 0
+    ? branchIds.map((id) => branchNameById.get(String(id))).filter(Boolean) as string[]
+    : !rawBranch
     ? ["Head Office"]
+    : isBoth
+    ? ["Dehiwala", "Neuro Rehabilitation"]
     : isAllBranches
     ? allBranchNames
     : rawBranch.split(",").map((s) => s.trim()).filter(Boolean);

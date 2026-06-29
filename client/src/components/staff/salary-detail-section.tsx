@@ -94,7 +94,6 @@ export function SalaryDetailSection({ staffId, staffName, canEdit }: Props) {
       },
       { label: "Home Visit Income", calc: `${s.totalHomeVisits} visits`, amount: formatLkr(s.homeIncome) },
       { label: "  └ Colombo (Dehiwala/Neuro)", calc: `${s.colomboHome} visits`, amount: "" },
-      { label: "  └ Holiday Colombo HV", calc: `${s.holidayHomeVisits} visits`, amount: formatLkr(s.holidayHomeIncome) },
       { label: "  └ Bandaragama / Nexus HV", calc: `${s.bandaragamaHome} visits`, amount: "" },
       { label: "OT Hours", calc: `${s.totalOt} hrs`, amount: formatLkr(s.otIncome) },
       { label: "Extra Holidays", calc: `${s.extraHolidays} days`, amount: `-${formatLkr(s.extraHolidayDeduction)}` },

@@ -10,7 +10,6 @@ export const DEFAULT_RATES = {
   incentivePerCount: 100,
   homeColombo: 1000,
   homeBandaragama: 500,
-  holidayHome: 1500,
   otPerHour: 250,
   extraHolidayDeduction: 1500,
   freeAbsentDays: 4,
@@ -27,7 +26,6 @@ export interface CalculationRates {
   incentivePerCount: number;
   homeColombo: number;
   homeBandaragama: number;
-  holidayHome: number;
   otPerHour: number;
   extraHolidayDeduction: number;
   freeAbsentDays: number;
@@ -44,7 +42,6 @@ export interface DailyIncentiveResult {
 export interface HomeVisitBreakdown {
   colomboVisits: number;
   bandaragamaVisits: number;
-  holidayVisits: number;
   income: number;
 }
 
@@ -218,16 +215,11 @@ export function computeDailyIncentivesForRange(
   return results.sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
-/** Home visit on a day when staff was Absent → Holiday visit at holiday rate. */
-export function isHolidayHomeVisitDay(attendanceStatus: string | undefined | null): boolean {
-  return String(attendanceStatus ?? "").trim() === "Absent";
-}
-
-export function classifyHomeVisit(
-  branch: string,
-  attendanceStatus: string | undefined | null
-): "Colombo" | "Bandaragama" | "Holiday" {
-  if (isHolidayHomeVisitDay(attendanceStatus)) return "Holiday";
+/**
+ * Home visit classification (Bug 7): flat per-branch rate, no holiday case.
+ * Colombo "main"-tier branches (Dehiwala, Neuro Unit) → Colombo rate; all others → Bandaragama rate.
+ */
+export function classifyHomeVisit(branch: string): "Colombo" | "Bandaragama" {
   if (getHomeVisitRateTier(branch) === "bandaragama") return "Bandaragama";
   return "Colombo";
 }
@@ -235,49 +227,32 @@ export function classifyHomeVisit(
 export function computeHomeVisitIncome(
   colomboVisits: number,
   bandaragamaVisits: number,
-  holidayVisits: number,
-  rates: Pick<CalculationRates, "homeColombo" | "homeBandaragama" | "holidayHome">
+  rates: Pick<CalculationRates, "homeColombo" | "homeBandaragama">
 ): number {
   return (
     Math.max(0, colomboVisits) * rates.homeColombo +
-    Math.max(0, bandaragamaVisits) * rates.homeBandaragama +
-    Math.max(0, holidayVisits) * rates.holidayHome
+    Math.max(0, bandaragamaVisits) * rates.homeBandaragama
   );
 }
 
 export function computeHomeVisitBreakdown(
   homeVisits: { branch: string; visitDate: string }[],
-  attendanceByDate: Map<string, Attendance>,
-  rates: Pick<CalculationRates, "homeColombo" | "homeBandaragama" | "holidayHome">
+  rates: Pick<CalculationRates, "homeColombo" | "homeBandaragama">
 ): HomeVisitBreakdown {
   let colomboVisits = 0;
   let bandaragamaVisits = 0;
-  let holidayVisits = 0;
   for (const v of homeVisits) {
-    const att = attendanceByDate.get(v.visitDate);
-
-    // Business rule (Bug 8): the LKR 1,500 holiday home-visit rate applies ONLY to
-    // the Colombo "main"-tier branches — Dehiwala and the Neuro (Rehabilitation) Unit.
-    // Other branches (Bandaragama, Nexus/Beruwala) never receive the holiday rate and
-    // use their standard branch home-visit rate instead.
-    const isColomboBranch = getHomeVisitRateTier(v.branch) === "main";
-
+    // Bug 7: flat home-visit rate by branch tier — no holiday multiplier regardless of day.
     if (getHomeVisitRateTier(v.branch) === "bandaragama") {
       bandaragamaVisits++;
     } else {
       colomboVisits++;
     }
-
-    const isHoliday = isHolidayHomeVisitDay(att?.status);
-    if (isHoliday && isColomboBranch) {
-      holidayVisits++;
-    }
   }
   return {
     colomboVisits,
     bandaragamaVisits,
-    holidayVisits,
-    income: computeHomeVisitIncome(colomboVisits, bandaragamaVisits, holidayVisits, rates),
+    income: computeHomeVisitIncome(colomboVisits, bandaragamaVisits, rates),
   };
 }
 

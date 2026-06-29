@@ -9,6 +9,7 @@ import {
   summarizeAttendance,
   isPaidPaymentStatus,
   visitMatchesStaff,
+  getVisitCollectedRevenue,
 } from "./calculationEngine";
 import { computeExtendedDashboardKpis, computeDashboardCharts, type DashboardCharts } from "./reportService";
 
@@ -136,18 +137,11 @@ export async function computeDashboardKpis(
       incentiveCountToday += todayIncentive.count;
       incentiveAmountToday += todayIncentive.incentive;
     }
-    const todaySummary = computePayrollForStaff(
-      staff,
-      visits.filter((v) => v.visitDate === today),
-      attendance,
-      ipSessions.filter((s) => s.sessionDate === today),
-      [],
-      today,
-      today,
-      settings
-    );
-    homeVisitIncomeToday += todaySummary.homeIncome;
   }
+
+  const todayHomeVisits = visits.filter((v) => v.visitDate === today && v.visitType === "Home");
+  homeVisitIncomeToday = todayHomeVisits.reduce((acc, v) => acc + getVisitCollectedRevenue(v), 0);
+  console.log("[HomeVisitDiagnostics] today:", today, "visits count:", todayHomeVisits.length, "revenue:", homeVisitIncomeToday, "visits:", todayHomeVisits.map(v => ({ id: v.id, date: v.visitDate, type: v.visitType, amount: v.paymentAmount, paid: v.amountPaid, status: v.paymentStatus })));
 
   let expensesList = await storage.getExpensesByDateRange(rangeFrom, rangeTo);
   // Scope by the expense's own branch column (consistent with /api/expenses and

@@ -7,12 +7,11 @@ export const BRANCH_OPTIONS = [
 ] as const;
 
 /** Client mirror of enterprise branch config — labels for UI only. */
-export const HOME_VISIT_TYPES = ["Main", "Bandaragama", "Holiday"] as const;
+export const HOME_VISIT_TYPES = ["Main", "Bandaragama"] as const;
 
 export const HOME_VISIT_TYPE_LABELS: Record<string, string> = {
   Main: "Main branch (Dehiwala / Neuro / Nexus)",
   Bandaragama: "Bandaragama",
-  Holiday: "Holiday (staff absent)",
   Colombo: "Main branch (legacy)",
 };
 

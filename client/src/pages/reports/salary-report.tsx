@@ -55,8 +55,7 @@ function SalaryReportContent() {
     const d = data.deductions;
     return [
       { item: "Basic Salary", amount: lkr(data.basicSalary) },
-      { item: `Home Visits — Colombo Regular (${hv.colomboRegular.count} × ${formatMoney(hv.colomboRegular.rate)})`, amount: lkr(hv.colomboRegular.amount) },
-      { item: `Home Visits — Colombo Holiday (${hv.colomboHoliday.count} × ${formatMoney(hv.colomboHoliday.rate)})`, amount: lkr(hv.colomboHoliday.amount) },
+      { item: `Home Visits — Colombo (Dehiwala/Neuro) (${hv.colomboRegular.count} × ${formatMoney(hv.colomboRegular.rate)})`, amount: lkr(hv.colomboRegular.amount) },
       { item: `Home Visits — Other Branches (${hv.otherBranches.count} × ${formatMoney(hv.otherBranches.rate)})`, amount: lkr(hv.otherBranches.amount) },
       { item: "Home Visits Total", amount: lkr(hv.total) },
       { item: `OT Hours (${data.ot.hours} × ${formatMoney(data.ot.rate)})`, amount: lkr(data.ot.amount) },
@@ -152,12 +151,8 @@ function SalaryReportContent() {
                 <td className="pt-2 text-left font-semibold" colSpan={2}>Home Visits</td>
               </tr>
               <tr>
-                <td className="py-1 text-left text-muted-foreground">Colombo Regular ({data.homeVisits.colomboRegular.count} × {formatMoney(data.homeVisits.colomboRegular.rate)})</td>
+                <td className="py-1 text-left text-muted-foreground">Colombo (Dehiwala/Neuro) ({data.homeVisits.colomboRegular.count} × {formatMoney(data.homeVisits.colomboRegular.rate)})</td>
                 <td className="py-1 text-right whitespace-nowrap">{lkr(data.homeVisits.colomboRegular.amount)}</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-left text-muted-foreground">Colombo Holiday ({data.homeVisits.colomboHoliday.count} × {formatMoney(data.homeVisits.colomboHoliday.rate)})</td>
-                <td className="py-1 text-right whitespace-nowrap">{lkr(data.homeVisits.colomboHoliday.amount)}</td>
               </tr>
               <tr>
                 <td className="py-1 text-left text-muted-foreground">Other Branches ({data.homeVisits.otherBranches.count} × {formatMoney(data.homeVisits.otherBranches.rate)})</td>

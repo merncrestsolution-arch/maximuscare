@@ -18,7 +18,6 @@ const settings = {
   autoFineAmount: 500,
   homeColombo: PAYROLL_RATES.homeColombo,
   homeBandaragama: PAYROLL_RATES.homeBandaragama,
-  holidayHome: PAYROLL_RATES.holidayHome,
   otPerHour: PAYROLL_RATES.otPerHour,
   extraHolidayDeduction: PAYROLL_RATES.extraHolidayDeduction,
   freeAbsentDays: 4,

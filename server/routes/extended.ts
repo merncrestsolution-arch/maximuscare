@@ -150,7 +150,6 @@ export function registerExtendedRoutes(app: Express) {
         autoFineAmount: "500",
         homeRateColombo: "1000",
         homeRateBandaragama: "500",
-        holidayHomeRate: "1500",
         otRatePerHour: "250",
         extraHolidayDeduction: "1500",
         freeAbsentDays: 4,
@@ -581,6 +580,7 @@ export function registerExtendedRoutes(app: Express) {
       const staffId = isManagementRole(user.role) ? (req.query.staffId as string | undefined) : user.staffId;
       const branchFilter = getBranchFilter(req as any);
       const report = await computeAttendanceReport(storage, startDate, endDate, staffId, branchFilter);
+      console.log("[AttendanceReport]", { startDate, endDate, staffId, branchFilter, records: report.records?.length ?? 0 });
       return successResponse(res, report);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);

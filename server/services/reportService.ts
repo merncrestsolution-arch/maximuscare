@@ -285,8 +285,15 @@ export async function computeAttendanceReport(
         rows.filter((a) => inDateRange(a.date, rangeFrom, rangeTo))
       )
     : await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
-  if (branchFilter) {
-    attendance = applyBranchFilter(attendance, branchFilter);
+  if (branchFilter && !staffId) {
+    // Bug 8: attendance rows historically had no `branch` column, so filtering on
+    // attendance.branch drops legacy records and the report comes back empty.
+    // Scope by the *staff member's* branch instead (mirrors GET /api/attendance).
+    const { filterStaffByBranchAccess } = await import("./staffService");
+    const allStaff = await storage.getAllStaff();
+    const branchStaff = await filterStaffByBranchAccess(storage, allStaff, branchFilter);
+    const branchStaffIds = new Set(branchStaff.map((s) => s.id));
+    attendance = attendance.filter((a) => branchStaffIds.has(a.staffId));
   }
 
   const summary = summarizeAttendance(attendance);
@@ -605,7 +612,11 @@ export async function computeExtendedDashboardKpis(
   const outstandingPatients = new Set(scopedUnpaid.map((r) => r.patientId)).size;
 
   let todayAttendance = await storage.getAttendanceByDateRange(today, today);
-  if (branchFilter) todayAttendance = applyBranchFilter(todayAttendance, branchFilter);
+  console.log("[AttendanceDiagnostics] today:", today, "raw attendance rows count:", todayAttendance.length, "rows:", todayAttendance.map((a: any) => ({ id: a.id, staffId: a.staffId, date: a.date, branch: a.branch, status: a.status })));
+  if (branchFilter) {
+    todayAttendance = applyBranchFilter(todayAttendance, branchFilter);
+    console.log("[AttendanceDiagnostics] after branch filter count:", todayAttendance.length, "branchFilter:", branchFilter);
+  }
   const todayAttendanceSummary = summarizeAttendance(todayAttendance);
 
   const todayPaidVisitRevenue = todayVisitsList.reduce((a, v) => a + getVisitCollectedRevenue(v), 0);

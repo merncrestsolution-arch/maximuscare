@@ -60,7 +60,7 @@ function HomeVisitsContent() {
             <Button onClick={() => setOpen(true)}>Add Home Visit</Button>
           </div>
           <ReportDateFilters preset={preset} onPresetChange={setPreset} startDate={startDate} endDate={endDate} onStartDateChange={setStartDate} onEndDateChange={setEndDate} />
-          <p className="text-xs text-muted-foreground">Rates: Main branch Rs.1,000 · Bandaragama Rs.500 · Holiday Rs.1,500 (auto when staff absent)</p>
+          <p className="text-xs text-muted-foreground">Rates: Main branch Rs.1,000 · Bandaragama Rs.500</p>
         </div>
       }
     >

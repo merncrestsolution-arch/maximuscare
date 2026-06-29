@@ -5,6 +5,12 @@ import {
   parsePatientIdSequence,
   patientIdYearMonth,
   PATIENT_ID_PREFIX,
+  patientBranchCode,
+  patientIdDayMonth,
+  formatPatientCode,
+  nextPatientCode,
+  bumpPatientCode,
+  isCurrentPatientCode,
 } from "@shared/patientId";
 
 describe("patientId", () => {
@@ -40,5 +46,38 @@ describe("patientId", () => {
 
   it("uses the Maximus clinic prefix", () => {
     expect(PATIENT_ID_PREFIX).toBe("MXM");
+  });
+});
+
+describe("patientCode (MC/<BRANCH>/<DDMM>/<SEQ>)", () => {
+  it("maps branches to 3-letter codes", () => {
+    expect(patientBranchCode("Dehiwala")).toBe("DEH");
+    expect(patientBranchCode("Neuro Rehabilitation")).toBe("NEU");
+    expect(patientBranchCode("Bandaragama")).toBe("BAN");
+    // legacy alias resolves to Dehiwala
+    expect(patientBranchCode("Colombo")).toBe("DEH");
+  });
+
+  it("extracts DDMM in clinic timezone from a registration date string", () => {
+    expect(patientIdDayMonth("2026-06-29")).toBe("2906");
+    expect(patientIdDayMonth("2026-07-01")).toBe("0107");
+  });
+
+  it("formats and increments per branch per day", () => {
+    expect(formatPatientCode("DEH", "2906", 1)).toBe("MC/DEH/2906/01");
+    const next = nextPatientCode(["MC/DEH/2906/01", "MC/DEH/2906/02"], "Dehiwala", "2026-06-29");
+    expect(next).toBe("MC/DEH/2906/03");
+  });
+
+  it("resets the sequence for a different branch or day", () => {
+    const existing = ["MC/DEH/2906/01", "MC/DEH/2906/02"];
+    expect(nextPatientCode(existing, "Bandaragama", "2026-06-29")).toBe("MC/BAN/2906/01");
+    expect(nextPatientCode(existing, "Dehiwala", "2026-07-01")).toBe("MC/DEH/0107/01");
+  });
+
+  it("bumps a code and recognises the current format", () => {
+    expect(bumpPatientCode("MC/DEH/2906/01")).toBe("MC/DEH/2906/02");
+    expect(isCurrentPatientCode("MC/DEH/2906/01")).toBe(true);
+    expect(isCurrentPatientCode("MXM-202606-000001")).toBe(false);
   });
 });

@@ -827,3 +827,32 @@ export const updateStaffOtEntrySchema = insertStaffOtEntrySchema.partial();
 export type InsertStaffOtEntry = z.infer<typeof insertStaffOtEntrySchema>;
 export type UpdateStaffOtEntry = z.infer<typeof updateStaffOtEntrySchema>;
 export type StaffOtEntry = typeof staffOtEntries.$inferSelect;
+
+// Staff Salary Adjustments table
+export const staffSalaryAdjustments = sqliteTable("staff_salary_adjustments", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  staffId: text("staff_id").notNull().references(() => staff.id),
+  staffName: text("staff_name").notNull(),
+  type: text("type").notNull(), // 'addition' | 'decrement'
+  amount: text("amount").notNull(),
+  adjustmentDate: text("adjustment_date").notNull(),
+  reason: text("reason").notNull(),
+  createdByStaffId: text("created_by_staff_id"),
+  createdByName: text("created_by_name"),
+  deletedAt: integer("deleted_at", { mode: "timestamp" }),
+  deletedBy: text("deleted_by"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const insertStaffSalaryAdjustmentSchema = createInsertSchema(staffSalaryAdjustments).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  amount: z.union([z.string(), z.number()]).transform((v) => String(v)),
+});
+export const updateStaffSalaryAdjustmentSchema = insertStaffSalaryAdjustmentSchema.partial();
+export type InsertStaffSalaryAdjustment = z.infer<typeof insertStaffSalaryAdjustmentSchema>;
+export type UpdateStaffSalaryAdjustment = z.infer<typeof updateStaffSalaryAdjustmentSchema>;
+export type StaffSalaryAdjustment = typeof staffSalaryAdjustments.$inferSelect;
