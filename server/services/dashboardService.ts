@@ -90,10 +90,21 @@ export async function computeDashboardKpis(
         .filter((s) => targets.has(normalizeBranchName(s.branch ?? "").toLowerCase()))
         .map((s) => s.id)
     );
-    ipSessions = ipSessions.filter(s => 
-      (s.branchId && matchingBranchIds.has(s.branchId)) || 
-      branchStaffIds.has(s.treatingStaffId)
+    // A session's own branchId / treating staff branch is often missing or differs
+    // (staff can treat in-patients at a branch other than their home branch), which
+    // dropped valid sessions from the count/chart. Match by the parent ADMISSION's
+    // branch too so every in-patient session is attributed to the right branch.
+    const admissionBranchById = new Map(
+      (await storage.getAllInPatientAdmissions()).map((a) => [a.id, a.branchId]),
     );
+    ipSessions = ipSessions.filter((s) => {
+      const admissionBranch = admissionBranchById.get(s.admissionId);
+      return (
+        (s.branchId && matchingBranchIds.has(s.branchId)) ||
+        (admissionBranch && matchingBranchIds.has(admissionBranch)) ||
+        branchStaffIds.has(s.treatingStaffId)
+      );
+    });
   }
   const todaySessions = ipSessions.filter((s) => s.sessionDate === today).length;
 

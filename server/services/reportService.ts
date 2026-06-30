@@ -522,10 +522,20 @@ export async function computeDashboardCharts(
         .filter((s) => targets.has(normalizeBranchName(s.branch ?? "").toLowerCase()))
         .map((s) => s.id)
     );
-    ipSessions = ipSessions.filter(s => 
-      (s.branchId && matchingBranchIds.has(s.branchId)) || 
-      branchStaffIds.has(s.treatingStaffId)
+    // Match by the parent ADMISSION's branch too — the session row's own branchId is
+    // often missing and the treating staff's home branch can differ, which otherwise
+    // dropped valid in-patient sessions from the Visit Analytics chart.
+    const admissionBranchById = new Map(
+      (await storage.getAllInPatientAdmissions()).map((a) => [a.id, a.branchId]),
     );
+    ipSessions = ipSessions.filter((s) => {
+      const admissionBranch = admissionBranchById.get(s.admissionId);
+      return (
+        (s.branchId && matchingBranchIds.has(s.branchId)) ||
+        (admissionBranch && matchingBranchIds.has(admissionBranch)) ||
+        branchStaffIds.has(s.treatingStaffId)
+      );
+    });
   }
   const incentiveRows = await computeIncentiveReport(storage, rangeFrom, rangeTo);
 
