@@ -552,6 +552,10 @@ export default function InPatientProfilePage() {
       : "Deduction";
   const grandTotal = subtotal - deductionAmount;
   const balanceDue = grandTotal - paymentTotal;
+  // Discharge balance is recomputed from the snapshot grand total minus ALL recorded
+  // payments so the Discharge Summary reconciles with the live Billing Summary even
+  // when payments are added after the discharge was created.
+  const dischargeBalance = discharge ? Number(discharge.grandTotal) - paymentTotal : 0;
   const billingColumns = [
     { key: "item", label: "Item" },
     { key: "quantity", label: "Qty/Days" },
@@ -911,21 +915,24 @@ export default function InPatientProfilePage() {
                     <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
                     <td className="pt-2 text-right font-bold whitespace-nowrap">LKR {formatMoney(Number(discharge.grandTotal))}</td>
                   </tr>
+                  {/* Amount Paid / Balance reflect ALL recorded payments (live), not just the
+                      amount entered at discharge — so this stays in sync with the Billing
+                      Summary above when payments are added after discharge. */}
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Amount Paid</td>
-                    <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap">LKR {formatMoney(Number(discharge.amountPaid))}</td>
+                    <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap">LKR {formatMoney(paymentTotal)}</td>
                   </tr>
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Balance</td>
-                    <td className={`py-1 text-right font-medium whitespace-nowrap ${parseFloat(discharge.balance) > 0 ? "text-red-600" : "text-green-700"}`}>LKR {formatMoney(Number(discharge.balance))}</td>
+                    <td className={`py-1 text-right font-medium whitespace-nowrap ${dischargeBalance > 0 ? "text-red-600" : "text-green-700"}`}>LKR {formatMoney(dischargeBalance)}</td>
                   </tr>
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">Payment Status</td>
                     <td className="py-1 text-right">
                       <span className={`px-2 py-0.5 rounded text-xs ${
-                        discharge.paymentStatus === "Paid" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                        dischargeBalance <= 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
                       }`}>
-                        {discharge.paymentStatus}
+                        {dischargeBalance <= 0 ? "Paid" : "Unpaid"}
                       </span>
                     </td>
                   </tr>
