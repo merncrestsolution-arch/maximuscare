@@ -121,16 +121,8 @@ export default function AddInPatientPage() {
       toast({ title: "Error", description: "Patient name is required", variant: "destructive" });
       return;
     }
-    if (!formData.phone.trim()) {
-      toast({ title: "Error", description: "Phone number is required", variant: "destructive" });
-      return;
-    }
     if (!formData.condition.trim()) {
       toast({ title: "Error", description: "Condition is required", variant: "destructive" });
-      return;
-    }
-    if (!formData.careTakerName.trim()) {
-      toast({ title: "Error", description: "Caretaker name is required", variant: "destructive" });
       return;
     }
     if (!formData.amountPerDay || parseFloat(formData.amountPerDay) <= 0) {
@@ -231,7 +223,7 @@ export default function AddInPatientPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="phone">Phone *</Label>
+              <Label htmlFor="phone">Phone</Label>
               <Input
                 id="phone"
                 value={formData.phone}
@@ -270,7 +262,7 @@ export default function AddInPatientPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="careTakerName">Caretaker Name *</Label>
+              <Label htmlFor="careTakerName">Caretaker Name</Label>
               <Input
                 id="careTakerName"
                 value={formData.careTakerName}
@@ -281,7 +273,7 @@ export default function AddInPatientPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="careTakerRelationship">Relationship *</Label>
+              <Label htmlFor="careTakerRelationship">Relationship</Label>
               <Input
                 id="careTakerRelationship"
                 value={formData.careTakerRelationship}
