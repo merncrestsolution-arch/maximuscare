@@ -35,6 +35,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
+import { PatientCredentials } from "@/components/patients/patient-credentials";
 import { isManager, isBranchManager } from "@/lib/permissions";
 import { useBranches } from "@/hooks/useData";
 
@@ -540,6 +541,16 @@ export default function InPatientProfilePage() {
           {patient.status}
         </div>
 
+        <div className="flex flex-wrap gap-2 mb-4">
+          <PatientCredentials
+            kind="inpatient"
+            id={patientId}
+            patientName={patient.patientName}
+            patientCode={patient.patientCode ?? patient.patientIdNo}
+            phone={patient.phone}
+          />
+        </div>
+
         {/* Bug 13: discharge/transfer never remove the record — surface the status prominently. */}
         {patient.status === "Discharged" && discharge && (
           <div className="rounded-lg mb-4 px-4 py-2.5 text-sm" style={{ background: "#FEF2F2", color: "#DC2626" }} data-testid="banner-discharged">
@@ -799,11 +810,11 @@ export default function InPatientProfilePage() {
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-lg font-semibold">Extra Expenses</h2>
             <Button
-              size="sm"
+              size="compact"
               onClick={openAddExpenseModal}
               data-testid="button-add-expense"
             >
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className="h-4 w-4" />
               Add
             </Button>
           </div>
@@ -893,11 +904,11 @@ export default function InPatientProfilePage() {
               />
               {canAddSession && (
                 <Button 
-                  size="sm"
+                  size="compact"
                   onClick={() => setLocation(`/inpatients/${patientId}/session/new`)}
                   data-testid="button-add-session"
                 >
-                  <Plus className="h-4 w-4 mr-1" />
+                  <Plus className="h-4 w-4" />
                   Add Session
                 </Button>
               )}
@@ -968,18 +979,18 @@ export default function InPatientProfilePage() {
 
         {canViewPayments && (
           <div className="bg-green-50 rounded-lg p-4 mb-6" data-testid="payment-section">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
               <h3 className="font-semibold flex items-center gap-2">
                 <CreditCard className="h-4 w-4" />
                 Payments
               </h3>
               {canAddPayment && (
                 <Button 
-                  size="sm"
+                  size="compact"
                   onClick={() => setShowPaymentModal(true)}
                   data-testid="button-add-payment"
                 >
-                  <Plus className="h-4 w-4 mr-1" />
+                  <Plus className="h-4 w-4" />
                   Add Payment
                 </Button>
               )}

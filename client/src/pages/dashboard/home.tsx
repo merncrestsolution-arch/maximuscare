@@ -558,8 +558,8 @@ export default function Dashboard() {
               <Wallet className="h-5 w-5" />
               Add My Expense
             </CardTitle>
-            <Button onClick={() => navigate("/expenses/add")} size="sm" data-testid="button-add-my-expense">
-              <Plus className="h-4 w-4 mr-1" /> Add Expense
+            <Button onClick={() => navigate("/expenses/add")} size="compact" data-testid="button-add-my-expense">
+              <Plus className="h-4 w-4" /> Add Expense
             </Button>
           </CardHeader>
           <CardContent>
@@ -818,8 +818,8 @@ export default function Dashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Expenses</CardTitle>
-            <Button onClick={() => navigate("/expenses/add")} size="sm" data-testid="button-add-expense">
-              <Plus className="h-4 w-4 mr-1" /> Add Expense
+            <Button onClick={() => navigate("/expenses/add")} size="compact" data-testid="button-add-expense">
+              <Plus className="h-4 w-4" /> Add Expense
             </Button>
           </CardHeader>
           <CardContent>

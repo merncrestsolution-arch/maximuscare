@@ -369,6 +369,15 @@ export function useInPatient(id: string) {
   });
 }
 
+export function useInPatientQrToken(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['inpatient-qr-token', id],
+    queryFn: () => inPatientApi.qrToken(id),
+    enabled: !!id && enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useCreateInPatient() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -51,9 +51,9 @@ export default function ExpensesListPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Expenses</h1>
         {!isBranchLead && (
-          <Button asChild>
+          <Button size="compact" asChild>
             <Link href="/expenses/add">
-              <Plus className="h-4 w-4 mr-1" /> Add
+              <Plus className="h-4 w-4" /> Add
             </Link>
           </Button>
         )}

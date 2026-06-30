@@ -472,8 +472,8 @@ function PhysioSummaryContent() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-bold text-foreground">Staff fines</div>
                 {isManagement ? (
-                  <Button size="sm" onClick={openAddFine} data-testid="button-add-fine">
-                    <Plus className="h-4 w-4 mr-1" />
+                  <Button size="compact" onClick={openAddFine} data-testid="button-add-fine">
+                    <Plus className="h-4 w-4" />
                     Add fine
                   </Button>
                 ) : null}

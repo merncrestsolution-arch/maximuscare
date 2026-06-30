@@ -22,7 +22,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { ArrowLeft, Edit2, Pencil, FileText, Phone, MapPin, Calendar, User as UserIcon, Loader2, Trash2, History } from "lucide-react";
-import { PatientQrButton } from "@/components/patients/patient-qr";
+import { PatientCredentials } from "@/components/patients/patient-credentials";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { useAuth } from "@/context/auth-context";
@@ -328,7 +328,13 @@ export default function PatientProfile() {
           </div>
 
           <div className="flex flex-wrap gap-2 pt-2">
-            <PatientQrButton patientId={patient.id} patientName={patient.name} patientCode={patient.patientCode} />
+            <PatientCredentials
+              kind="outpatient"
+              id={patient.id}
+              patientName={patient.name}
+              patientCode={patient.patientCode}
+              phone={patient.phone}
+            />
             <Button
               type="button"
               variant="outline"

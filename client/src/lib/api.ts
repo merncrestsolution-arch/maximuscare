@@ -416,7 +416,9 @@ export const patientApi = {
     return apiRequest<{ patient: any | null }>(`/patients/lookup?${q.toString()}`);
   },
   qrToken: (id: string) =>
-    apiRequest<{ token: string; patientCode: string | null }>(`/patients/${id}/qr-token`),
+    apiRequest<{ token: string; patientCode: string | null; organizationId: "maximus" | "nexus" }>(
+      `/patients/${id}/qr-token`
+    ),
   scan: (token: string) =>
     apiRequest<{ patient: any }>(`/patients/scan`, {
       method: "POST",
@@ -536,6 +538,10 @@ export const inPatientApi = {
     return apiRequest<any[]>(`/inpatients${query}`);
   },
   getOne: (id: string) => apiRequest<any>(`/inpatients/${id}`),
+  qrToken: (id: string) =>
+    apiRequest<{ token: string; patientCode: string | null; organizationId: "maximus" | "nexus" }>(
+      `/inpatients/${id}/qr-token`
+    ),
   create: (data: any) => apiRequest<any>('/inpatients', {
     method: 'POST',
     body: JSON.stringify(data),

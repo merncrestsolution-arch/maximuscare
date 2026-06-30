@@ -1090,12 +1090,13 @@ export async function registerRoutes(
             return res.status(403).json({ message: "Forbidden" });
           }
         }
+        const organizationId = organizationForBranch(patient.branch);
         const token = signPatientQrToken({
           patientId: patient.id,
-          organizationId: organizationForBranch(patient.branch),
+          organizationId,
           branchId: patient.branchId ?? null,
         });
-        return res.json({ token, patientCode: patient.patientCode ?? null });
+        return res.json({ token, patientCode: patient.patientCode ?? null, organizationId });
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }
@@ -2192,6 +2193,37 @@ export async function registerRoutes(
       return res.status(500).json({ message: error.message });
     }
   });
+
+  // Signed QR token for an in-patient admission — mirrors the out-patient QR so the
+  // printable ID card / "Show QR" feature works for in-patients too. Scanning resolves
+  // to the linked patient master record when present (admissions created from an existing
+  // patient), otherwise the QR still encodes a verifiable, org-scoped admission token.
+  app.get(
+    "/api/inpatients/:id/qr-token",
+    requireAuth,
+    attachBranchContext(),
+    async (req: Request, res: Response) => {
+      try {
+        const admission = await storage.getInPatientAdmission(param(req, "id"));
+        if (!admission) {
+          return res.status(404).json({ message: "Admission not found" });
+        }
+        const organizationId = resolveSessionOrganization(req) ?? "maximus";
+        const token = signPatientQrToken({
+          patientId: admission.patientId ?? admission.id,
+          organizationId,
+          branchId: admission.branchId ?? null,
+        });
+        return res.json({
+          token,
+          patientCode: admission.patientCode ?? admission.patientIdNo ?? null,
+          organizationId,
+        });
+      } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+      }
+    }
+  );
 
   // Create in-patient admission (Admin, MD, Receptionist, Physiotherapist)
   app.post("/api/inpatients", requireAuth, requireBranchContext(), requirePatientsManage, async (req: Request, res: Response) => {

@@ -88,8 +88,8 @@ function TasksContent() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Tasks</h1>
         {isMgmt && (
-          <Button onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" /> New task
+          <Button size="compact" onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4" /> New task
           </Button>
         )}
       </div>
