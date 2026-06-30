@@ -47,7 +47,7 @@ export function PatientCredentials({ kind, id, patientName, patientCode, phone, 
     const list = (allBranches as Array<{ name: string; branchName?: string | null; isActive?: boolean | number }>)
       .filter((b) => b.isActive !== false && b.isActive !== 0)
       .map((b) => b.branchName ?? b.name)
-      .filter((name) => organizationForBranch(name) === org)
+      .filter((name) => org === "maximus" ? true : organizationForBranch(name) === org)
       .map((name) => branchLabel(name, name));
     return Array.from(new Set(list));
   };
