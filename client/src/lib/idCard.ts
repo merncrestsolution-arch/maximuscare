@@ -363,11 +363,11 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   const r1Top = 16.5;
   drawIconInCircle(iconPerson, leftIconX, r1Top + 0.5, 4.4);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.4);
+  doc.setFontSize(4.0);
   text(doc, SUBTLE);
   doc.text("PATIENT NAME", leftTextX, r1Top + 1.6);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8.0);
+  doc.setFontSize(6.8);
   text(doc, INK);
   doc.text(data.patientName ? data.patientName.toUpperCase() : "—", leftTextX, r1Top + 4.9);
 
@@ -379,12 +379,12 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   const r2Top = div1Y;
   drawIconInCircle(iconIdCard, leftIconX, r2Top + 0.6, 4.4);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.4);
+  doc.setFontSize(4.0);
   text(doc, SUBTLE);
   doc.text("PATIENT ID", leftTextX, r2Top + 3.6);
   doc.text(":", 22.5, r2Top + 3.6);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.4);
+  doc.setFontSize(5.6);
   text(doc, INK);
   doc.text(data.patientIdNumber || "—", 24.0, r2Top + 3.6);
 
@@ -396,12 +396,12 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   const r3Top = div2Y;
   drawIconInCircle(iconPhoneHandset, leftIconX, r3Top + 0.6, 4.4);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.4);
+  doc.setFontSize(4.0);
   text(doc, SUBTLE);
   doc.text("PHONE", leftTextX, r3Top + 3.6);
   doc.text(":", 22.5, r3Top + 3.6);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.4);
+  doc.setFontSize(5.6);
   text(doc, INK);
   doc.text(data.phone || "—", 24.0, r3Top + 3.6);
 
@@ -413,12 +413,12 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   const r4Top = div3Y;
   drawIconInCircle(iconPin, leftIconX, r4Top + 0.6, 4.4);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.4);
+  doc.setFontSize(4.0);
   text(doc, SUBTLE);
   doc.text("ADDRESS", leftTextX, r4Top + 3.6);
   doc.text(":", 22.5, r4Top + 3.6);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.4);
+  doc.setFontSize(5.6);
   text(doc, INK);
 
   const addrValue = data.address || "—";
