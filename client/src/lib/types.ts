@@ -52,6 +52,11 @@ export interface Patient {
   condition?: string;
   patientCode?: string | null;
   fullName?: string | null;
+  branchId?: string | null;
+  nicOrPassport?: string | null;
+  dateOfBirth?: string | null;
+  emergencyContact?: string | null;
+  referralSource?: string | null;
 }
 
 export interface Visit {
@@ -93,6 +98,8 @@ export interface InPatientAdmission {
   address: string;
   patientIdNo?: string;
   careTakerIdNo?: string;
+  patientId?: string | null;
+  patientCode?: string | null;
   packageType: 'AC Room' | 'Non-AC Room';
   admitDate: string;
   amountPerDay: string;
@@ -100,7 +107,8 @@ export interface InPatientAdmission {
   careTakerDaysOverride?: number | null;
   reportsAttachments?: string[];
   idCopyAttachments?: string[];
-  status: 'Admitted' | 'Discharged';
+  branchId?: string | null;
+  status: 'Admitted' | 'Discharged' | 'Transferred';
   createdAt: string;
   updatedAt: string;
 }

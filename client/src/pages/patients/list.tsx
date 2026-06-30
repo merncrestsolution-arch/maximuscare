@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { usePatients, useDeletePatient } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Search, UserPlus, Phone, MapPin, ChevronRight, Loader2, BedDouble, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
+import { ListCard } from "@/components/ui/list-card";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { isManagementRole } from "@/lib/permissions";
@@ -176,11 +176,7 @@ export default function PatientsList() {
 
       <div className="space-y-3">
         {filteredPatients.map(patient => (
-          <Card
-            key={patient.id}
-            className="bg-white border border-border/60 shadow-sm hover:shadow-md hover:border-primary/20 active:scale-[0.99] transition-all"
-          >
-            <CardContent className="p-4 flex items-center justify-between gap-3">
+          <ListCard key={patient.id}>
               <Link href={`/patients/${patient.id}`} className="flex items-center gap-3 min-w-0 flex-1">
                 <Avatar className="h-12 w-12 shrink-0 border-2 border-background shadow-sm bg-secondary/10 text-secondary-foreground">
                   <AvatarFallback className="font-bold text-lg text-primary">{patient.name.charAt(0)}</AvatarFallback>
@@ -274,8 +270,7 @@ export default function PatientsList() {
                   </Link>
                 )}
               </div>
-            </CardContent>
-          </Card>
+          </ListCard>
         ))}
         {filteredPatients.length === 0 && (
            <div className="text-center py-10 text-muted-foreground bg-muted/10 rounded-lg border border-dashed">

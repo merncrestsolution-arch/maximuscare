@@ -1,31 +1,243 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearch } from "wouter";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
 import { canViewReportsHub } from "@/lib/permissions";
 import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
-import { useSalaryDetail, useStaffDirectory } from "@/hooks/useData";
+import {
+  useSalaryReport,
+  useSalaryReportHistory,
+  useStaffDirectory,
+  useAddSalaryAddition,
+  useAddSalaryDecrement,
+  useAddSalaryFine,
+} from "@/hooks/useData";
+import { useToast } from "@/hooks/use-toast";
 import { ReportPageShell } from "@/components/reports/report-page-shell";
 import { ReportDateFilters } from "@/components/reports/report-date-filters";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { getDateRangeForPreset, formatMoney, type DatePreset } from "@/lib/reportDatePresets";
+import { Plus, Loader2 } from "lucide-react";
 
 const lkr = (n: number) => `LKR ${formatMoney(Number(n) || 0)}`;
+
+type AdjustmentType = "addition" | "decrement" | "fine";
+
+type ReportLine = { id: string; date: string; reason: string; amount: number };
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function AdjustmentDialog({
+  open,
+  type,
+  staffId,
+  onClose,
+}: {
+  open: boolean;
+  type: AdjustmentType;
+  staffId: string;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const addAddition = useAddSalaryAddition();
+  const addDecrement = useAddSalaryDecrement();
+  const addFine = useAddSalaryFine();
+
+  const [date, setDate] = useState(todayStr());
+  const [reason, setReason] = useState("");
+  const [amount, setAmount] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setDate(todayStr());
+      setReason("");
+      setAmount("");
+    }
+  }, [open]);
+
+  const mutation =
+    type === "addition" ? addAddition : type === "decrement" ? addDecrement : addFine;
+
+  const title =
+    type === "addition" ? "Add Addition" : type === "decrement" ? "Add Decrement" : "Add Fine";
+
+  const submit = async () => {
+    const numeric = Number(amount);
+    if (!date || !reason.trim() || !Number.isFinite(numeric) || numeric <= 0) {
+      toast({
+        title: "Missing details",
+        description: "Date, reason and a positive amount are all required.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      await mutation.mutateAsync({ staffId, date, reason: reason.trim(), amount: numeric });
+      toast({ title: `${title.replace("Add ", "")} recorded` });
+      onClose();
+    } catch (e) {
+      toast({
+        title: "Error",
+        description: e instanceof Error ? e.message : "Failed to save",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="adj-date">Date</Label>
+            <Input id="adj-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="adj-reason">Reason</Label>
+            <Input
+              id="adj-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={type === "addition" ? "Performance bonus" : type === "fine" ? "Late arrival" : "Advance deduction"}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="adj-amount">Amount (LKR)</Label>
+            <Input
+              id="adj-amount"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={mutation.isPending}>
+            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LineSection({
+  title,
+  sign,
+  lines,
+  total,
+  canManage,
+  onAdd,
+  addLabel,
+}: {
+  title: string;
+  sign: "+" | "-";
+  lines: ReportLine[];
+  total: number;
+  canManage: boolean;
+  onAdd: () => void;
+  addLabel: string;
+}) {
+  return (
+    <>
+      <tr className="border-t border-border/60">
+        <td className="pt-2 text-left font-semibold" colSpan={2}>
+          {title} ({sign})
+        </td>
+      </tr>
+      {lines.length === 0 ? (
+        <tr>
+          <td className="py-1 text-left text-muted-foreground" colSpan={2}>
+            None recorded for this period.
+          </td>
+        </tr>
+      ) : (
+        lines.map((l) => (
+          <tr key={l.id}>
+            <td className="py-1 text-left text-muted-foreground">
+              {l.date} · {l.reason}
+            </td>
+            <td
+              className={`py-1 text-right whitespace-nowrap ${sign === "-" ? "text-red-600" : ""}`}
+            >
+              {sign === "-" ? "-" : ""}
+              {lkr(l.amount)}
+            </td>
+          </tr>
+        ))
+      )}
+      <tr>
+        <td className="py-1 text-left font-medium">{title} Total</td>
+        <td className={`py-1 text-right font-medium whitespace-nowrap ${sign === "-" ? "text-red-600" : ""}`}>
+          {sign === "-" ? "-" : ""}
+          {lkr(total)}
+        </td>
+      </tr>
+      {canManage && (
+        <tr>
+          <td className="pb-1" colSpan={2}>
+            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onAdd}>
+              <Plus className="h-3 w-3 mr-1" /> {addLabel}
+            </Button>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
 
 function SalaryReportContent() {
   const { user } = useAuth();
   const { logoUri } = useBranding();
+  const search = useSearch();
+
   // Staff / Physiotherapists only ever see their own report; the selector is hidden.
   const isSelfOnly = ["Staff", "Physiotherapist"].includes(user?.role ?? "");
   const canPickStaff = !isSelfOnly;
+  const canManageAdjustments = ["Admin", "MD", "Nexus MD"].includes(user?.role ?? "");
 
-  const [selectedStaffId, setSelectedStaffId] = useState(isSelfOnly ? user?.id ?? "" : "");
+  // Bug L: the staff profile links here pre-filtered with ?staffId=…
+  const presetStaffId = useMemo(() => {
+    const params = new URLSearchParams(search);
+    return params.get("staffId") ?? "";
+  }, [search]);
+
+  const [selectedStaffId, setSelectedStaffId] = useState(
+    isSelfOnly ? user?.id ?? "" : presetStaffId
+  );
   const [preset, setPreset] = useState<DatePreset>("currentMonth");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [submitted, setSubmitted] = useState<{ staffId: string; startDate: string; endDate: string } | null>(null);
+  const [dialog, setDialog] = useState<AdjustmentType | null>(null);
 
   useEffect(() => {
     const r = getDateRangeForPreset(preset, startDate, endDate);
@@ -34,13 +246,23 @@ function SalaryReportContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset]);
 
-  // Branch staff list for managers (server scopes /staff/directory to the active branch).
+  // Auto-generate when arriving with a pre-selected staff (from the profile link).
+  useEffect(() => {
+    if (presetStaffId && !isSelfOnly) setSelectedStaffId(presetStaffId);
+  }, [presetStaffId, isSelfOnly]);
+
   const { data: staffList = [] } = useStaffDirectory(undefined, canPickStaff);
 
-  const { data, isLoading, error } = useSalaryDetail(
+  const { data: report, isLoading, error } = useSalaryReport(
     submitted?.staffId ?? "",
     { startDate: submitted?.startDate ?? "", endDate: submitted?.endDate ?? "" },
     !!submitted?.staffId && !!submitted?.startDate && !!submitted?.endDate
+  );
+
+  const { data: history = [] } = useSalaryReportHistory(
+    submitted?.staffId ?? "",
+    6,
+    !!submitted?.staffId
   );
 
   const handleGenerate = () => {
@@ -50,22 +272,30 @@ function SalaryReportContent() {
   };
 
   const pdfRows = useMemo(() => {
-    if (!data) return [];
-    const hv = data.homeVisits;
-    const d = data.deductions;
-    return [
-      { item: "Basic Salary", amount: lkr(data.basicSalary) },
-      { item: `Home Visits — Colombo (Dehiwala/Neuro) (${hv.colomboRegular.count} × ${formatMoney(hv.colomboRegular.rate)})`, amount: lkr(hv.colomboRegular.amount) },
-      { item: `Home Visits — Other Branches (${hv.otherBranches.count} × ${formatMoney(hv.otherBranches.rate)})`, amount: lkr(hv.otherBranches.amount) },
-      { item: "Home Visits Total", amount: lkr(hv.total) },
-      { item: `OT Hours (${data.ot.hours} × ${formatMoney(data.ot.rate)})`, amount: lkr(data.ot.amount) },
-      { item: "Additions / Bonuses", amount: lkr(data.additions.amount) },
-      { item: "Deduction — Fines", amount: `-${lkr(d.fines.amount)}` },
-      { item: `Deduction — Extra Holidays (${d.extraHolidays.days} × ${formatMoney(d.extraHolidays.rate)})`, amount: `-${lkr(d.extraHolidays.amount)}` },
-      { item: "Deduction — Other", amount: `-${lkr(d.other.amount)}` },
-      { item: "FINAL SALARY", amount: lkr(data.finalSalary) },
+    if (!report) return [];
+    const rows: { item: string; amount: string }[] = [
+      { item: "Basic Salary", amount: lkr(report.basicSalary) },
     ];
-  }, [data]);
+    for (const hv of report.homeVisits) {
+      rows.push({
+        item: `Home Visits — ${hv.branchName} (${hv.count} × ${formatMoney(hv.ratePerVisit)})`,
+        amount: lkr(hv.total),
+      });
+    }
+    rows.push({ item: "Home Visits Total", amount: lkr(report.homeVisitsTotal) });
+    rows.push({
+      item: `OT Hours (${report.otHours} × ${formatMoney(report.otRatePerHour)})`,
+      amount: lkr(report.otTotal),
+    });
+    for (const a of report.additions) rows.push({ item: `Addition — ${a.date} ${a.reason}`, amount: lkr(a.amount) });
+    rows.push({ item: "Additions Total", amount: lkr(report.additionsTotal) });
+    for (const f of report.fines) rows.push({ item: `Fine — ${f.date} ${f.reason}`, amount: `-${lkr(f.amount)}` });
+    rows.push({ item: "Fines Total", amount: `-${lkr(report.finesTotal)}` });
+    for (const d of report.decrements) rows.push({ item: `Decrement — ${d.date} ${d.reason}`, amount: `-${lkr(d.amount)}` });
+    rows.push({ item: "Decrements Total", amount: `-${lkr(report.decrementsTotal)}` });
+    rows.push({ item: "FINAL SALARY", amount: lkr(report.finalSalary) });
+    return rows;
+  }, [report]);
 
   return (
     <ReportPageShell
@@ -84,7 +314,8 @@ function SalaryReportContent() {
                 <SelectContent>
                   {(staffList as any[]).map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.name}{s.role ? ` (${s.role})` : ""}
+                      {s.name}
+                      {s.role ? ` (${s.role})` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -100,17 +331,20 @@ function SalaryReportContent() {
             onEndDateChange={setEndDate}
           />
           <div>
-            <Button onClick={handleGenerate} disabled={(!isSelfOnly && !selectedStaffId) || !startDate || !endDate}>
+            <Button
+              onClick={handleGenerate}
+              disabled={(!isSelfOnly && !selectedStaffId) || !startDate || !endDate}
+            >
               Generate Report
             </Button>
           </div>
         </div>
       }
       actions={
-        data ? (
+        report ? (
           <StructuredReportActions
-            reportTitle={`Salary Report — ${data.staff.name}`}
-            fileBaseName={`salary-${data.staff.id}-${submitted?.startDate ?? ""}`}
+            reportTitle={`Salary Report — ${report.staffName}`}
+            fileBaseName={`salary-${report.staffId}-${submitted?.startDate ?? ""}`}
             columns={[
               { key: "item", label: "Description" },
               { key: "amount", label: "Amount (LKR)" },
@@ -118,88 +352,151 @@ function SalaryReportContent() {
             rows={pdfRows}
             logoUri={logoUri}
             meta={[
-              { label: "Staff", value: data.staff.name },
-              { label: "Branch", value: data.staff.branch ?? "—" },
+              { label: "Staff", value: report.staffName },
+              { label: "Branch", value: report.branch ?? "—" },
               { label: "Period", value: `${submitted?.startDate} to ${submitted?.endDate}` },
+              { label: "Final Salary", value: lkr(report.finalSalary) },
             ]}
           />
         ) : null
       }
     >
-      {data && (
-        <div className="rounded-lg border border-border/60 bg-white p-4">
-          <div className="border-b border-border/60 pb-3 mb-3">
-            <div className="text-sm font-bold text-foreground">
-              Salary Report — {data.staff.name}
+      {report && (
+        <div className="space-y-6">
+          <div className="rounded-lg border border-border/60 bg-white p-4">
+            <div className="border-b-2 border-[#F58220] pb-3 mb-3">
+              <div className="text-sm font-bold text-[#105691]">Salary Report — {report.staffName}</div>
+              <div className="text-xs text-muted-foreground">
+                {report.branch ?? "—"} · {submitted?.startDate} to {submitted?.endDate}
+              </div>
             </div>
-            <div className="text-xs text-muted-foreground">
-              {data.staff.branch ?? "—"} · {submitted?.startDate} to {submitted?.endDate}
-            </div>
+            <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: "68%" }} />
+                <col style={{ width: "32%" }} />
+              </colgroup>
+              <tbody>
+                <tr>
+                  <td className="py-1 text-left">Basic Salary</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap">{lkr(report.basicSalary)}</td>
+                </tr>
+
+                <tr className="border-t border-border/60">
+                  <td className="pt-2 text-left font-semibold" colSpan={2}>
+                    Home Visits
+                  </td>
+                </tr>
+                {report.homeVisits.length === 0 ? (
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground" colSpan={2}>
+                      No home visits in this period.
+                    </td>
+                  </tr>
+                ) : (
+                  report.homeVisits.map((hv: any) => (
+                    <tr key={hv.branchName}>
+                      <td className="py-1 text-left text-muted-foreground">
+                        {hv.branchName} — {hv.count} {hv.count === 1 ? "visit" : "visits"} × {formatMoney(hv.ratePerVisit)}
+                      </td>
+                      <td className="py-1 text-right whitespace-nowrap">{lkr(hv.total)}</td>
+                    </tr>
+                  ))
+                )}
+                <tr>
+                  <td className="py-1 text-left font-medium">HV Total</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap">{lkr(report.homeVisitsTotal)}</td>
+                </tr>
+
+                <tr className="border-t border-border/60">
+                  <td className="pt-2 py-1 text-left">
+                    OT Hours ({report.otHours} × {formatMoney(report.otRatePerHour)})
+                  </td>
+                  <td className="pt-2 py-1 text-right whitespace-nowrap">{lkr(report.otTotal)}</td>
+                </tr>
+
+                <LineSection
+                  title="Additions"
+                  sign="+"
+                  lines={report.additions}
+                  total={report.additionsTotal}
+                  canManage={canManageAdjustments}
+                  onAdd={() => setDialog("addition")}
+                  addLabel="Add"
+                />
+                <LineSection
+                  title="Fines"
+                  sign="-"
+                  lines={report.fines}
+                  total={report.finesTotal}
+                  canManage={canManageAdjustments}
+                  onAdd={() => setDialog("fine")}
+                  addLabel="Add Fine"
+                />
+                <LineSection
+                  title="Decrements"
+                  sign="-"
+                  lines={report.decrements}
+                  total={report.decrementsTotal}
+                  canManage={canManageAdjustments}
+                  onAdd={() => setDialog("decrement")}
+                  addLabel="Add Decrement"
+                />
+
+                <tr className="border-t-2 border-[#105691]">
+                  <td className="pt-2 text-left font-bold text-[#105691]">FINAL SALARY</td>
+                  <td className="pt-2 text-right font-bold text-[#105691] whitespace-nowrap">{lkr(report.finalSalary)}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
-            <colgroup>
-              <col style={{ width: "70%" }} />
-              <col style={{ width: "30%" }} />
-            </colgroup>
-            <tbody>
-              <tr>
-                <td className="py-1 text-left">Basic Salary</td>
-                <td className="py-1 text-right font-medium whitespace-nowrap">{lkr(data.basicSalary)}</td>
-              </tr>
 
-              <tr className="border-t border-border/60">
-                <td className="pt-2 text-left font-semibold" colSpan={2}>Home Visits</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-left text-muted-foreground">Colombo (Dehiwala/Neuro) ({data.homeVisits.colomboRegular.count} × {formatMoney(data.homeVisits.colomboRegular.rate)})</td>
-                <td className="py-1 text-right whitespace-nowrap">{lkr(data.homeVisits.colomboRegular.amount)}</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-left text-muted-foreground">Other Branches ({data.homeVisits.otherBranches.count} × {formatMoney(data.homeVisits.otherBranches.rate)})</td>
-                <td className="py-1 text-right whitespace-nowrap">{lkr(data.homeVisits.otherBranches.amount)}</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-left font-medium">Home Visits Total</td>
-                <td className="py-1 text-right font-medium whitespace-nowrap">{lkr(data.homeVisits.total)}</td>
-              </tr>
-
-              <tr className="border-t border-border/60">
-                <td className="pt-2 py-1 text-left">OT Hours ({data.ot.hours} × {formatMoney(data.ot.rate)})</td>
-                <td className="pt-2 py-1 text-right whitespace-nowrap">{lkr(data.ot.amount)}</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-left">Additions / Bonuses</td>
-                <td className="py-1 text-right whitespace-nowrap">{lkr(data.additions.amount)}</td>
-              </tr>
-
-              <tr className="border-t border-border/60">
-                <td className="pt-2 text-left font-semibold" colSpan={2}>Deductions</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-left text-muted-foreground">Fines</td>
-                <td className="py-1 text-right text-red-600 whitespace-nowrap">-{lkr(data.deductions.fines.amount)}</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-left text-muted-foreground">Extra Holidays ({data.deductions.extraHolidays.days} × {formatMoney(data.deductions.extraHolidays.rate)})</td>
-                <td className="py-1 text-right text-red-600 whitespace-nowrap">-{lkr(data.deductions.extraHolidays.amount)}</td>
-              </tr>
-              <tr>
-                <td className="py-1 text-left text-muted-foreground">Other Decrements</td>
-                <td className="py-1 text-right text-red-600 whitespace-nowrap">-{lkr(data.deductions.other.amount)}</td>
-              </tr>
-
-              <tr className="border-t-2 border-border">
-                <td className="pt-2 text-left font-bold">FINAL SALARY</td>
-                <td className="pt-2 text-right font-bold whitespace-nowrap">{lkr(data.finalSalary)}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div className="rounded-lg border border-border/60 bg-white p-4">
+            <div className="text-sm font-bold text-[#105691] mb-3">Salary History</div>
+            {(history as any[]).length === 0 ? (
+              <p className="text-sm text-muted-foreground">No history available.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground border-b border-border/60">
+                      <th className="py-1 pr-3">Period</th>
+                      <th className="py-1 px-3 text-right">Basic</th>
+                      <th className="py-1 px-3 text-right">Total HV</th>
+                      <th className="py-1 px-3 text-right">OT</th>
+                      <th className="py-1 pl-3 text-right">Final</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(history as any[]).map((h) => (
+                      <tr key={h.period} className="border-b border-border/40">
+                        <td className="py-1 pr-3">{h.period}</td>
+                        <td className="py-1 px-3 text-right whitespace-nowrap">{formatMoney(h.basicSalary)}</td>
+                        <td className="py-1 px-3 text-right whitespace-nowrap">{formatMoney(h.homeVisitsTotal)}</td>
+                        <td className="py-1 px-3 text-right whitespace-nowrap">{formatMoney(h.otTotal)}</td>
+                        <td className="py-1 pl-3 text-right font-medium whitespace-nowrap">{formatMoney(h.finalSalary)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
-      {!data && !isLoading && (
+
+      {!report && !isLoading && (
         <p className="text-muted-foreground text-sm">
           Select {canPickStaff ? "a staff member and " : ""}a date range, then press “Generate Report”.
         </p>
+      )}
+
+      {submitted?.staffId && (
+        <AdjustmentDialog
+          open={dialog !== null}
+          type={dialog ?? "addition"}
+          staffId={submitted.staffId}
+          onClose={() => setDialog(null)}
+        />
       )}
     </ReportPageShell>
   );

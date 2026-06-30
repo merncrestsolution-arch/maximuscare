@@ -1,7 +1,49 @@
 import type { IStorage } from "../storage";
-import type { Patient, Visit, InPatientSession } from "@shared/schema";
+import type { Patient, Visit, InPatientSession, InPatientAdmission } from "@shared/schema";
 import { nextPatientCode, bumpPatientCode } from "@shared/patientId";
+import { organizationForBranch, type OrganizationId } from "@shared/branchAccess";
 import { computeOutstandingBalance, derivePaymentStatus } from "./calculationEngine";
+
+const normalizePhone = (phone: string | null | undefined): string =>
+  phone && phone.trim() !== "" ? phone.replace(/\s+/g, "").trim() : "";
+
+const normalizeNic = (nic: string | null | undefined): string =>
+  nic && nic.trim() !== "" ? nic.trim().toUpperCase() : "";
+
+/**
+ * Find an existing patient within an organization by phone OR NIC/Passport.
+ *
+ * Shared by the in-patient and out-patient registration flows so a re-admission
+ * reuses the same patient record (and Patient ID) instead of creating a duplicate.
+ * Scoped to the organization (branch grouping) so identity matches never leak a
+ * record from an unrelated org that happens to share a phone/NIC.
+ */
+export async function findPatientByPhoneOrNIC(
+  storage: IStorage,
+  organizationId: OrganizationId,
+  phone: string | null | undefined,
+  nicOrPassport?: string | null,
+): Promise<Patient | null> {
+  const wantedPhone = normalizePhone(phone);
+  const wantedNic = normalizeNic(nicOrPassport);
+  if (!wantedPhone && !wantedNic) return null;
+
+  const all = await storage.getAllPatients();
+  const scoped = all.filter(
+    (p) => !p.deletedAt && organizationForBranch(p.branch) === organizationId
+  );
+
+  // Prefer an NIC/Passport match (strongest identifier), then fall back to phone.
+  if (wantedNic) {
+    const byNic = scoped.find((p) => normalizeNic(p.nicOrPassport) === wantedNic);
+    if (byNic) return byNic;
+  }
+  if (wantedPhone) {
+    const byPhone = scoped.find((p) => normalizePhone(p.phone) === wantedPhone);
+    if (byPhone) return byPhone;
+  }
+  return null;
+}
 
 /** Bug 2/9: patient code MC/<BRANCH>/<DDMM>/<SEQ> — sequence resets per day per branch. */
 export async function generatePatientCode(
@@ -214,6 +256,117 @@ export interface PatientExportRow {
   sessions: number;
   outstandingAmount: number;
   status: string;
+}
+
+export type PatientHistoryItemType = "admission" | "visit";
+
+export interface PatientHistoryItem {
+  type: PatientHistoryItemType;
+  id: string;
+  date: string;
+  branch: string | null;
+  title: string;
+  status?: string | null;
+  condition?: string | null;
+  treatment?: string | null;
+  packageType?: string | null;
+  dischargeDate?: string | null;
+  sessionNumber?: number | null;
+  amount?: string | null;
+  staffName?: string | null;
+}
+
+export interface PatientHistory {
+  patientId: string;
+  patientCode: string | null;
+  organizationId: OrganizationId;
+  items: PatientHistoryItem[];
+}
+
+/**
+ * Chronological (newest-first) cross-module history for a patient: out-patient
+ * visits + in-patient admissions, strictly scoped to the patient's organization
+ * so history never bleeds across the Maximus/Nexus boundary.
+ */
+export async function getPatientHistory(
+  storage: IStorage,
+  patientId: string,
+): Promise<PatientHistory | null> {
+  const patient = await storage.getPatient(patientId);
+  if (!patient) return null;
+
+  const org = organizationForBranch(patient.branch);
+  const branches = await storage.getAllBranches();
+  const branchOrgById = new Map<string, OrganizationId>();
+  for (const b of branches) {
+    branchOrgById.set(b.id, organizationForBranch((b as any).branchName ?? b.name));
+  }
+  const inSameOrg = (branch?: string | null, branchId?: string | null): boolean => {
+    if (branch && branch.trim()) return organizationForBranch(branch) === org;
+    if (branchId && branchOrgById.has(branchId)) return branchOrgById.get(branchId) === org;
+    // Unscoped legacy rows default to the patient's own org rather than being hidden.
+    return true;
+  };
+
+  const items: PatientHistoryItem[] = [];
+
+  const visits = await storage.getVisitsByPatient(patientId);
+  for (const v of visits) {
+    if (!inSameOrg((v as any).branch, (v as any).branchId)) continue;
+    items.push({
+      type: "visit",
+      id: v.id,
+      date: v.visitDate,
+      branch: (v as any).branch ?? null,
+      title: `Out-Patient Visit · Session #${v.sessionNumber}`,
+      status: v.status,
+      condition: v.condition,
+      treatment: v.treatment,
+      sessionNumber: v.sessionNumber,
+      amount: v.paymentAmount != null ? String(v.paymentAmount) : null,
+      staffName: v.treatingStaffName ?? (v as any).createdByName ?? null,
+    });
+  }
+
+  const admissions = await storage.getInPatientAdmissionsForPatient(patientId);
+  for (const a of admissions) {
+    if (!inSameOrg(null, a.branchId)) continue;
+    const branchName = a.branchId ? branchNameForId(branches, a.branchId) : null;
+    let dischargeDate: string | null = null;
+    if (a.status === "Discharged") {
+      const discharge = await storage.getInPatientDischargeByAdmission(a.id);
+      dischargeDate = discharge?.dischargeDate ?? null;
+    }
+    items.push({
+      type: "admission",
+      id: a.id,
+      date: a.admitDate,
+      branch: branchName,
+      title: "In-Patient Admission",
+      status: a.status,
+      condition: a.condition,
+      packageType: a.packageType,
+      dischargeDate,
+      amount: a.amountPerDay != null ? String(a.amountPerDay) : null,
+    });
+  }
+
+  items.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
+  return {
+    patientId: patient.id,
+    patientCode: patient.patientCode ?? null,
+    organizationId: org,
+    items,
+  };
+}
+
+function branchNameForId(
+  branches: Array<{ id: string; name: string; branchName?: string | null }>,
+  branchId: string,
+): string | null {
+  const b = branches.find((x) => x.id === branchId);
+  return b ? (b.branchName ?? b.name) : null;
 }
 
 export async function getPatientExportRows(storage: IStorage): Promise<PatientExportRow[]> {

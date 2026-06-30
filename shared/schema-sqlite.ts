@@ -245,6 +245,10 @@ export const inPatientAdmissions = sqliteTable("in_patient_admissions", {
   address: text("address").notNull(),
   patientIdNo: text("patient_id_no"),
   careTakerIdNo: text("care_taker_id_no"),
+  // Links an admission back to the patient master record so re-admissions reuse the
+  // same human-facing Patient ID (patientCode) instead of generating a new one.
+  patientId: text("patient_id"),
+  patientCode: text("patient_code"),
   packageType: text("package_type").notNull(),
   admitDate: text("admit_date").notNull(),
   amountPerDay: text("amount_per_day").notNull(),

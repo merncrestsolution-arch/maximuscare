@@ -24,7 +24,7 @@ import {
 } from "./middleware/secureApi";
 import { filterByBranchName, resolveBranchIdByName } from "./services/branchService";
 import { normalizeBranchName } from "@shared/branches";
-import { hasFullBranchAccess } from "@shared/branchAccess";
+import { hasFullBranchAccess, organizationForBranch, type OrganizationId } from "@shared/branchAccess";
 import { registerAutoFineJobs, startScheduledJobs } from "./jobs/scheduler";
 import { clinicDateString, clinicYesterdayString, clinicDateOffset } from "./clinicTime";
 import { registerHrmRoutes } from "./routes/hrm";
@@ -47,7 +47,8 @@ import { hasPermission } from "./rbac/permissions";
 import { registerExtendedRoutes } from "./routes/extended";
 import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
-import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient } from "./services/patientService";
+import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
+import { signPatientQrToken, verifyPatientQrToken } from "./services/qrTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
 import { logAudit } from "./services/auditService";
 
@@ -68,6 +69,19 @@ function requestIp(req: Request): string {
 function requestDevice(req: Request): string {
   const ua = req.headers["user-agent"];
   return typeof ua === "string" ? ua : "";
+}
+
+/**
+ * The organization (Maximus/Nexus branch grouping) the current session is acting
+ * within — derived from the selected branch, or the management overview context.
+ * Returns null when neither is established (caller should ask to pick a branch).
+ */
+function resolveSessionOrganization(req: Request): OrganizationId | null {
+  const ctx = (req as any).branchContext;
+  if (ctx?.selectedBranchName) return organizationForBranch(ctx.selectedBranchName);
+  if (ctx?.selectedContext === "nexus-overview") return "nexus";
+  if (ctx?.selectedContext === "maximus-overview") return "maximus";
+  return null;
 }
 
 const {
@@ -597,8 +611,10 @@ export async function registerRoutes(
           filtered = await filterStaffByBranchAccess(storage, filtered, branchFilter);
         }
 
-        // Scope Managers/Branch Managers/Receptionists to their allowed branches (Bug 6)
-        const { hasFullBranchAccess } = await import("./shared/branchAccess");
+        // Scope Managers/Branch Managers/Receptionists to their allowed branches (Bug 6).
+        // hasFullBranchAccess is imported statically at the top from "@shared/branchAccess";
+        // a dynamic import of "./shared/branchAccess" here pointed at a non-existent path and
+        // threw at runtime, returning 500 for managers loading the staff list.
         if (!hasFullBranchAccess(currentUser.role)) {
           const { getAllowedBranchesForStaff } = await import("./services/branchService");
           const allowed = await getAllowedBranchesForStaff(storage, currentUser.staffId, currentUser.role);
@@ -990,6 +1006,127 @@ export async function registerRoutes(
       return res.status(500).json({ message: error.message });
     }
   });
+
+  // Look up an existing patient by phone or NIC/Passport within the current org.
+  // Used by the in-patient/out-patient registration forms to reuse a Patient ID.
+  app.get(
+    "/api/patients/lookup",
+    requireAuth,
+    attachBranchContext(),
+    requirePatientsManage,
+    async (req: Request, res: Response) => {
+      try {
+        const organizationId = resolveSessionOrganization(req);
+        if (!organizationId) {
+          return res.status(400).json({ message: "Select a branch before looking up patients." });
+        }
+        const phone = String(req.query.phone ?? "").trim();
+        const nic = String(req.query.nic ?? "").trim();
+        if (!phone && !nic) {
+          return res.json({ patient: null });
+        }
+        const match = await findPatientByPhoneOrNIC(storage, organizationId, phone, nic);
+        return res.json({ patient: match ?? null });
+      } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+      }
+    }
+  );
+
+  // Resolve a scanned patient QR token to a patient — scoped to the session's org/branch.
+  app.post(
+    "/api/patients/scan",
+    requireAuth,
+    attachBranchContext(),
+    requirePatientsManage,
+    async (req: Request, res: Response) => {
+      try {
+        const organizationId = resolveSessionOrganization(req);
+        if (!organizationId) {
+          return res.status(400).json({ message: "Select a branch before scanning." });
+        }
+        const token = String((req.body as any)?.token ?? "").trim();
+        const verified = verifyPatientQrToken(token);
+        if (!verified.ok || !verified.payload) {
+          if (verified.error === "expired") {
+            return res.status(400).json({ message: "QR code invalid or expired", code: "QR_EXPIRED" });
+          }
+          return res.status(400).json({ message: "Invalid QR code, please try again", code: "QR_INVALID" });
+        }
+        // Reject cross-org scans before any DB read so we never leak existence.
+        if (verified.payload.organizationId !== organizationId) {
+          return res.status(404).json({ message: "Patient not found in this branch", code: "QR_SCOPE" });
+        }
+        const patient = await storage.getPatient(verified.payload.patientId);
+        if (!patient || patient.deletedAt) {
+          return res.status(404).json({ message: "Patient not found in this branch", code: "QR_SCOPE" });
+        }
+        // Defense in depth: the patient's current org must still match the session org.
+        if (organizationForBranch(patient.branch) !== organizationId) {
+          return res.status(404).json({ message: "Patient not found in this branch", code: "QR_SCOPE" });
+        }
+        return res.json({ patient });
+      } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+      }
+    }
+  );
+
+  // Signed QR token for a patient (encoded into the printable QR on the profile).
+  app.get(
+    "/api/patients/:id/qr-token",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const currentUser = (req as any).user;
+        const id = param(req, "id");
+        const patient = await storage.getPatient(id);
+        if (!patient || patient.deletedAt) {
+          return res.status(404).json({ message: "Patient not found" });
+        }
+        if (!canViewAllPatients(currentUser.role)) {
+          const ids = await storage.getPatientIdsForStaff(currentUser.staffId);
+          if (!ids.includes(id)) {
+            return res.status(403).json({ message: "Forbidden" });
+          }
+        }
+        const token = signPatientQrToken({
+          patientId: patient.id,
+          organizationId: organizationForBranch(patient.branch),
+          branchId: patient.branchId ?? null,
+        });
+        return res.json({ token, patientCode: patient.patientCode ?? null });
+      } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+      }
+    }
+  );
+
+  // Cross-module chronological history for a patient (org-scoped).
+  app.get(
+    "/api/patients/:id/history",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const currentUser = (req as any).user;
+        const id = param(req, "id");
+        const patient = await storage.getPatient(id);
+        if (!patient || patient.deletedAt) {
+          return res.status(404).json({ message: "Patient not found" });
+        }
+        if (!canViewAllPatients(currentUser.role)) {
+          const ids = await storage.getPatientIdsForStaff(currentUser.staffId);
+          if (!ids.includes(id)) {
+            return res.status(403).json({ message: "Forbidden" });
+          }
+        }
+        const history = await getPatientHistory(storage, id);
+        return res.json(history);
+      } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+      }
+    }
+  );
 
   registerPatientRoutes(app);
 
@@ -2061,6 +2198,8 @@ export async function registerRoutes(
     try {
       const branchContext = (req as any).branchContext;
       const branchId = branchContext?.selectedBranchId ?? null;
+      const branchName = branchContext?.selectedBranchName ?? null;
+      const organizationId = resolveSessionOrganization(req) ?? "maximus";
 
       const normalizedBody = normalizeInPatientAdmissionBody(req.body as Record<string, unknown>);
       const parsed = insertInPatientAdmissionSchema.safeParse(normalizedBody);
@@ -2068,9 +2207,47 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Invalid data", errors: parsed.error.flatten() });
       }
       const d = parsed.data;
+
+      // Patient ID logic: reuse an existing patient's ID on re-admission, otherwise
+      // generate a fresh MC/<BRANCH>/<DDMM>/<SEQ> code. Never trust patientCode from
+      // the client — always derive it from a validated patient record or generate it.
+      let linkedPatientId: string | null = null;
+      let patientCode: string | null = null;
+
+      // 1) Explicit existing patient chosen on the client (lookup/scan).
+      const requestedPatientId = String((req.body as any)?.patientId ?? "").trim();
+      if (requestedPatientId) {
+        const existing = await storage.getPatient(requestedPatientId);
+        if (existing && !existing.deletedAt && organizationForBranch(existing.branch) === organizationId) {
+          linkedPatientId = existing.id;
+          patientCode = existing.patientCode ?? null;
+        }
+      }
+
+      // 2) Fall back to matching by phone / NIC (patientIdNo) within the org.
+      if (!linkedPatientId) {
+        const match = await findPatientByPhoneOrNIC(
+          storage,
+          organizationId,
+          d.phone,
+          (d as any).patientIdNo
+        );
+        if (match) {
+          linkedPatientId = match.id;
+          patientCode = match.patientCode ?? null;
+        }
+      }
+
+      // 3) No existing patient — generate a new branch-scoped Patient ID.
+      if (!patientCode) {
+        patientCode = await generateUniquePatientCode(storage, branchName, d.admitDate);
+      }
+
       const admission = await storage.createInPatientAdmission({
         ...d,
         branchId: d.branchId || branchId,
+        patientId: linkedPatientId,
+        patientCode,
         reportsAttachments: (d as any).reportsAttachments ?? null,
         idCopyAttachments: (d as any).idCopyAttachments ?? null,
       } as any);

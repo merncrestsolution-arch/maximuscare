@@ -21,7 +21,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ArrowLeft, Edit2, Pencil, FileText, Phone, MapPin, Calendar, User as UserIcon, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, Edit2, Pencil, FileText, Phone, MapPin, Calendar, User as UserIcon, Loader2, Trash2, History } from "lucide-react";
+import { PatientQrButton } from "@/components/patients/patient-qr";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { useAuth } from "@/context/auth-context";
@@ -324,6 +325,20 @@ export default function PatientProfile() {
           
           <div className="text-sm text-muted-foreground flex items-center gap-1.5 pt-1">
             <MapPin className="h-3.5 w-3.5 opacity-70" /> {patient.address}
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-2">
+            <PatientQrButton patientId={patient.id} patientName={patient.name} patientCode={patient.patientCode} />
+            <Button
+              type="button"
+              variant="outline"
+              size="compact"
+              onClick={() => setLocation(`/patients/${patient.id}/history`)}
+              data-testid="button-view-history"
+            >
+              <History className="h-4 w-4" />
+              View History
+            </Button>
           </div>
         </CardContent>
       </Card>

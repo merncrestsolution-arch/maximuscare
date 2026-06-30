@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
 import { canManageAttendance } from "@/lib/permissions";
+import { clinicTodayString } from "@/lib/utils";
 
 function isoToDatetimeLocal(iso: string | undefined): string {
   if (!iso) return "";
@@ -285,7 +286,9 @@ export default function AttendancePage() {
   const deleteAttendanceMutation = useDeleteAttendance();
   const { toast } = useToast();
 
-  const today = format(new Date(), 'yyyy-MM-dd');
+  // Bug B: "today" must be the clinic's Sri Lanka calendar day so the date attendance
+  // is marked with matches how the dashboard/widgets filter "today" (clinicTodayString).
+  const today = clinicTodayString();
   const userId = user?.id ?? "";
   const isManagement = canManageAttendance(user?.role);
 
@@ -300,7 +303,7 @@ export default function AttendancePage() {
   const [summaryStatusFilter, setSummaryStatusFilter] = useState<"all" | "Present" | "Absent">("all");
 
   const [adminMarkStaffId, setAdminMarkStaffId] = useState("");
-  const [adminMarkDate, setAdminMarkDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
+  const [adminMarkDate, setAdminMarkDate] = useState(() => clinicTodayString());
   const [adminMarkLoading, setAdminMarkLoading] = useState(false);
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);

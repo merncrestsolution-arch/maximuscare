@@ -8,6 +8,8 @@ import {
   type PayrollSummary,
 } from "./payrollService";
 import { computeOtAmount } from "./calculationEngine";
+import { normalizeBranchName, getHomeVisitRateTier } from "@shared/branches";
+import { clinicDateString } from "../clinicTime";
 
 export interface SalaryPreview {
   staff: {
@@ -423,6 +425,188 @@ export async function getSalaryHistory(
   }
 ): Promise<Salary[]> {
   return storage.getSalariesFiltered(filters);
+}
+
+// ── Bug K: full salary report (Reports page) ──
+// A self-contained breakdown driven by the Phase-2 spec data model:
+//   finalSalary = basicSalary + homeVisitsTotal + otTotal + additionsTotal
+//                 - finesTotal - decrementsTotal
+// Home visits are auto-calculated per branch using the Phase-1 flat rates (no
+// holiday multiplier); additions/fines/decrements are manual entries stored in
+// staff_salary_adjustments.
+export interface SalaryReportLine {
+  id: string;
+  date: string;
+  reason: string;
+  amount: number;
+}
+
+export interface SalaryReportHomeVisit {
+  branchName: string;
+  branchId: string | null;
+  count: number;
+  ratePerVisit: number;
+  total: number;
+}
+
+export interface SalaryReport {
+  staffId: string;
+  staffName: string;
+  branch: string | null;
+  period: { startDate: string; endDate: string };
+  basicSalary: number;
+  homeVisits: SalaryReportHomeVisit[];
+  homeVisitsTotal: number;
+  otHours: number;
+  otRatePerHour: number;
+  otTotal: number;
+  additions: SalaryReportLine[];
+  additionsTotal: number;
+  fines: SalaryReportLine[];
+  finesTotal: number;
+  decrements: SalaryReportLine[];
+  decrementsTotal: number;
+  finalSalary: number;
+}
+
+export interface SalaryHistoryEntry {
+  period: string;
+  startDate: string;
+  endDate: string;
+  basicSalary: number;
+  finalSalary: number;
+  homeVisitsTotal: number;
+  otTotal: number;
+  finesTotal: number;
+  additionsTotal: number;
+  decrementsTotal: number;
+}
+
+export async function buildSalaryReport(
+  storage: IStorage,
+  staffId: string,
+  startDate: string,
+  endDate: string
+): Promise<SalaryReport | null> {
+  const staff = await storage.getStaff(staffId);
+  if (!staff) return null;
+
+  const settings = await loadPayrollSettings(storage);
+  const summary = await buildEnhancedPayrollSummary(storage, staff, startDate, endDate);
+
+  // Map branch names → ids so the response can carry both (the spec's model).
+  const branchRows = await storage.getAllBranches();
+  const branchIdByName = new Map<string, string>();
+  for (const b of branchRows as any[]) {
+    const key = normalizeBranchName(b.name ?? b.branchName).toLowerCase();
+    if (key) branchIdByName.set(key, String(b.id));
+  }
+
+  // Per-branch home visits at the Phase-1 flat rate (Bug A: no holiday rate).
+  const homeVisits: SalaryReportHomeVisit[] = summary.visitsByBranch
+    .filter((b) => b.home > 0)
+    .map((b) => {
+      const ratePerVisit =
+        getHomeVisitRateTier(b.branch) === "bandaragama" ? settings.homeBandaragama : settings.homeColombo;
+      return {
+        branchName: b.branch,
+        branchId: branchIdByName.get(normalizeBranchName(b.branch).toLowerCase()) ?? null,
+        count: b.home,
+        ratePerVisit,
+        total: b.home * ratePerVisit,
+      };
+    });
+  const homeVisitsTotal = homeVisits.reduce((acc, h) => acc + h.total, 0);
+
+  const otHours = Number(summary.totalOt || 0);
+  const otRatePerHour = settings.otPerHour;
+  const otTotal = Number(summary.otIncome || 0);
+
+  const adjustments = await storage.getStaffSalaryAdjustmentsByStaffAndRange(staffId, startDate, endDate);
+  const toLine = (a: { id: string; adjustmentDate: string; reason: string; amount: string }): SalaryReportLine => ({
+    id: a.id,
+    date: a.adjustmentDate,
+    reason: a.reason,
+    amount: Number(a.amount) || 0,
+  });
+  const additions = adjustments.filter((a) => a.type === "addition").map(toLine);
+  const fines = adjustments.filter((a) => a.type === "fine").map(toLine);
+  const decrements = adjustments.filter((a) => a.type === "decrement").map(toLine);
+
+  const sumLines = (rows: SalaryReportLine[]) => rows.reduce((acc, r) => acc + r.amount, 0);
+  const additionsTotal = sumLines(additions);
+  const finesTotal = sumLines(fines);
+  const decrementsTotal = sumLines(decrements);
+
+  const basicSalary = Number(staff.basicSalary || 0);
+  const finalSalary =
+    basicSalary + homeVisitsTotal + otTotal + additionsTotal - finesTotal - decrementsTotal;
+
+  return {
+    staffId: staff.id,
+    staffName: staff.name,
+    branch: staff.branch,
+    period: { startDate, endDate },
+    basicSalary,
+    homeVisits,
+    homeVisitsTotal,
+    otHours,
+    otRatePerHour,
+    otTotal,
+    additions,
+    additionsTotal,
+    fines,
+    finesTotal,
+    decrements,
+    decrementsTotal,
+    finalSalary,
+  };
+}
+
+function monthRange(year: number, month1to12: number): { startDate: string; endDate: string; label: string } {
+  const mm = String(month1to12).padStart(2, "0");
+  const lastDay = new Date(year, month1to12, 0).getDate();
+  return {
+    startDate: `${year}-${mm}-01`,
+    endDate: `${year}-${mm}-${String(lastDay).padStart(2, "0")}`,
+    label: new Date(year, month1to12 - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" }),
+  };
+}
+
+export async function getSalaryReportHistory(
+  storage: IStorage,
+  staffId: string,
+  monthsBack = 6
+): Promise<SalaryHistoryEntry[]> {
+  const [yStr, mStr] = clinicDateString().split("-");
+  const year = Number(yStr);
+  const month = Number(mStr); // current month (1-12)
+
+  const entries: SalaryHistoryEntry[] = [];
+  for (let i = 1; i <= monthsBack; i++) {
+    let m = month - i;
+    let y = year;
+    while (m <= 0) {
+      m += 12;
+      y -= 1;
+    }
+    const { startDate, endDate, label } = monthRange(y, m);
+    const report = await buildSalaryReport(storage, staffId, startDate, endDate);
+    if (!report) continue;
+    entries.push({
+      period: label,
+      startDate,
+      endDate,
+      basicSalary: report.basicSalary,
+      finalSalary: report.finalSalary,
+      homeVisitsTotal: report.homeVisitsTotal,
+      otTotal: report.otTotal,
+      finesTotal: report.finesTotal,
+      additionsTotal: report.additionsTotal,
+      decrementsTotal: report.decrementsTotal,
+    });
+  }
+  return entries;
 }
 
 export async function getSalaryExportRows(storage: IStorage, filters: Parameters<typeof getSalaryHistory>[1]) {

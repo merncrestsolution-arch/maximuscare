@@ -17,6 +17,8 @@ import {
   getSalaryDashboardData,
   getSalaryHistory,
   getSalaryExportRows,
+  buildSalaryReport,
+  getSalaryReportHistory,
 } from "../services/salaryService";
 import { loadPayrollSettings } from "../services/payrollService";
 import { loadBranchContext } from "../middleware/branchContext";
@@ -38,6 +40,97 @@ function param(req: Request, name: string): string {
 async function editorName(staffId: string) {
   const s = await storage.getStaff(staffId);
   return s?.name ?? "";
+}
+
+const SALARY_REPORT_ROLES = [
+  "Admin",
+  "MD",
+  "Nexus MD",
+  "Manager",
+  "Branch Manager",
+  "Staff",
+  "Physiotherapist",
+];
+
+// Shared read-access check for the Bug-K salary report/history endpoints:
+//   • Staff / Physiotherapist → own record only
+//   • Manager / Branch Manager → staff within their allowed branches
+//   • Admin / MD / Nexus MD → any staff
+async function checkSalaryReportAccess(
+  req: Request,
+  targetId: string
+): Promise<{ status: number; message: string } | null> {
+  const user = (req as any).user;
+  const role = String(user.role ?? "").trim();
+  if (!SALARY_REPORT_ROLES.includes(role)) return { status: 403, message: "Access denied" };
+  if ((role === "Staff" || role === "Physiotherapist") && targetId !== user.staffId) {
+    return { status: 403, message: "Access denied" };
+  }
+  if (role === "Manager" || role === "Branch Manager") {
+    const target = await storage.getStaff(targetId);
+    if (!target) return { status: 404, message: "Staff not found" };
+    const ctx = await loadBranchContext(req as any);
+    const allowedNames = new Set(
+      (ctx?.allowedBranches ?? []).map((b: any) =>
+        normalizeBranchName(b.branchName ?? b.name).toLowerCase()
+      )
+    );
+    const targetBranch = normalizeBranchName(target.branch ?? "").toLowerCase();
+    if (targetBranch && !allowedNames.has(targetBranch)) {
+      return { status: 403, message: "Access denied" };
+    }
+  }
+  return null;
+}
+
+// Admin/MD manual salary adjustment (addition | decrement | fine) with audit log.
+async function createSalaryAdjustment(
+  req: Request,
+  res: Response,
+  type: "addition" | "decrement" | "fine"
+) {
+  const user = (req as any).user;
+  const targetId = param(req, "id");
+  const { date, reason, amount } = req.body ?? {};
+  if (!date || !reason || amount == null) {
+    return errorResponse(res, "date, reason, amount are required", 400);
+  }
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return errorResponse(res, "amount must be a positive number", 400);
+  }
+  const staff = await storage.getStaff(targetId);
+  if (!staff) return errorResponse(res, "Staff not found", 404);
+
+  const editor = await editorName(user.staffId);
+  const record = await storage.createStaffSalaryAdjustment({
+    staffId: targetId,
+    staffName: staff.name,
+    type,
+    amount: String(numericAmount),
+    adjustmentDate: date,
+    reason,
+    createdByStaffId: user.staffId,
+    createdByName: editor,
+  } as any);
+
+  await logAudit(storage, {
+    userId: user.staffId,
+    userName: editor,
+    module: "salary",
+    action: type,
+    recordId: record.id,
+    newValue: {
+      actorId: user.staffId,
+      staffId: targetId,
+      type,
+      amount: numericAmount,
+      reason,
+      timestamp: new Date().toISOString(),
+    },
+  });
+
+  return successResponse(res, record, "Adjustment recorded", 201);
 }
 
 export function registerSalaryRoutes(app: Express) {
@@ -170,6 +263,55 @@ export function registerSalaryRoutes(app: Express) {
       return errorResponse(res, error.message, 500);
     }
   });
+
+  // ── Bug K: full salary report (per-branch home visits, OT, manual adjustments) ──
+  app.get("/api/staff/:id/salary/report", requireAuth, async (req, res) => {
+    try {
+      const targetId = param(req, "id");
+      const denied = await checkSalaryReportAccess(req as Request, targetId);
+      if (denied) return errorResponse(res, denied.message, denied.status);
+
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+      if (!startDate || !endDate) {
+        return errorResponse(res, "startDate and endDate are required", 400);
+      }
+
+      const report = await buildSalaryReport(storage, targetId, startDate, endDate);
+      if (!report) return errorResponse(res, "Staff not found", 404);
+      return successResponse(res, report);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ── Bug K: salary history (one summary per recent calendar month) ──
+  app.get("/api/staff/:id/salary/history", requireAuth, async (req, res) => {
+    try {
+      const targetId = param(req, "id");
+      const denied = await checkSalaryReportAccess(req as Request, targetId);
+      if (denied) return errorResponse(res, denied.message, denied.status);
+
+      const months = req.query.months
+        ? Math.min(24, Math.max(1, Number(req.query.months)))
+        : 6;
+      const history = await getSalaryReportHistory(storage, targetId, months);
+      return successResponse(res, history);
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
+  // ── Bug K: manual additions / decrements / fines (Admin / MD only) ──
+  app.post("/api/staff/:id/salary/additions", requireAuth, requireSalaryManage, (req, res) =>
+    createSalaryAdjustment(req as Request, res as Response, "addition")
+  );
+  app.post("/api/staff/:id/salary/decrements", requireAuth, requireSalaryManage, (req, res) =>
+    createSalaryAdjustment(req as Request, res as Response, "decrement")
+  );
+  app.post("/api/staff/:id/salary/fines", requireAuth, requireSalaryManage, (req, res) =>
+    createSalaryAdjustment(req as Request, res as Response, "fine")
+  );
 
   // ── Generate ──
   app.post("/api/salary/generate", requireAuth, requireSalaryManage, async (req, res) => {

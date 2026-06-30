@@ -13,3 +13,9 @@ devserver.err.log
 *.iml
 
 .vercel
+
+# Local throwaway browser-debug scripts
+test.cjs
+test-pw.cjs
+test-puppeteer.cjs
+test-puppeteer-login.cjs

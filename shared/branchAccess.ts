@@ -1,9 +1,44 @@
-import { ENTERPRISE_BRANCHES, type BranchCode } from "./branches";
+import { ENTERPRISE_BRANCHES, normalizeBranchName, type BranchCode } from "./branches";
 
 export type OverviewContext = "maximus-overview" | "nexus-overview";
 
 export const MAXIMUS_BRANCH_CODES: BranchCode[] = ["DEHIWALA", "BANDARAGAMA", "NEURO"];
 export const NEXUS_BRANCH_CODE: BranchCode = "NEXUS";
+
+/**
+ * This deployment has no `organizations` table — tenancy is expressed as the two
+ * enterprise groupings (Maximus Care vs Nexus). We treat that grouping as the
+ * "organization" the spec refers to, so patient lookups/history can be scoped
+ * across the branches a patient legitimately belongs to without leaking data
+ * across the org boundary.
+ */
+export type OrganizationId = "maximus" | "nexus";
+
+/** Resolve the organization a branch (name, short-name, or code) belongs to. */
+export function organizationForBranch(branch: string | null | undefined): OrganizationId {
+  const normalized = normalizeBranchName(branch);
+  const def = ENTERPRISE_BRANCHES.find((b) => b.shortName === normalized);
+  return def?.code === NEXUS_BRANCH_CODE ? "nexus" : "maximus";
+}
+
+/** Branch codes that make up an organization. */
+export function branchCodesForOrganization(org: OrganizationId): BranchCode[] {
+  return org === "nexus" ? [NEXUS_BRANCH_CODE] : [...MAXIMUS_BRANCH_CODES];
+}
+
+/** Canonical short-names of the branches that make up an organization. */
+export function organizationBranchNames(org: OrganizationId): string[] {
+  const codes = branchCodesForOrganization(org);
+  return ENTERPRISE_BRANCHES.filter((b) => codes.includes(b.code)).map((b) => b.shortName);
+}
+
+/** True when both branch values resolve to the same organization. */
+export function sameOrganization(
+  a: string | null | undefined,
+  b: string | null | undefined
+): boolean {
+  return organizationForBranch(a) === organizationForBranch(b);
+}
 
 export const BRANCH_CHART_COLORS: Record<string, string> = {
   DEHIWALA: "#2563eb",

@@ -1,17 +1,24 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/context/auth-context";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Plus, UserPlus, FileText, BedDouble, Stethoscope, LogOut, Users } from "lucide-react";
+import { Plus, UserPlus, FileText, BedDouble, Stethoscope, LogOut, Users, QrCode } from "lucide-react";
 import { canManageStaff } from "@/lib/permissions";
+import { ScanQrDialog } from "@/components/patients/scan-qr-dialog";
 
 export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const isMobile = useIsMobile();
+  const [scanOpen, setScanOpen] = useState(false);
+
+  const canScanPatient = useMemo(() => {
+    if (!user) return false;
+    return ["Admin", "MD", "Receptionist", "Physiotherapist", "Manager", "Branch Manager", "Nexus MD"].includes(user.role);
+  }, [user]);
 
   const canAddPatient = useMemo(() => {
     if (!user) return false;
@@ -45,11 +52,31 @@ export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenCha
     setLocation(path);
   };
 
+  const openScanner = () => {
+    onOpenChange(false);
+    setScanOpen(true);
+  };
+
   if (!user) return null;
 
   const content = (
     <>
       <div className="space-y-4">
+        {canScanPatient && (
+          <section>
+            <p className="text-xs font-bold text-foreground uppercase tracking-wide mb-2">Scan</p>
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-3 h-12 bg-white border-2 hover:bg-muted/50"
+              onClick={openScanner}
+              data-testid="button-quick-scan-qr"
+            >
+              <QrCode className="h-5 w-5" />
+              Scan QR
+            </Button>
+          </section>
+        )}
+
         <section>
           <p className="text-xs font-bold text-foreground uppercase tracking-wide mb-2">Out-Patient</p>
           <div className="space-y-2">
@@ -143,6 +170,8 @@ export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenCha
   // Desktop: centered modal dialog
   if (!isMobile) {
     return (
+      <>
+      <ScanQrDialog open={scanOpen} onOpenChange={setScanOpen} />
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           className="max-w-sm !bg-white shadow-2xl border-2 border-border"
@@ -159,11 +188,14 @@ export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenCha
           {content}
         </DialogContent>
       </Dialog>
+      </>
     );
   }
 
   // Mobile: bottom sheet
   return (
+    <>
+    <ScanQrDialog open={scanOpen} onOpenChange={setScanOpen} />
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
@@ -187,5 +219,6 @@ export function QuickAddSheet({ open, onOpenChange }: { open: boolean; onOpenCha
         </div>
       </SheetContent>
     </Sheet>
+    </>
   );
 }

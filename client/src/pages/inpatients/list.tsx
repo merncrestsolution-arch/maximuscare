@@ -4,6 +4,9 @@ import { useInPatients, useDeleteInPatient } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { ListCard } from "@/components/ui/list-card";
+import { PageShell } from "@/components/layout/page-shell";
 import { Loader2, Search, Plus, ChevronRight, User, Phone, Calendar, Home, Pencil, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import type { InPatientAdmission } from "@/lib/types";
@@ -80,144 +83,148 @@ export default function InPatientsListPage() {
     );
   }
 
+  const statusBadgeClass = (status: string) =>
+    status === "Admitted"
+      ? "bg-green-100 text-green-800 hover:bg-green-100"
+      : status === "Transferred"
+      ? "bg-blue-100 text-blue-800 hover:bg-blue-100"
+      : "bg-gray-100 text-gray-800 hover:bg-gray-100";
+
   return (
-    <div className="min-h-screen bg-white pb-20">
-      <div className="max-w-[720px] mx-auto p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-bold text-foreground" data-testid="page-title">In-Patients</h1>
-          {canAdd && (
-            <Button 
-              size="sm" 
-              onClick={() => setLocation("/inpatients/new")}
-              data-testid="button-add-inpatient"
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Add
-            </Button>
-          )}
-        </div>
+    <PageShell
+      title="In-Patients"
+      className="space-y-4"
+      actions={
+        canAdd ? (
+          <Button
+            size="compact"
+            onClick={() => setLocation("/inpatients/new")}
+            data-testid="button-add-inpatient"
+          >
+            <Plus className="h-4 w-4" />
+            Add
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search by name or phone..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="pl-9 h-11 bg-card border-border shadow-sm text-base"
+          data-testid="input-search"
+        />
+      </div>
 
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by name or phone..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-            data-testid="input-search"
-          />
-        </div>
+      <div className="grid grid-cols-4 gap-2">
+        {(["Admitted", "Discharged", "Transferred", "all"] as const).map((status) => (
+          <Button
+            key={status}
+            variant={statusFilter === status ? "default" : "outline"}
+            size="sm"
+            onClick={() => setStatusFilter(status)}
+            data-testid={`button-filter-${status.toLowerCase()}`}
+          >
+            {status === "all" ? "All" : status}
+          </Button>
+        ))}
+      </div>
 
-        <div className="grid grid-cols-4 gap-2 mb-4">
-          {(["Admitted", "Discharged", "Transferred", "all"] as const).map((status) => (
-            <Button
-              key={status}
-              variant={statusFilter === status ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter(status)}
-              data-testid={`button-filter-${status.toLowerCase()}`}
-            >
-              {status === "all" ? "All" : status}
-            </Button>
-          ))}
+      {filteredPatients.length === 0 ? (
+        <div className="text-center py-10 text-muted-foreground bg-muted/10 rounded-lg border border-dashed" data-testid="text-empty">
+          No in-patients found
         </div>
-
-        {filteredPatients.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground" data-testid="text-empty">
-            No in-patients found
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {filteredPatients.map((patient: InPatientAdmission) => (
-              <div
-                key={patient.id}
-                className="bg-white border rounded-lg p-4 hover:bg-gray-50 transition-colors"
-                data-testid={`card-inpatient-${patient.id}`}
+      ) : (
+        <div className="space-y-3">
+          {filteredPatients.map((patient: InPatientAdmission) => (
+            <ListCard key={patient.id} data-testid={`card-inpatient-${patient.id}`}>
+              <button
+                type="button"
+                className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                onClick={() => setLocation(`/inpatients/${patient.id}`)}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <button
-                    type="button"
-                    className="flex-1 text-left min-w-0"
-                    onClick={() => setLocation(`/inpatients/${patient.id}`)}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <User className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="font-medium text-foreground" data-testid={`text-name-${patient.id}`}>
-                        {patient.patientName}
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-secondary/10">
+                  <User className="h-5 w-5 text-primary" />
+                </div>
+                <div className="space-y-1 min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-bold text-base text-foreground leading-tight truncate" data-testid={`text-name-${patient.id}`}>
+                      {patient.patientName}
+                    </span>
+                  </div>
+                  {patient.patientCode && (
+                    <p className="text-[11px] font-mono text-muted-foreground">{patient.patientCode}</p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                    <span className="flex items-center gap-1 min-w-0">
+                      <Phone className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate" data-testid={`text-phone-${patient.id}`}>{patient.phone}</span>
+                    </span>
+                    <span className="flex items-center gap-1 shrink-0">
+                      <Calendar className="h-3.5 w-3.5" />
+                      <span data-testid={`text-date-${patient.id}`}>
+                        {format(new Date(patient.admitDate), "dd MMM yyyy")}
                       </span>
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        patient.status === "Admitted" 
-                          ? "bg-green-100 text-green-800" 
-                          : patient.status === "Transferred"
-                          ? "bg-blue-100 text-blue-800"
-                          : "bg-gray-100 text-gray-800"
-                      }`} data-testid={`badge-status-${patient.id}`}>
-                        {patient.status}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1 min-w-0">
-                        <Phone className="h-3 w-3 shrink-0" />
-                        <span className="truncate" data-testid={`text-phone-${patient.id}`}>{patient.phone}</span>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Calendar className="h-3 w-3" />
-                        <span data-testid={`text-date-${patient.id}`}>
-                          {format(new Date(patient.admitDate), "dd MMM yyyy")}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Home className="h-3 w-3" />
-                        <span data-testid={`text-package-${patient.id}`}>{patient.packageType}</span>
-                      </div>
-                    </div>
-                    <div className="text-sm text-muted-foreground mt-1" data-testid={`text-condition-${patient.id}`}>
+                    </span>
+                    <span className="flex items-center gap-1 shrink-0">
+                      <Home className="h-3.5 w-3.5" />
+                      <span data-testid={`text-package-${patient.id}`}>{patient.packageType}</span>
+                    </span>
+                  </div>
+                  {patient.condition && (
+                    <div className="text-sm text-muted-foreground truncate" data-testid={`text-condition-${patient.id}`}>
                       {patient.condition}
                     </div>
-                  </button>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {canManage && (
-                      <>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9"
-                          aria-label="Edit admission"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setLocation(`/inpatients/${patient.id}/edit`);
-                          }}
-                          data-testid={`button-edit-inpatient-${patient.id}`}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-9 w-9 text-destructive hover:text-destructive"
-                          aria-label="Delete admission"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteId(patient.id);
-                          }}
-                          data-testid={`button-delete-inpatient-${patient.id}`}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </>
-                    )}
-                    <div className="flex items-center pl-1">
-                      <ChevronRight className="h-5 w-5 text-muted-foreground/40 pointer-events-none" />
-                    </div>
-                  </div>
+                  )}
+                </div>
+              </button>
+
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                <Badge className={`${statusBadgeClass(patient.status)} font-semibold px-2.5`} data-testid={`badge-status-${patient.id}`}>
+                  {patient.status}
+                </Badge>
+                <div className="flex items-center gap-1">
+                  {canManage && (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        aria-label="Edit admission"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLocation(`/inpatients/${patient.id}/edit`);
+                        }}
+                        data-testid={`button-edit-inpatient-${patient.id}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-destructive hover:text-destructive"
+                        aria-label="Delete admission"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteId(patient.id);
+                        }}
+                        data-testid={`button-delete-inpatient-${patient.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </>
+                  )}
+                  <ChevronRight className="h-5 w-5 text-muted-foreground/40 pointer-events-none" />
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            </ListCard>
+          ))}
+        </div>
+      )}
 
       <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
         <AlertDialogContent>
@@ -239,6 +246,6 @@ export default function InPatientsListPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageShell>
   );
 }

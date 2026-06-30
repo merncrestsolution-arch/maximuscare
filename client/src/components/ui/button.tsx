@@ -25,6 +25,9 @@ const buttonVariants = cva(
         sm: "w-full md:w-auto min-h-[48px] md:min-h-9 rounded-md px-4 py-2 text-base md:text-xs",
         lg: "w-full md:w-auto min-h-[56px] md:min-h-11 rounded-lg px-6 text-lg md:text-base",
         icon: "min-h-[48px] min-w-[48px] md:min-h-10 md:min-w-10 p-2",
+        // Inline/toolbar action button: always auto-width and ~40-44px tall so it
+        // stays proportionate (not full-width) next to headings and other controls.
+        compact: "w-auto h-10 min-h-10 rounded-lg px-4 py-2 text-sm gap-1.5",
       },
     },
     defaultVariants: {

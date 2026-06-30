@@ -409,6 +409,40 @@ export const patientApi = {
     const qs = q.toString() ? `?${q.toString()}` : "";
     return apiRequest<{ patientCode: string }>(`/patients/next-id${qs}`);
   },
+  lookup: (params: { phone?: string; nic?: string }) => {
+    const q = new URLSearchParams();
+    if (params.phone) q.set("phone", params.phone);
+    if (params.nic) q.set("nic", params.nic);
+    return apiRequest<{ patient: any | null }>(`/patients/lookup?${q.toString()}`);
+  },
+  qrToken: (id: string) =>
+    apiRequest<{ token: string; patientCode: string | null }>(`/patients/${id}/qr-token`),
+  scan: (token: string) =>
+    apiRequest<{ patient: any }>(`/patients/scan`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  history: (id: string) =>
+    apiRequest<{
+      patientId: string;
+      patientCode: string | null;
+      organizationId: "maximus" | "nexus";
+      items: Array<{
+        type: "admission" | "visit";
+        id: string;
+        date: string;
+        branch: string | null;
+        title: string;
+        status?: string | null;
+        condition?: string | null;
+        treatment?: string | null;
+        packageType?: string | null;
+        dischargeDate?: string | null;
+        sessionNumber?: number | null;
+        amount?: string | null;
+        staffName?: string | null;
+      }>;
+    }>(`/patients/${id}/history`),
   nextSessionNumber: (patientId: string) =>
     apiRequest<{ nextSessionNumber: number }>(`/patients/${patientId}/next-session-number`),
   create: (data: any) => apiRequest<any>('/patients', {
@@ -775,6 +809,30 @@ export const salaryApi = {
     const q = new URLSearchParams(params as Record<string, string>);
     return apiRequest<any>(`/staff/${staffId}/salary/detail?${q.toString()}`).then(unwrapApiData);
   },
+  // Bug K: full salary report (per-branch home visits, OT, manual adjustments, final salary).
+  report: (staffId: string, params: { startDate: string; endDate: string }) => {
+    const q = new URLSearchParams(params as Record<string, string>);
+    return apiRequest<any>(`/staff/${staffId}/salary/report?${q.toString()}`).then(unwrapApiData);
+  },
+  reportHistory: (staffId: string, months?: number) => {
+    const qs = months ? `?months=${months}` : "";
+    return apiRequest<any>(`/staff/${staffId}/salary/history${qs}`).then(unwrapApiData);
+  },
+  addAddition: (staffId: string, data: { date: string; reason: string; amount: number }) =>
+    apiRequest<any>(`/staff/${staffId}/salary/additions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then(unwrapApiData),
+  addDecrement: (staffId: string, data: { date: string; reason: string; amount: number }) =>
+    apiRequest<any>(`/staff/${staffId}/salary/decrements`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then(unwrapApiData),
+  addFine: (staffId: string, data: { date: string; reason: string; amount: number }) =>
+    apiRequest<any>(`/staff/${staffId}/salary/fines`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }).then(unwrapApiData),
   generate: (data: {
     staffId?: string;
     staffIds?: string[];

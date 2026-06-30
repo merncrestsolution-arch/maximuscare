@@ -148,7 +148,7 @@ export default function BottomNav() {
                 key={item.href + item.label}
                 href={item.href}
                 onClick={() => setOpenMore(false)}
-                className="flex min-w-0 flex-col items-center gap-1.5 rounded-xl p-2 text-center transition-colors hover:bg-[#EEF5FB] touch-manipulation"
+                className="flex min-w-0 flex-col items-center justify-start gap-1.5 rounded-xl p-2 text-center transition-colors hover:bg-[#EEF5FB] touch-manipulation"
                 data-testid={`more-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
               >
                 <div
@@ -161,7 +161,7 @@ export default function BottomNav() {
                   {item.icon}
                 </div>
                 <span
-                  className={`w-full truncate text-[0.7rem] font-semibold leading-tight ${
+                  className={`flex w-full min-h-[2.1rem] items-start justify-center text-center text-[0.7rem] font-semibold leading-tight line-clamp-2 ${
                     item.active ? "text-[#F45627]" : "text-[#334155]"
                   }`}
                 >

@@ -17,6 +17,7 @@ import Dashboard from "@/pages/dashboard/home";
 import PatientsList from "@/pages/patients/list";
 import PatientProfile from "@/pages/patients/profile";
 import PatientEditPage from "@/pages/patients/edit";
+import PatientHistoryPage from "@/pages/patients/history";
 import NewVisit from "@/pages/visits/new";
 import AttendancePage from "@/pages/attendance/index";
 import PhysioSummaryPage from "@/pages/physio-summary";
@@ -170,6 +171,9 @@ function Router() {
       </Route>
       <Route path="/patients/:id/edit">
         <ProtectedRoute component={PatientEditPage} />
+      </Route>
+      <Route path="/patients/:id/history">
+        <ProtectedRoute component={PatientHistoryPage} />
       </Route>
       <Route path="/patients/:id">
         <ProtectedRoute component={PatientProfile} />

@@ -137,6 +137,8 @@ import type {
   StaffOtEntry,
   InsertStaffOtEntry,
   UpdateStaffOtEntry,
+  StaffSalaryAdjustment,
+  InsertStaffSalaryAdjustment,
   VisitPayment,
   InsertVisitPayment,
   PatientDocument,
@@ -395,6 +397,14 @@ export interface IStorage {
   getStaffOtEntriesByStaffAndRange(staffId: string, startDate: string, endDate: string): Promise<StaffOtEntry[]>;
   getAllStaffOtEntries(): Promise<StaffOtEntry[]>;
 
+  createStaffSalaryAdjustment(data: InsertStaffSalaryAdjustment): Promise<StaffSalaryAdjustment>;
+  deleteStaffSalaryAdjustment(id: string, deletedBy?: string): Promise<boolean>;
+  getStaffSalaryAdjustmentsByStaffAndRange(
+    staffId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<StaffSalaryAdjustment[]>;
+
   createVisitPayment(data: InsertVisitPayment): Promise<VisitPayment>;
   getVisitPaymentsByVisit(visitId: string): Promise<VisitPayment[]>;
 
@@ -409,6 +419,7 @@ export interface IStorage {
   deletePatientNote(id: string): Promise<boolean>;
 
   getInPatientSessionsForPatient(patientId: string): Promise<InPatientSession[]>;
+  getInPatientAdmissionsForPatient(patientId: string): Promise<InPatientAdmission[]>;
   getHomeVisitsFiltered(filters: {
     startDate?: string;
     endDate?: string;
@@ -1610,11 +1621,28 @@ export class DatabaseStorage implements IStorage {
     return Array.from(ids);
   }
 
-  async getInPatientSessionsForPatient(patientId: string): Promise<InPatientSession[]> {
+  /**
+   * Admissions belonging to a patient. Prefers the explicit patientId/patientCode
+   * link (set on new admissions); falls back to a name match for legacy rows that
+   * pre-date the link columns.
+   */
+  async getInPatientAdmissionsForPatient(patientId: string): Promise<InPatientAdmission[]> {
     const patient = await this.getPatient(patientId);
     if (!patient) return [];
     const admissions = await this.getAllInPatientAdmissions();
-    const related = admissions.filter((a) => a.patientName === patient.name);
+    const code = patient.patientCode ?? null;
+    return admissions.filter((a) => {
+      if ((a as any).patientId && (a as any).patientId === patient.id) return true;
+      if (code && (a as any).patientCode && (a as any).patientCode === code) return true;
+      if (!(a as any).patientId && !(a as any).patientCode && a.patientName === patient.name) {
+        return true;
+      }
+      return false;
+    });
+  }
+
+  async getInPatientSessionsForPatient(patientId: string): Promise<InPatientSession[]> {
+    const related = await this.getInPatientAdmissionsForPatient(patientId);
     const sessions: InPatientSession[] = [];
     for (const a of related) {
       sessions.push(...(await this.getInPatientSessionsByAdmission(a.id)));
@@ -2358,6 +2386,45 @@ export class DatabaseStorage implements IStorage {
       .from(staffOtEntries)
       .where(isNull(staffOtEntries.deletedAt))
       .orderBy(desc(staffOtEntries.otDate));
+  }
+
+  async createStaffSalaryAdjustment(
+    data: InsertStaffSalaryAdjustment
+  ): Promise<StaffSalaryAdjustment> {
+    const now = new Date();
+    const result = await db
+      .insert(staffSalaryAdjustments)
+      .values({ ...data, createdAt: now, updatedAt: now } as any)
+      .returning();
+    return result[0];
+  }
+
+  async deleteStaffSalaryAdjustment(id: string, deletedBy?: string): Promise<boolean> {
+    const result = await db
+      .update(staffSalaryAdjustments)
+      .set({ deletedAt: new Date(), deletedBy: deletedBy ?? null } as any)
+      .where(eq(staffSalaryAdjustments.id, id))
+      .returning();
+    return result.length > 0;
+  }
+
+  async getStaffSalaryAdjustmentsByStaffAndRange(
+    staffId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<StaffSalaryAdjustment[]> {
+    return await db
+      .select()
+      .from(staffSalaryAdjustments)
+      .where(
+        and(
+          eq(staffSalaryAdjustments.staffId, staffId),
+          gte(staffSalaryAdjustments.adjustmentDate, startDate),
+          lte(staffSalaryAdjustments.adjustmentDate, endDate),
+          isNull(staffSalaryAdjustments.deletedAt)
+        )
+      )
+      .orderBy(desc(staffSalaryAdjustments.adjustmentDate));
   }
 
   async createVisitPayment(data: InsertVisitPayment): Promise<VisitPayment> {

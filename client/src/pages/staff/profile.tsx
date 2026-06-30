@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useRoute } from "wouter";
 import { addDays, format, parseISO } from "date-fns";
 import { useAuth } from "@/context/auth-context";
-import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange, useStaffStats, useBranches, usePayrollReport } from "@/hooks/useData";
+import { useVisits, useAttendance, useStaffMember, usePatients, useInPatientSessionsForStaffRange, useStaffStats, useBranches, useSalaryReport } from "@/hooks/useData";
 import { BRANCH_OPTIONS } from "@/lib/branches";
 import { staffApi } from "@/lib/api";
 import { format as fmt, startOfMonth, endOfMonth } from "date-fns";
@@ -13,7 +13,6 @@ import { ArrowLeft, Edit2, CalendarCheck, Stethoscope, Pencil } from "lucide-rea
 import { isVisitForStaff } from "@/lib/visitAccess";
 import { canViewStaffList, canManageStaff, isManager, isBranchManager } from "@/lib/permissions";
 import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
-import { SalaryDetailSection } from "@/components/staff/salary-detail-section";
 
 export default function StaffProfilePage() {
   const [match, params] = useRoute("/staff/:id");
@@ -32,13 +31,16 @@ export default function StaffProfilePage() {
   const { data: staffAttendance = [] } = useAttendance({ staffId });
   const monthStart = fmt(startOfMonth(new Date()), "yyyy-MM-dd");
   const monthEnd = fmt(endOfMonth(new Date()), "yyyy-MM-dd");
-  const { data: payrollReport } = usePayrollReport({ startDate: monthStart, endDate: monthEnd, staffId }, !!staffId);
-  const payrollSummary = payrollReport?.summaries?.[0];
+  // Bug L: the profile shows only a simple current-month final salary; the full
+  // breakdown (date range, additions/fines/decrements, history) lives in Reports.
+  const { data: currentSalary } = useSalaryReport(
+    staffId,
+    { startDate: monthStart, endDate: monthEnd },
+    !!staffId
+  );
+  const currentMonthLabel = format(new Date(), "MMMM yyyy");
   const { data: hrmStats } = useStaffStats(staffId, { startDate: monthStart, endDate: monthEnd }, !!staffId);
   const [photoUploading, setPhotoUploading] = useState(false);
-  // Bug 17: the detailed breakdown is an additive panel, toggled on demand —
-  // the quick monthly summary below stays exactly as it was.
-  const [showSalaryDetail, setShowSalaryDetail] = useState(false);
 
   if (!match || !params || !currentUser) return null;
 
@@ -58,7 +60,15 @@ export default function StaffProfilePage() {
   }
 
   if (staffError || !profileUser) {
-    return <div className="p-4 text-muted-foreground">Staff member not found.</div>;
+    // Bug H: a manager/branch-lead viewing a staff member outside their branch gets a 403
+    // from the API. Surface that as a graceful access message rather than "not found".
+    const msg = staffError instanceof Error ? staffError.message : "";
+    const accessDenied = /access|forbidden|don['’]t have/i.test(msg);
+    return (
+      <div className="p-4 text-muted-foreground" data-testid="staff-profile-error">
+        {accessDenied ? "You don't have access to this staff profile." : "Staff member not found."}
+      </div>
+    );
   }
 
   // Bug 16: resolve the staff member's assigned branches to actual branch names instead
@@ -255,35 +265,25 @@ export default function StaffProfilePage() {
         </Card>
       </div>
 
-      {payrollSummary && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">Financial Summary (This Month)</CardTitle>
-            {/* Bug 17: opens the full date-ranged breakdown as a separate panel. */}
-            <Button size="sm" variant="outline" onClick={() => setShowSalaryDetail((v) => !v)} data-testid="button-toggle-salary-detail">
-              {showSalaryDetail ? "Hide Detail" : "Salary Detail"}
+      {/* Bug L: simple current-month salary summary. The full breakdown — date
+          range, home-visit lines, additions/fines/decrements and history — lives
+          in Reports → Salary Report, linked below. */}
+      <Card className="bg-white border border-border/60 shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Salary</CardTitle>
+          <Link href={`/reports/salary?staffId=${staffId}`}>
+            <Button variant="ghost" size="sm" className="text-primary" data-testid="link-full-salary-report">
+              View Full Report →
             </Button>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-            <div><span className="text-muted-foreground">Basic</span><div className="font-semibold">{formatLkr(payrollSummary.basicSalary)}</div></div>
-            <div><span className="text-muted-foreground">Incentives</span><div className="font-semibold">{formatLkr(payrollSummary.incentiveTotal)}</div></div>
-            <div><span className="text-muted-foreground">Home Visits</span><div className="font-semibold">{formatLkr(payrollSummary.homeIncome)}</div></div>
-            <div><span className="text-muted-foreground">OT</span><div className="font-semibold">{formatLkr(payrollSummary.otIncome)}</div></div>
-            <div><span className="text-muted-foreground">Fines</span><div className="font-semibold">{formatLkr(payrollSummary.finesTotal)}</div></div>
-            <div><span className="text-muted-foreground">Extra Holidays</span><div className="font-semibold">{formatLkr(payrollSummary.extraHolidayDeduction)}</div></div>
-            <div className="col-span-2"><span className="text-muted-foreground">Final Salary</span><div className="font-bold text-lg">{formatLkr(payrollSummary.finalSalary)}</div></div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Bug 14/15/17: full date-ranged breakdown with PDF export and Admin/MD inline edit. */}
-      {showSalaryDetail && (
-        <SalaryDetailSection
-          staffId={staffId}
-          staffName={profileUser.name}
-          canEdit={["Admin", "MD"].includes(currentUser.role)}
-        />
-      )}
+          </Link>
+        </CardHeader>
+        <CardContent>
+          <p style={{ fontSize: "0.82rem", color: "#94A3B8" }}>{currentMonthLabel} Final Salary</p>
+          <p style={{ fontSize: "1.6rem", fontWeight: 800, color: "#105691" }}>
+            LKR {currentSalary?.finalSalary != null ? Number(currentSalary.finalSalary).toLocaleString() : "—"}
+          </p>
+        </CardContent>
+      </Card>
 
       <Card className="bg-white border border-border/60 shadow-sm">
         <CardHeader>

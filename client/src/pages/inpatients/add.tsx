@@ -1,14 +1,18 @@
-import { useState } from "react";
-import { useLocation } from "wouter";
-import { useCreateInPatient } from "@/hooks/useData";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useSearch } from "wouter";
+import { useCreateInPatient, usePatientLookup, usePatient } from "@/hooks/useData";
+import { useBranch } from "@/context/branch-context";
+import { patientApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import type { Patient } from "@/lib/types";
 
 interface FormData {
   patientName: string;
@@ -42,9 +46,73 @@ const DEFAULT_FORM: FormData = {
 
 export default function AddInPatientPage() {
   const [, setLocation] = useLocation();
+  const search = useSearch();
+  const prefillId = new URLSearchParams(search).get("patientId") || "";
   const { toast } = useToast();
+  const { selectedBranchName } = useBranch();
   const createInPatient = useCreateInPatient();
+  const lookup = usePatientLookup();
+  const { data: prefillPatient } = usePatient(prefillId);
+
   const [formData, setFormData] = useState<FormData>({ ...DEFAULT_FORM });
+  // The matched/linked existing patient (re-admission). When set, we reuse their
+  // Patient ID instead of generating a new one.
+  const [existing, setExisting] = useState<Patient | null>(null);
+  const [generatedCode, setGeneratedCode] = useState<string>("");
+  const prefilledRef = useRef(false);
+
+  const applyPatient = (p: Patient) => {
+    setExisting(p);
+    setFormData((prev) => ({
+      ...prev,
+      patientName: p.name ?? prev.patientName,
+      age: typeof p.age === "number" && p.age > 0 ? p.age : prev.age,
+      phone: p.phone ?? prev.phone,
+      address: p.address ?? prev.address,
+      patientIdNo: p.nicOrPassport ?? prev.patientIdNo,
+      condition: p.condition ?? prev.condition,
+    }));
+  };
+
+  // Pre-fill from a scanned patient (Quick Add → Scan QR → Add In-Patient).
+  useEffect(() => {
+    if (prefillPatient && !prefilledRef.current) {
+      prefilledRef.current = true;
+      applyPatient(prefillPatient as Patient);
+    }
+  }, [prefillPatient]);
+
+  // Preview the auto-generated Patient ID for a brand-new patient.
+  const refreshGeneratedCode = (admitDate: string) => {
+    patientApi
+      .nextId(admitDate, selectedBranchName || undefined)
+      .then((r) => setGeneratedCode(r.patientCode))
+      .catch(() => setGeneratedCode(""));
+  };
+
+  useEffect(() => {
+    if (!existing) refreshGeneratedCode(formData.admitDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.admitDate, existing, selectedBranchName]);
+
+  const runLookup = async () => {
+    const phone = formData.phone.trim();
+    const nic = formData.patientIdNo.trim();
+    if (!phone && !nic) {
+      setExisting(null);
+      return;
+    }
+    try {
+      const res = await lookup.mutateAsync({ phone, nic });
+      if (res.patient) {
+        applyPatient(res.patient as Patient);
+      } else {
+        setExisting(null);
+      }
+    } catch {
+      /* lookup failures shouldn't block manual entry */
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,28 +143,32 @@ export default function AddInPatientPage() {
         ...formData,
         age: Number(formData.age),
         status: "Admitted",
+        // Server reuses this patient's Patient ID and links the admission.
+        patientId: existing?.id ?? null,
       });
       toast({ title: "Success", description: "In-patient admitted successfully" });
       setLocation("/inpatients");
     } catch (error) {
-      toast({ 
-        title: "Error", 
+      toast({
+        title: "Error",
         description: error instanceof Error ? error.message : "Failed to admit patient",
-        variant: "destructive"
+        variant: "destructive",
       });
     }
   };
 
   const updateField = <K extends keyof FormData>(field: K, value: FormData[K]) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
+
+  const displayedPatientId = existing?.patientCode ?? generatedCode;
 
   return (
     <div className="min-h-screen bg-white pb-20">
       <div className="max-w-[720px] mx-auto p-4">
         <div className="flex items-center gap-3 mb-6">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             size="icon"
             onClick={() => setLocation("/inpatients")}
             data-testid="button-back"
@@ -107,6 +179,32 @@ export default function AddInPatientPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Patient ID — read-only, reused on re-admission or auto-generated for new patients */}
+          <div className="space-y-2">
+            <Label htmlFor="patientId">Patient ID</Label>
+            <Input
+              id="patientId"
+              readOnly
+              value={displayedPatientId}
+              placeholder="Assigned automatically"
+              className="h-12 font-mono bg-muted/40"
+              data-testid="input-patient-code"
+            />
+            {existing ? (
+              <Badge
+                className="bg-success text-white gap-1.5"
+                data-testid="badge-existing-patient"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Existing patient found — reusing Patient ID
+              </Badge>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                A new Patient ID is assigned automatically when you admit this patient.
+              </p>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="patientName">Patient Name *</Label>
             <Input
@@ -138,6 +236,7 @@ export default function AddInPatientPage() {
                 id="phone"
                 value={formData.phone}
                 onChange={(e) => updateField("phone", e.target.value)}
+                onBlur={runLookup}
                 placeholder="Phone number"
                 className="h-12"
                 data-testid="input-phone"
@@ -196,11 +295,12 @@ export default function AddInPatientPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="patientIdNo">Patient ID No</Label>
+              <Label htmlFor="patientIdNo">NIC / Passport No</Label>
               <Input
                 id="patientIdNo"
                 value={formData.patientIdNo}
                 onChange={(e) => updateField("patientIdNo", e.target.value)}
+                onBlur={runLookup}
                 placeholder="NIC/Passport"
                 className="h-12"
                 data-testid="input-patient-id"
@@ -222,8 +322,8 @@ export default function AddInPatientPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="packageType">Package Type *</Label>
-              <Select 
-                value={formData.packageType} 
+              <Select
+                value={formData.packageType}
                 onValueChange={(v) => updateField("packageType", v as "AC Room" | "Non-AC Room")}
               >
                 <SelectTrigger className="h-12" data-testid="select-package-type">

@@ -76,6 +76,10 @@ export async function runPart2SchemaMigration() {
   await addColumn("in_patient_sessions", "branch_id", "TEXT");
   await addColumn("in_patient_sessions", "notes", "TEXT");
 
+  // ── in_patient_admissions — link admissions to the patient master + reused Patient ID ──
+  await addColumn("in_patient_admissions", "patient_id", "TEXT");
+  await addColumn("in_patient_admissions", "patient_code", "TEXT");
+
   // ── branches ──
   await addColumn("branches", "branch_name", "TEXT");
   await addColumn("branches", "address", "TEXT");

@@ -12,10 +12,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CalendarCheck, ListTodo, Bell, Stethoscope, Activity, TrendingUp } from "lucide-react";
 import { startOfMonth, endOfMonth } from "date-fns";
+import { clinicTodayString } from "@/lib/utils";
 
 export function StaffHomeWidgets() {
   const { user } = useAuth();
-  const today = format(new Date(), "yyyy-MM-dd");
+  // Bug B: use the clinic's Sri Lanka "today" so it matches the date attendance/visits
+  // are stored with (avoids the widget showing nothing when the browser TZ differs).
+  const today = clinicTodayString();
   const monthStart = format(startOfMonth(new Date()), "yyyy-MM-dd");
   const monthEnd = format(endOfMonth(new Date()), "yyyy-MM-dd");
 

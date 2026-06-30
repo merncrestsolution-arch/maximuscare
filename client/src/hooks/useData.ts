@@ -57,6 +57,35 @@ export function useDeletePatient() {
   });
 }
 
+export function usePatientLookup() {
+  return useMutation({
+    mutationFn: (params: { phone?: string; nic?: string }) => patientApi.lookup(params),
+  });
+}
+
+export function usePatientQrToken(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['patient-qr-token', id],
+    queryFn: () => patientApi.qrToken(id),
+    enabled: !!id && enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useScanPatient() {
+  return useMutation({
+    mutationFn: (token: string) => patientApi.scan(token),
+  });
+}
+
+export function usePatientHistory(id: string) {
+  return useQuery({
+    queryKey: ['patient-history', id],
+    queryFn: () => patientApi.history(id),
+    enabled: !!id,
+  });
+}
+
 // Visit hooks
 export function useVisits(params?: { patientId?: string; startDate?: string; endDate?: string }) {
   return useQuery({
@@ -1024,6 +1053,54 @@ export function useSalaryDetail(
     queryFn: () => salaryApi.detail(staffId, params),
     enabled,
   });
+}
+
+// Bug K: full salary report + history for the Reports page salary section.
+export function useSalaryReport(
+  staffId: string,
+  params: { startDate: string; endDate: string },
+  enabled = true
+) {
+  return useQuery({
+    queryKey: ['salary-report', staffId, params],
+    queryFn: () => salaryApi.report(staffId, params),
+    enabled: enabled && !!staffId && !!params.startDate && !!params.endDate,
+  });
+}
+
+export function useSalaryReportHistory(staffId: string, months?: number, enabled = true) {
+  return useQuery({
+    queryKey: ['salary-report-history', staffId, months],
+    queryFn: () => salaryApi.reportHistory(staffId, months),
+    enabled: enabled && !!staffId,
+  });
+}
+
+type SalaryAdjustmentInput = { staffId: string; date: string; reason: string; amount: number };
+
+function useSalaryAdjustmentMutation(
+  fn: (staffId: string, data: { date: string; reason: string; amount: number }) => Promise<any>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ staffId, ...data }: SalaryAdjustmentInput) => fn(staffId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['salary-report'] });
+      queryClient.invalidateQueries({ queryKey: ['salary-report-history'] });
+    },
+  });
+}
+
+export function useAddSalaryAddition() {
+  return useSalaryAdjustmentMutation(salaryApi.addAddition);
+}
+
+export function useAddSalaryDecrement() {
+  return useSalaryAdjustmentMutation(salaryApi.addDecrement);
+}
+
+export function useAddSalaryFine() {
+  return useSalaryAdjustmentMutation(salaryApi.addFine);
 }
 
 export function useStaffDeductions(params?: { staffId?: string; startDate?: string; endDate?: string }) {
