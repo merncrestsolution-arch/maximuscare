@@ -223,10 +223,26 @@ export async function filterStaffByBranchAccess(
   } catch {
     // fall back to column heuristic only
   }
-  return list.filter((s) => 
-    staffMatchesBranch(s, branchName) || 
+  return list.filter((s) =>
+    staffMatchesBranch(s, branchName) ||
     permittedIds.has(s.id)
   );
+}
+
+/**
+ * The set of all staff IDs belonging to a branch (honouring multi-branch / "Both"
+ * assignments). Used to branch-scope salary/payroll/fines listings so a branch only
+ * ever sees its own staff. Returns null when no branch is given (e.g. a management
+ * overview context), meaning "do not branch-scope".
+ */
+export async function branchStaffIdSet(
+  storage: IStorage,
+  branchName: string | null | undefined,
+): Promise<Set<string> | null> {
+  if (!branchName) return null;
+  const allStaff = await storage.getAllStaff();
+  const scoped = await filterStaffByBranchAccess(storage, allStaff, branchName);
+  return new Set(scoped.map((s) => s.id));
 }
 
 export interface TreatingStaffOption {

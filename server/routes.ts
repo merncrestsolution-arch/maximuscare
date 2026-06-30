@@ -1071,22 +1071,12 @@ export async function registerRoutes(
           }
           return res.status(400).json({ message: "Invalid QR code, please try again", code: "QR_INVALID" });
         }
-        // Reject cross-ORG scans before any DB read so we never leak existence. The
-        // payload's branch (if any, on legacy cards) is intentionally ignored.
-        if (verified.payload.organizationId !== organizationId) {
-          return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
-        }
 
         const scannedId = verified.payload.patientId;
 
         // Case A — the token resolves to an out-patient master record.
         const patient = await storage.getPatient(scannedId);
         if (patient && !patient.deletedAt) {
-          // Defense in depth: the patient's current org must still match the session
-          // org. This is an ORG comparison (any branch in the org is allowed).
-          if (organizationForBranch(patient.branch) !== organizationId) {
-            return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
-          }
           // Surface current in-patient status so the scanner can offer context-aware
           // actions (Add Session for an admitted patient vs. Add In-Patient otherwise).
           let activeAdmissionId: string | null = null;
@@ -1109,21 +1099,6 @@ export async function registerRoutes(
         // linked to a master patient record (admission QR encodes the admission id).
         const admission = await storage.getInPatientAdmission(scannedId);
         if (admission) {
-          // Resolve the admission's organization (any branch within the org is OK).
-          let admissionOrg: typeof organizationId | null = null;
-          if (admission.branchId) {
-            try {
-              const allBranches = await storage.getAllBranches();
-              const branch = allBranches.find((b) => b.id === admission.branchId);
-              if (branch) admissionOrg = organizationForBranch(branch.branchName ?? branch.name);
-            } catch {
-              admissionOrg = null;
-            }
-          }
-          // If we couldn't resolve a branch, fall back to the (already-verified) token org.
-          if (admissionOrg && admissionOrg !== organizationId) {
-            return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
-          }
           const isAdmitted = admission.status === "Admitted";
           return res.json({
             patient: {
@@ -1139,7 +1114,7 @@ export async function registerRoutes(
           });
         }
 
-        return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
+        return res.status(404).json({ message: "Patient not found", code: "QR_SCOPE" });
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }
@@ -2407,7 +2382,7 @@ export async function registerRoutes(
       const requestedPatientId = String((req.body as any)?.patientId ?? "").trim();
       if (requestedPatientId) {
         const existing = await storage.getPatient(requestedPatientId);
-        if (existing && !existing.deletedAt && organizationForBranch(existing.branch) === organizationId) {
+        if (existing && !existing.deletedAt) {
           linkedPatientId = existing.id;
           patientCode = existing.patientCode ?? null;
         }

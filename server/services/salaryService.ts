@@ -225,16 +225,22 @@ export async function generateSalariesBulk(
   periodStart: string,
   periodEnd: string,
   generatedByStaffId: string,
-  generatedByName: string
+  generatedByName: string,
+  /**
+   * When provided, "all" is restricted to this set of staff IDs (e.g. the staff of
+   * the currently selected branch) so bulk generation never spills across branches.
+   */
+  allowedStaffIds?: Set<string>
 ): Promise<{ created: Salary[]; errors: Array<{ staffId: string; error: string }> }> {
   let targets: string[];
   if (staffIds === "all") {
     const allStaff = await storage.getAllStaff();
     targets = allStaff
       .filter((s) => s.role === "Physiotherapist" || s.role === "Staff" || s.role === "Manager")
+      .filter((s) => !allowedStaffIds || allowedStaffIds.has(s.id))
       .map((s) => s.id);
   } else {
-    targets = staffIds;
+    targets = allowedStaffIds ? staffIds.filter((id) => allowedStaffIds.has(id)) : staffIds;
   }
 
   const created: Salary[] = [];
@@ -348,8 +354,15 @@ export async function markSalaryPaid(
   return updated;
 }
 
-export async function getSalaryDashboardData(storage: IStorage): Promise<SalaryDashboard> {
-  const records = await storage.getAllSalaries();
+export async function getSalaryDashboardData(
+  storage: IStorage,
+  /** When provided, all dashboard figures are scoped to these staff (selected branch). */
+  allowedStaffIds?: Set<string>
+): Promise<SalaryDashboard> {
+  const allRecords = await storage.getAllSalaries();
+  const records = allowedStaffIds
+    ? allRecords.filter((r) => allowedStaffIds.has(r.staffId))
+    : allRecords;
   const active = records.filter((r) => r.status !== "Cancelled");
 
   const sumStatus = (status: string) =>
@@ -393,7 +406,10 @@ export async function getSalaryDashboardData(storage: IStorage): Promise<SalaryD
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 10);
 
-  const deductions = await storage.getAllStaffDeductions();
+  const allDeductions = await storage.getAllStaffDeductions();
+  const deductions = allowedStaffIds
+    ? allDeductions.filter((d) => allowedStaffIds.has(d.staffId))
+    : allDeductions;
   const catMap = new Map<string, number>();
   for (const d of deductions) {
     catMap.set(d.category, (catMap.get(d.category) ?? 0) + Number(d.amount || 0));
