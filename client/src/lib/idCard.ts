@@ -310,7 +310,6 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   doc.roundedRect(textX, badgeY, badgeW, badgeH, 1.2, 1.2, "F");
   text(doc, WHITE);
   doc.text(badgeLabel, textX + badgeW / 2, badgeY + badgeH / 2 + 0.6, { align: "center" });
-
   // Right column: QR code inside bordered rounded box
   const qrDataUrl = await QRCode.toDataURL(data.qrToken, {
     margin: 0,
@@ -318,7 +317,7 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
     errorCorrectionLevel: "M",
   });
   
-  const qrBoxSize = 21.0;
+  const qrBoxSize = 19.0;
   const qrBoxX = W - qrBoxSize - 4.5;
   const qrBoxY = 16.5;
   
@@ -328,20 +327,20 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   doc.addImage(qrDataUrl, "PNG", qrBoxX + 1.2, qrBoxY + 1.2, qrImageSize, qrImageSize);
 
   // Caption group centered under QR code
-  const capX = qrBoxX + 1.5;
-  const capY = qrBoxY + qrBoxSize + 2.0;
-  iconPhoneScan(doc, capX, capY, 5.0, NAVY);
+  const capX = qrBoxX + 0.6;
+  const capY = qrBoxY + qrBoxSize + 2.4;
+  iconPhoneScan(doc, capX, capY, 4.4, NAVY);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.2);
+  doc.setFontSize(3.8);
   text(doc, NAVY);
-  doc.text("Scan to view", capX + 6.0, capY + 1.8);
-  doc.text("patient records", capX + 6.0, capY + 3.8);
+  doc.text("Scan to view", capX + 5.2, capY + 1.6);
+  doc.text("patient records", capX + 5.2, capY + 3.4);
 
   // Left column: Patient details rows
   const leftX = 4.5;
   const leftIconX = leftX;
   const leftTextX = leftX + 6.0;
-  const leftRightEdge = 40.0;
+  const leftRightEdge = 39.0;
 
   function drawIconInCircle(
     iconFunc: any,
@@ -368,9 +367,9 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   text(doc, SUBTLE);
   doc.text("PATIENT NAME", leftTextX, r1Top + 1.5);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(7.2);
+  doc.setFontSize(8.0);
   text(doc, INK);
-  doc.text(data.patientName ? data.patientName.toUpperCase() : "—", leftTextX, r1Top + 4.6);
+  doc.text(data.patientName ? data.patientName.toUpperCase() : "—", leftTextX, r1Top + 4.7);
 
   const div1Y = r1Top + 5.8;
   stroke(doc, DIVIDER, 0.25);
@@ -422,7 +421,6 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   doc.setFontSize(6.4);
   text(doc, INK);
 
-  
   const addrValue = data.address || "—";
   const addrLines = doc.splitTextToSize(addrValue, leftRightEdge - 24.0);
   doc.text(addrLines[0] || "—", 24.0, r4Top + 3.6);
@@ -432,10 +430,10 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
 
   // Vertical divider separating left and middle columns
   stroke(doc, DIVIDER, 0.25);
-  doc.line(41.0, 16.5, 41.0, 44.5);
+  doc.line(40.5, 16.5, 40.5, 44.5);
 
   // Middle column: Our Branches
-  const midX = 43.0;
+  const midX = 42.0;
   iconPin(doc, midX, 16.8, 3.0, ORANGE, WHITE);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(5.4);
@@ -456,29 +454,29 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   const branchLineH = 3.2;
   let by = 22.5;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.4);
+  doc.setFontSize(3.2);
   branchList.slice(0, 5).forEach((b) => {
     fill(doc, ORANGE);
-    doc.circle(midX + 1.2, by - 0.9, 0.4, "F");
+    doc.circle(midX + 1.2, by - 0.8, 0.35, "F");
     text(doc, INK);
-    doc.text(b, midX + 3.0, by);
+    doc.text(b, midX + 2.8, by);
     by += branchLineH;
   });
 
   // Clinic Hotline
-  const hotY = 38.6;
+  const hotY = 38.2;
   fill(doc, NAVY);
-  doc.circle(midX + 2.0, hotY + 2.0, 2.0, "F");
-  iconPhoneHandset(doc, midX + 0.5, hotY + 0.5, 3.0, WHITE);
+  doc.circle(midX + 1.8, hotY + 1.8, 1.8, "F");
+  iconPhoneHandset(doc, midX + 0.5, hotY + 0.5, 2.6, WHITE);
   
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(4.2);
+  doc.setFontSize(3.8);
   text(doc, SUBTLE);
-  doc.text("CLINIC HOTLINE", midX + 5.5, hotY + 1.6);
+  doc.text("CLINIC HOTLINE", midX + 5.0, hotY + 1.4);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.4);
+  doc.setFontSize(5.2);
   text(doc, INK);
-  doc.text(clinicHotline, midX + 5.5, hotY + 4.4);
+  doc.text(clinicHotline, midX + 5.0, hotY + 4.0);
 
   // Footer: navy bar
   const footY = H - 7.6;
