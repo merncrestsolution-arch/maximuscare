@@ -360,18 +360,18 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   }
 
   // Row 1: Patient Name
-  const r1Top = 17.2;
-  drawIconInCircle(iconPerson, leftIconX, r1Top + 0.4, 4.4);
+  const r1Top = 16.5;
+  drawIconInCircle(iconPerson, leftIconX, r1Top + 0.5, 4.4);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(4.4);
   text(doc, SUBTLE);
-  doc.text("PATIENT NAME", leftTextX, r1Top + 1.5);
+  doc.text("PATIENT NAME", leftTextX, r1Top + 1.6);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.0);
   text(doc, INK);
-  doc.text(data.patientName ? data.patientName.toUpperCase() : "—", leftTextX, r1Top + 4.7);
+  doc.text(data.patientName ? data.patientName.toUpperCase() : "—", leftTextX, r1Top + 4.9);
 
-  const div1Y = r1Top + 5.8;
+  const div1Y = r1Top + 6.3;
   stroke(doc, DIVIDER, 0.25);
   doc.line(leftX, div1Y, leftRightEdge, div1Y);
 
@@ -479,14 +479,14 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   doc.text(clinicHotline, midX + 5.0, hotY + 4.0);
 
   // Footer: navy bar
-  const footY = H - 7.6;
+  const footY = H - 8.5;
   fill(doc, NAVY);
   doc.rect(0.8, footY, W - 1.6, H - 0.8 - footY, "F");
   stroke(doc, NAVY, 0.5);
   doc.roundedRect(0.8, 0.8, W - 1.6, H - 1.6, 2.4, 2.4, "S");
 
   // Globe icon + website name
-  const footRow1 = footY + 4.0;
+  const footRow1 = footY + 4.5;
   iconGlobe(doc, 4.5, footRow1 - 3.2, 3.2, WHITE);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(5.2);
@@ -495,30 +495,30 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
 
   // Outer white rounded badge for CARD ID
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(4.4);
+  doc.setFontSize(4.0);
   const cardIdLabel = "CARD ID:";
   const cardIdLabelW = doc.getTextWidth(cardIdLabel);
 
-  doc.setFontSize(4.8);
+  doc.setFontSize(4.4);
   const cardIdValW = doc.getTextWidth(cardId);
 
-  const innerPadding = 1.6;
+  const innerPadding = 1.4;
   const navyPillW = cardIdValW + 2 * innerPadding;
 
   const outerPadding = 1.0;
   const footBadgeW = outerPadding + cardIdLabelW + 1.2 + navyPillW + outerPadding;
-  const footBadgeH = 4.2;
+  const footBadgeH = 4.4;
   const footBadgeX = 27.5;
-  const footBadgeY = footY + (6.8 - footBadgeH) / 2;
+  const footBadgeY = footY + (8.5 - footBadgeH) / 2;
 
   fill(doc, WHITE);
   doc.roundedRect(footBadgeX, footBadgeY, footBadgeW, footBadgeH, 1.0, 1.0, "F");
 
   // CARD ID: text inside outer badge
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(4.4);
+  doc.setFontSize(4.0);
   text(doc, NAVY);
-  doc.text(cardIdLabel, footBadgeX + outerPadding, footBadgeY + footBadgeH / 2 + 0.65);
+  doc.text(cardIdLabel, footBadgeX + outerPadding, footBadgeY + footBadgeH / 2 + 0.6);
 
   // Navy pill inside white badge
   const navyPillX = footBadgeX + outerPadding + cardIdLabelW + 1.2;
@@ -528,21 +528,21 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
 
   // Card ID value inside navy pill
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(4.8);
+  doc.setFontSize(4.4);
   text(doc, WHITE);
   doc.text(cardId, navyPillX + navyPillW / 2, navyPillY + 3.4 / 2 + 0.7, { align: "center" });
 
   // Vertical separator | between badge and Merncrest attribution
   stroke(doc, [200, 214, 232], 0.2);
-  doc.line(61.5, footY + 1.2, 61.5, footY + 5.6);
+  doc.line(61.5, footY + 1.5, 61.5, footY + 7.0);
 
   // Right: MERNcrest Solutions Attribution (stacked, right-aligned)
   doc.setFont("helvetica", "normal");
   doc.setFontSize(2.6);
   text(doc, [200, 214, 232]);
-  doc.text("Powered By", W - 4.5, footY + 2.0, { align: "right" });
-  doc.text("Merncrest Solutions (Pvt) Ltd", W - 4.5, footY + 3.6, { align: "right" });
-  doc.text("Merncrest.lk  |  0713838638", W - 4.5, footY + 5.2, { align: "right" });
+  doc.text("Powered By", W - 4.5, footY + 2.4, { align: "right" });
+  doc.text("Merncrest Solutions (Pvt) Ltd", W - 4.5, footY + 4.2, { align: "right" });
+  doc.text("Merncrest.lk  |  0713838638", W - 4.5, footY + 6.0, { align: "right" });
 
   const safeName = (data.patientName || "patient").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   doc.save(`patient-id-card-${safeName}.pdf`);
