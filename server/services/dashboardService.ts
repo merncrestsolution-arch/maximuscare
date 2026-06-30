@@ -93,16 +93,28 @@ export async function computeDashboardKpis(
     // A session's own branchId / treating staff branch is often missing or differs
     // (staff can treat in-patients at a branch other than their home branch), which
     // dropped valid sessions from the count/chart. Match by the parent ADMISSION's
-    // branch too so every in-patient session is attributed to the right branch.
-    const admissionBranchById = new Map(
-      (await storage.getAllInPatientAdmissions()).map((a) => [a.id, a.branchId]),
+    // branch too — and, for legacy records where neither the session nor the admission
+    // carries a branchId, fall back to the linked PATIENT's branch name — so every
+    // in-patient session is attributed to the right branch.
+    const admissions = await storage.getAllInPatientAdmissions();
+    const admissionBranchById = new Map(admissions.map((a) => [a.id, a.branchId]));
+    const patientBranchById = new Map(
+      (await storage.getAllPatients()).map((p) => [
+        p.id,
+        normalizeBranchName(p.branch ?? "").toLowerCase(),
+      ]),
+    );
+    const admissionPatientBranchById = new Map(
+      admissions.map((a) => [a.id, a.patientId ? patientBranchById.get(a.patientId) ?? "" : ""]),
     );
     ipSessions = ipSessions.filter((s) => {
       const admissionBranch = admissionBranchById.get(s.admissionId);
+      const patientBranch = admissionPatientBranchById.get(s.admissionId);
       return (
         (s.branchId && matchingBranchIds.has(s.branchId)) ||
         (admissionBranch && matchingBranchIds.has(admissionBranch)) ||
-        branchStaffIds.has(s.treatingStaffId)
+        branchStaffIds.has(s.treatingStaffId) ||
+        (patientBranch ? targets.has(patientBranch) : false)
       );
     });
   }

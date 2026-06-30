@@ -524,16 +524,27 @@ export async function computeDashboardCharts(
     );
     // Match by the parent ADMISSION's branch too — the session row's own branchId is
     // often missing and the treating staff's home branch can differ, which otherwise
-    // dropped valid in-patient sessions from the Visit Analytics chart.
-    const admissionBranchById = new Map(
-      (await storage.getAllInPatientAdmissions()).map((a) => [a.id, a.branchId]),
+    // dropped valid in-patient sessions from the Visit Analytics chart. For legacy
+    // records with no branchId anywhere, fall back to the linked PATIENT's branch.
+    const admissions = await storage.getAllInPatientAdmissions();
+    const admissionBranchById = new Map(admissions.map((a) => [a.id, a.branchId]));
+    const patientBranchById = new Map(
+      (await storage.getAllPatients()).map((p) => [
+        p.id,
+        normalizeBranchName(p.branch ?? "").toLowerCase(),
+      ]),
+    );
+    const admissionPatientBranchById = new Map(
+      admissions.map((a) => [a.id, a.patientId ? patientBranchById.get(a.patientId) ?? "" : ""]),
     );
     ipSessions = ipSessions.filter((s) => {
       const admissionBranch = admissionBranchById.get(s.admissionId);
+      const patientBranch = admissionPatientBranchById.get(s.admissionId);
       return (
         (s.branchId && matchingBranchIds.has(s.branchId)) ||
         (admissionBranch && matchingBranchIds.has(admissionBranch)) ||
-        branchStaffIds.has(s.treatingStaffId)
+        branchStaffIds.has(s.treatingStaffId) ||
+        (patientBranch ? targets.has(patientBranch) : false)
       );
     });
   }
