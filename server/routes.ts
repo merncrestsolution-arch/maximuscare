@@ -1060,30 +1060,70 @@ export async function registerRoutes(
         if (verified.payload.organizationId !== organizationId) {
           return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
         }
-        const patient = await storage.getPatient(verified.payload.patientId);
-        if (!patient || patient.deletedAt) {
-          return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
+
+        const scannedId = verified.payload.patientId;
+
+        // Case A — the token resolves to an out-patient master record.
+        const patient = await storage.getPatient(scannedId);
+        if (patient && !patient.deletedAt) {
+          // Defense in depth: the patient's current org must still match the session
+          // org. This is an ORG comparison (any branch in the org is allowed).
+          if (organizationForBranch(patient.branch) !== organizationId) {
+            return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
+          }
+          // Surface current in-patient status so the scanner can offer context-aware
+          // actions (Add Session for an admitted patient vs. Add In-Patient otherwise).
+          let activeAdmissionId: string | null = null;
+          try {
+            const admissions = await storage.getInPatientAdmissionsForPatient(patient.id);
+            const active = admissions.find((a) => a.status === "Admitted");
+            activeAdmissionId = active?.id ?? null;
+          } catch {
+            activeAdmissionId = null;
+          }
+          return res.json({
+            patient,
+            kind: "outpatient",
+            isAdmitted: !!activeAdmissionId,
+            activeAdmissionId,
+          });
         }
-        // Defense in depth: the patient's current org must still match the session org.
-        // This is an ORG comparison (any branch in the org is allowed), not a branch lock.
-        if (organizationForBranch(patient.branch) !== organizationId) {
-          return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
+
+        // Case B — the token resolves to an in-patient admission that was never
+        // linked to a master patient record (admission QR encodes the admission id).
+        const admission = await storage.getInPatientAdmission(scannedId);
+        if (admission) {
+          // Resolve the admission's organization (any branch within the org is OK).
+          let admissionOrg: typeof organizationId | null = null;
+          if (admission.branchId) {
+            try {
+              const allBranches = await storage.getAllBranches();
+              const branch = allBranches.find((b) => b.id === admission.branchId);
+              if (branch) admissionOrg = organizationForBranch(branch.branchName ?? branch.name);
+            } catch {
+              admissionOrg = null;
+            }
+          }
+          // If we couldn't resolve a branch, fall back to the (already-verified) token org.
+          if (admissionOrg && admissionOrg !== organizationId) {
+            return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
+          }
+          const isAdmitted = admission.status === "Admitted";
+          return res.json({
+            patient: {
+              id: admission.id,
+              name: admission.patientName,
+              phone: admission.phone,
+              branch: null,
+              patientCode: admission.patientCode ?? admission.patientIdNo ?? null,
+            },
+            kind: "inpatient",
+            isAdmitted,
+            activeAdmissionId: isAdmitted ? admission.id : null,
+          });
         }
-        // Surface current in-patient status so the scanner can offer context-aware
-        // actions (Add Session for an admitted patient vs. Add In-Patient otherwise).
-        let activeAdmissionId: string | null = null;
-        try {
-          const admissions = await storage.getInPatientAdmissionsForPatient(patient.id);
-          const active = admissions.find((a) => a.status === "Admitted");
-          activeAdmissionId = active?.id ?? null;
-        } catch {
-          activeAdmissionId = null;
-        }
-        return res.json({
-          patient,
-          isAdmitted: !!activeAdmissionId,
-          activeAdmissionId,
-        });
+
+        return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }

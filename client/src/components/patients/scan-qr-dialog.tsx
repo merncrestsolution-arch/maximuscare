@@ -37,6 +37,7 @@ export function ScanQrDialog({
   const handledRef = useRef(false);
   const [phase, setPhase] = useState<Phase>("scanning");
   const [patient, setPatient] = useState<any>(null);
+  const [kind, setKind] = useState<"outpatient" | "inpatient">("outpatient");
   const [isAdmitted, setIsAdmitted] = useState(false);
   const [activeAdmissionId, setActiveAdmissionId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -64,6 +65,7 @@ export function ScanQrDialog({
     try {
       const res = await scan.mutateAsync(token.trim());
       setPatient(res.patient);
+      setKind(res.kind ?? "outpatient");
       setIsAdmitted(!!res.isAdmitted);
       setActiveAdmissionId(res.activeAdmissionId ?? null);
       setPhase("result");
@@ -121,6 +123,7 @@ export function ScanQrDialog({
       void stopScanner();
       setPhase("scanning");
       setPatient(null);
+      setKind("outpatient");
       setIsAdmitted(false);
       setActiveAdmissionId(null);
       setErrorMsg("");
@@ -130,6 +133,7 @@ export function ScanQrDialog({
 
   const reset = () => {
     setPatient(null);
+    setKind("outpatient");
     setIsAdmitted(false);
     setActiveAdmissionId(null);
     setErrorMsg("");
@@ -175,19 +179,23 @@ export function ScanQrDialog({
             <Button
               variant="outline"
               className="w-full justify-start gap-3 h-12 bg-white border-2"
-              onClick={() => go(`/patients/${patient.id}`)}
+              onClick={() =>
+                go(kind === "inpatient" ? `/inpatients/${patient.id}` : `/patients/${patient.id}`)
+              }
               data-testid="button-scan-view-patient"
             >
-              <User className="h-5 w-5" /> View Patient
+              <User className="h-5 w-5" /> {kind === "inpatient" ? "View In-Patient" : "View Patient"}
             </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-3 h-12 bg-white border-2"
-              onClick={() => go(`/patients/${patient.id}/history`)}
-              data-testid="button-scan-view-history"
-            >
-              <History className="h-5 w-5" /> View History
-            </Button>
+            {kind !== "inpatient" && (
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-3 h-12 bg-white border-2"
+                onClick={() => go(`/patients/${patient.id}/history`)}
+                data-testid="button-scan-view-history"
+              >
+                <History className="h-5 w-5" /> View History
+              </Button>
+            )}
             {isAdmitted && activeAdmissionId ? (
               <>
                 <Button
@@ -198,24 +206,28 @@ export function ScanQrDialog({
                 >
                   <Stethoscope className="h-5 w-5" /> Add Session
                 </Button>
+                {kind !== "inpatient" && (
+                  <Button
+                    variant="outline"
+                    className="w-full justify-start gap-3 h-12 bg-white border-2"
+                    onClick={() => go(`/patients/${patient.id}?tab=notes`)}
+                    data-testid="button-scan-add-experience"
+                  >
+                    <NotebookPen className="h-5 w-5" /> Add Experience
+                  </Button>
+                )}
+              </>
+            ) : (
+              kind !== "inpatient" && (
                 <Button
                   variant="outline"
                   className="w-full justify-start gap-3 h-12 bg-white border-2"
-                  onClick={() => go(`/patients/${patient.id}?tab=notes`)}
-                  data-testid="button-scan-add-experience"
+                  onClick={() => go(`/inpatients/new?patientId=${patient.id}`)}
+                  data-testid="button-scan-add-inpatient"
                 >
-                  <NotebookPen className="h-5 w-5" /> Add Experience
+                  <BedDouble className="h-5 w-5" /> Add In-Patient
                 </Button>
-              </>
-            ) : (
-              <Button
-                variant="outline"
-                className="w-full justify-start gap-3 h-12 bg-white border-2"
-                onClick={() => go(`/inpatients/new?patientId=${patient.id}`)}
-                data-testid="button-scan-add-inpatient"
-              >
-                <BedDouble className="h-5 w-5" /> Add In-Patient
-              </Button>
+              )
             )}
           </div>
         )}
