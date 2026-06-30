@@ -254,6 +254,14 @@ export const inPatientAdmissions = sqliteTable("in_patient_admissions", {
   amountPerDay: text("amount_per_day").notNull(),
   careTakerRatePerDay: text("care_taker_rate_per_day").notNull().default("0"),
   careTakerDaysOverride: integer("care_taker_days_override"),
+  // Bug 3: optional bill deduction (discount/adjustment) applied against the subtotal.
+  // deductionType is "fixed" (LKR) or "percentage"; deductionValue holds the raw figure.
+  deductionType: text("deduction_type"),
+  deductionValue: text("deduction_value").notNull().default("0"),
+  deductionReason: text("deduction_reason"),
+  deductionAppliedBy: text("deduction_applied_by"),
+  deductionAppliedById: text("deduction_applied_by_id"),
+  deductionAppliedAt: integer("deduction_applied_at", { mode: "timestamp" }),
   reportsAttachments: text("reports_attachments"), // JSON string
   idCopyAttachments: text("id_copy_attachments"), // JSON string
   status: text("status").notNull().default("Admitted"),
@@ -315,6 +323,11 @@ export const inPatientDischarges = sqliteTable("in_patient_discharges", {
   stayAmount: text("stay_amount").notNull(),
   otherAmounts: text("other_amounts"),
   otherTotal: text("other_total").notNull().default("0"),
+  // Bug 3: deduction snapshot captured at discharge (applied against the subtotal).
+  deductionType: text("deduction_type"),
+  deductionValue: text("deduction_value").notNull().default("0"),
+  deductionAmount: text("deduction_amount").notNull().default("0"),
+  deductionReason: text("deduction_reason"),
   grandTotal: text("grand_total").notNull(),
   amountPaid: text("amount_paid").notNull(),
   balance: text("balance").notNull(),

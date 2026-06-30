@@ -47,43 +47,64 @@ export async function generateStandardPDF(options: PDFExportOptions): Promise<vo
   const headerFontSize = isManyColumns ? 8 : 10;
   const cellPadding = isManyColumns ? 2 : 4;
 
-  let startY = 15;
+  // 1. HEADER — fixed two-column layout so header text never collides with the logo.
+  //    Left column: the logo inside a fixed box (top-left).
+  //    Right column: title + meta fields, left-aligned at a fixed offset past the logo
+  //    and wrapped to the available width — regardless of Patient ID / title length.
+  const marginX = 14;
+  const logoBox = 20; // fixed logo width/height (mm)
+  const hasLogo = Boolean(options.logoUri);
 
-  // 1. HEADER (Left: Logo, Right: Titles)
-  if (options.logoUri) {
+  if (hasLogo) {
     try {
-      const isPng = options.logoUri.startsWith("data:image/png");
-      doc.addImage(options.logoUri, isPng ? "PNG" : "JPEG", 14, 10, 25, 25, undefined, "FAST");
+      const isPng = options.logoUri!.startsWith("data:image/png");
+      doc.addImage(options.logoUri!, isPng ? "PNG" : "JPEG", marginX, 10, logoBox, logoBox, undefined, "FAST");
     } catch (e) {
       console.warn("Could not add logo to PDF:", e);
     }
   }
 
-  // Right-aligned Title
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
-  doc.setTextColor(16, 86, 145); // #105691 (Blue Dark)
-  doc.text(options.title, pageWidth - 14, 20, { align: "right" });
+  // Text column starts to the right of the logo box (with a gap) so the two never overlap.
+  const textX = hasLogo ? marginX + logoBox + 6 : marginX;
+  const textMaxWidth = pageWidth - marginX - textX;
+  let cursorY = 16;
 
-  // Right-aligned Subtitle
+  // Title (left-aligned, wrapped).
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(16, 86, 145); // #105691 (Blue Dark)
+  const titleLines = doc.splitTextToSize(options.title, textMaxWidth);
+  doc.text(titleLines, textX, cursorY);
+  cursorY += titleLines.length * 6 + 1;
+
+  // Subtitle / meta fields (left-aligned, wrapped). Each "Label: value" pair is rendered
+  // on its own line so long Patient IDs/names wrap cleanly instead of running into the logo.
   if (options.subtitle) {
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    doc.setTextColor(100, 116, 139); // Slate-500
-    doc.text(options.subtitle, pageWidth - 14, 28, { align: "right" });
+    doc.setFontSize(9.5);
+    doc.setTextColor(71, 85, 105); // Slate-600
+    const metaFields = options.subtitle.split(" | ").filter(Boolean);
+    for (const field of metaFields) {
+      const lines = doc.splitTextToSize(field, textMaxWidth);
+      doc.text(lines, textX, cursorY);
+      cursorY += lines.length * 4.6;
+    }
+    cursorY += 0.5;
   }
 
-  // Right-aligned Timestamp
+  // Timestamp.
   doc.setFont("helvetica", "italic");
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(148, 163, 184); // Slate-400
-  doc.text(`Generated: ${format(new Date(), "dd MMM yyyy, HH:mm")} (SLST)`, pageWidth - 14, 34, { align: "right" });
+  doc.text(`Generated: ${format(new Date(), "dd MMM yyyy, HH:mm")} (SLST)`, textX, cursorY);
+  cursorY += 4;
 
-  // Header Accent Line (Orange #F45627 block)
+  // Header Accent Line (Orange #F45627 block) sits below the taller of logo / text block.
+  const accentY = Math.max(10 + logoBox + 3, cursorY + 2);
   doc.setFillColor(244, 86, 39); // #F45627
-  doc.rect(0, 40, pageWidth, 3, "F");
+  doc.rect(0, accentY, pageWidth, 3, "F");
 
-  startY = 48;
+  const startY = accentY + 7;
 
   // Right-align (and 2-decimal format) every amount column so currency lines up.
   const amountColumnIndexes = options.columns.reduce<Record<number, { halign: "right" }>>(

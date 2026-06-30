@@ -15,12 +15,13 @@ export interface AppRelease {
 }
 
 export const APP_RELEASE: AppRelease = {
-  version: "1.3.0",
+  version: "1.4.0",
   title: "App Updated — What's New",
   highlights: [
-    "Premium PDF Redesign: All exported reports now feature a deeply redesigned, highly professional corporate layout.",
-    "Smart Table Scaling: PDF reports with massive amounts of data (like the Physio Summary) now automatically generate in Landscape orientation so data is perfectly spaced and legible.",
-    "Elegant Styling: PDFs now include right-aligned titles, subtle teal accent lines, structured table grids, and formal page footers."
+    "In-Patient Bill Deductions: Apply a fixed (LKR) or percentage discount on both the billing summary and the discharge screen, with a saved reason and an audit of who applied it. The deduction shows as its own line and updates the total in real time.",
+    "Calendar Date Range: Reports now use a clean two-month calendar picker for custom date ranges instead of separate date boxes.",
+    "Cleaner PDF Headers: The logo and Patient ID no longer overlap on Patient History and In-Patient Billing PDFs.",
+    "Fixes: 'Mark Complete' now works for shared/common tasks, the Visit History edit/delete buttons no longer overlap the title, and the redundant live 'Today' attendance counter was removed from the dashboard.",
   ],
 };
 

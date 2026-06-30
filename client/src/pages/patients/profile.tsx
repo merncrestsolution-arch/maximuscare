@@ -506,40 +506,46 @@ export default function PatientProfile() {
 
             const visitCard = (
               <div className="bg-card border rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow space-y-3 active:scale-[0.99] transition-transform cursor-pointer" data-testid={`card-visit-${visit.id}`}>
-                <div className="flex justify-between items-start gap-2">
+                {/* Session card header: title (left) and Edit/Delete actions (right) are
+                    kept on a single flex row with space-between + gap so the icons never
+                    crowd or overlap the "Session #N" heading, even at narrow widths. The
+                    visit date moves to its own line below to keep the action group compact. */}
+                <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-primary text-base">Session #{visit.sessionNumber}</span>
                       <Badge variant="secondary" className="text-[10px] h-5">{visit.visitType}</Badge>
                     </div>
                     <div className="text-sm font-medium mt-0.5">{visit.condition}</div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {canEditVisit && (
-                      <Link href={`/visits/edit/${visit.id}`}>
-                        <button type="button" className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700" data-testid={`button-edit-visit-${visit.id}`}>
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                      </Link>
-                    )}
-                    {isAdminMD && (
-                      <button
-                        type="button"
-                        className="p-1.5 rounded-md hover:bg-red-50 text-destructive"
-                        data-testid={`button-delete-visit-${visit.id}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setVisitToDeleteId(visit.id);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                    <span className="text-xs font-medium text-muted-foreground bg-muted/10 px-2 py-1 rounded-md whitespace-nowrap">
+                    <span className="mt-1 inline-block text-xs font-medium text-muted-foreground bg-muted/10 px-2 py-1 rounded-md">
                       {formatVisitDateTime(visit.visitDate, (visit as any).startTime)}
                       {(visit as any).endTime ? ` – ${formatClinicTime((visit as any).endTime)}` : ""}
                     </span>
                   </div>
+                  {(canEditVisit || isAdminMD) && (
+                    <div className="flex shrink-0 items-center gap-1">
+                      {canEditVisit && (
+                        <Link href={`/visits/edit/${visit.id}`}>
+                          <button type="button" className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 hover:text-gray-700" data-testid={`button-edit-visit-${visit.id}`}>
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        </Link>
+                      )}
+                      {isAdminMD && (
+                        <button
+                          type="button"
+                          className="p-1.5 rounded-md hover:bg-red-50 text-destructive"
+                          data-testid={`button-delete-visit-${visit.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setVisitToDeleteId(visit.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="text-sm text-muted-foreground leading-relaxed bg-muted/5 p-3 rounded-md max-h-56 overflow-y-auto">

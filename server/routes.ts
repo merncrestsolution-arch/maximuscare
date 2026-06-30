@@ -2638,6 +2638,83 @@ export async function registerRoutes(
     }
   });
 
+  // Bug 3: apply / update / clear a bill deduction on an in-patient admission.
+  // RBAC is enforced server-side: only Admin, MD and Manager-level roles may apply a
+  // deduction (never Staff/Physiotherapist/Receptionist). The applied-by / applied-at
+  // audit fields are always set on the server, never trusted from the client.
+  app.patch("/api/inpatients/:id/deduction", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const user = (req as any).user;
+      const allowedRoles = ["Admin", "MD", "Manager", "Branch Manager", "Nexus MD"];
+      if (!allowedRoles.includes(user.role)) {
+        return res.status(403).json({ message: "You are not permitted to apply a deduction." });
+      }
+      const id = param(req, "id");
+      const admission = await storage.getInPatientAdmission(id);
+      if (!admission) {
+        return res.status(404).json({ message: "Admission not found" });
+      }
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const rawType = body.deductionType == null ? null : String(body.deductionType);
+      const rawValue = Number(body.deductionValue ?? 0);
+      const reason = body.deductionReason == null ? null : String(body.deductionReason).trim() || null;
+
+      // Clearing the deduction (no type or zero value) resets every deduction field.
+      const isClearing = !rawType || !Number.isFinite(rawValue) || rawValue <= 0;
+      if (!isClearing) {
+        if (!["fixed", "percentage"].includes(rawType!)) {
+          return res.status(400).json({ message: "deductionType must be 'fixed' or 'percentage'." });
+        }
+        if (rawType === "percentage" && rawValue > 100) {
+          return res.status(400).json({ message: "Percentage deduction cannot exceed 100%." });
+        }
+      }
+
+      const oldValue = {
+        deductionType: admission.deductionType ?? null,
+        deductionValue: admission.deductionValue ?? "0",
+        deductionReason: admission.deductionReason ?? null,
+      };
+
+      const update: Record<string, unknown> = isClearing
+        ? {
+            deductionType: null,
+            deductionValue: "0",
+            deductionReason: null,
+            deductionAppliedBy: null,
+            deductionAppliedById: null,
+            deductionAppliedAt: null,
+          }
+        : {
+            deductionType: rawType,
+            deductionValue: String(rawValue),
+            deductionReason: reason,
+            deductionAppliedBy: user.name ?? user.email ?? "Unknown",
+            deductionAppliedById: user.staffId ?? null,
+            deductionAppliedAt: new Date(),
+          };
+
+      const updated = await storage.updateInPatientAdmission(id, update as any);
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "inpatient",
+        action: isClearing ? "deduction.clear" : "deduction.apply",
+        recordId: id,
+        oldValue,
+        newValue: {
+          deductionType: update.deductionType,
+          deductionValue: update.deductionValue,
+          deductionReason: update.deductionReason,
+        },
+      });
+      return res.json(updated);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Bug 4: transfer an in-patient to another branch. Historical sessions/bills keep their
   // original branch; only the admission's current branch changes and a transfer log is written.
   app.post("/api/inpatients/:id/transfer", requireAuth, async (req: Request, res: Response) => {

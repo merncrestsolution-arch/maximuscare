@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -68,6 +68,7 @@ export default function InPatientProfilePage() {
     .map((b) => ({ id: b.id, label: b.name }));
   const createPayment = useCreateInPatientPayment();
   const updateInPatient = useUpdateInPatient();
+  const setDeduction = useSetInPatientDeduction();
   const createExtraExpense = useCreateInPatientExtraExpense();
   const updateExtraExpense = useUpdateInPatientExtraExpense();
   const deleteExtraExpense = useDeleteInPatientExtraExpense();
@@ -100,6 +101,14 @@ export default function InPatientProfilePage() {
   const [caretakerRateForm, setCaretakerRateForm] = useState({
     careTakerRatePerDay: "",
     careTakerDaysOverride: "",
+  });
+
+  // Bug 3: in-patient bill deduction modal state.
+  const [showDeductionModal, setShowDeductionModal] = useState(false);
+  const [deductionForm, setDeductionForm] = useState({
+    deductionType: "fixed" as "fixed" | "percentage",
+    deductionValue: "",
+    deductionReason: "",
   });
 
   const [showExpenseModal, setShowExpenseModal] = useState(false);
@@ -270,6 +279,69 @@ export default function InPatientProfilePage() {
       careTakerDaysOverride: patient?.careTakerDaysOverride ? String(patient.careTakerDaysOverride) : "",
     });
     setShowCaretakerRateModal(true);
+  };
+
+  // Bug 3: only Admin/MD/Managers may apply or change a deduction (never staff/receptionist).
+  // Server enforces the same set; this just gates the UI.
+  const canApplyDeduction = isAdminMD || ["Manager", "Branch Manager", "Nexus MD"].includes(user?.role || "");
+
+  const openDeductionModal = () => {
+    setDeductionForm({
+      deductionType: ((patient as any)?.deductionType as "fixed" | "percentage") || "fixed",
+      deductionValue:
+        (patient as any)?.deductionType && parseFloat((patient as any)?.deductionValue ?? "0") > 0
+          ? String((patient as any).deductionValue)
+          : "",
+      deductionReason: (patient as any)?.deductionReason || "",
+    });
+    setShowDeductionModal(true);
+  };
+
+  const handleSaveDeduction = async () => {
+    const value = parseFloat(deductionForm.deductionValue);
+    if (!deductionForm.deductionValue || isNaN(value) || value <= 0) {
+      toast({ title: "Error", description: "Enter a deduction amount greater than zero", variant: "destructive" });
+      return;
+    }
+    if (deductionForm.deductionType === "percentage" && value > 100) {
+      toast({ title: "Error", description: "Percentage deduction cannot exceed 100%", variant: "destructive" });
+      return;
+    }
+    try {
+      await setDeduction.mutateAsync({
+        id: patientId,
+        data: {
+          deductionType: deductionForm.deductionType,
+          deductionValue: value,
+          deductionReason: deductionForm.deductionReason.trim() || null,
+        },
+      });
+      toast({ title: "Success", description: "Deduction applied" });
+      setShowDeductionModal(false);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to apply deduction",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleClearDeduction = async () => {
+    try {
+      await setDeduction.mutateAsync({
+        id: patientId,
+        data: { deductionType: null, deductionValue: 0, deductionReason: null },
+      });
+      toast({ title: "Success", description: "Deduction removed" });
+      setShowDeductionModal(false);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to remove deduction",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSaveCaretakerRate = async () => {
@@ -463,7 +535,22 @@ export default function InPatientProfilePage() {
   const careTakerRate = parseFloat(patient.careTakerRatePerDay) || 0;
   const careTakerDays = patient.careTakerDaysOverride ? patient.careTakerDaysOverride : stayDays;
   const caretakerCharges = careTakerRate * careTakerDays;
-  const grandTotal = roomCharges + caretakerCharges + extraExpenseTotal;
+  // Bug 3: subtotal is everything before the deduction; the deduction is applied against it.
+  const subtotal = roomCharges + caretakerCharges + extraExpenseTotal;
+  const deductionType = (patient as any).deductionType as "fixed" | "percentage" | null;
+  const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
+  const deductionAmount =
+    deductionType === "percentage"
+      ? Math.min(subtotal, subtotal * (deductionValue / 100))
+      : deductionType === "fixed"
+      ? Math.min(subtotal, deductionValue)
+      : 0;
+  const hasDeduction = deductionAmount > 0;
+  const deductionLabel =
+    deductionType === "percentage"
+      ? `Deduction (${deductionValue}%)`
+      : "Deduction";
+  const grandTotal = subtotal - deductionAmount;
   const balanceDue = grandTotal - paymentTotal;
   const billingColumns = [
     { key: "item", label: "Item" },
@@ -475,6 +562,10 @@ export default function InPatientProfilePage() {
     { item: "Room Charges", quantity: String(stayDays), rate: formatMoney(amountPerDay), amount: formatMoney(roomCharges) },
     { item: "Caretaker Charges", quantity: String(careTakerDays), rate: formatMoney(careTakerRate), amount: formatMoney(caretakerCharges) },
     { item: "Extra Expenses", quantity: "-", rate: "-", amount: formatMoney(extraExpenseTotal) },
+    { item: "Subtotal", quantity: "-", rate: "-", amount: formatMoney(subtotal) },
+    ...(hasDeduction
+      ? [{ item: deductionLabel, quantity: "-", rate: "-", amount: `-${formatMoney(deductionAmount)}` }]
+      : []),
     { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(grandTotal) },
     { item: "Total Paid", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
     { item: "Balance Due", quantity: "-", rate: "-", amount: formatMoney(balanceDue) },
@@ -707,10 +798,23 @@ export default function InPatientProfilePage() {
           </div>
 
           <div className="bg-[#EEF5FB] rounded-lg p-4" data-testid="billing-summary">
-            <h3 className="font-semibold mb-3 flex items-center gap-2">
-              <Receipt className="h-4 w-4" />
-              Billing Summary
-            </h3>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Receipt className="h-4 w-4" />
+                Billing Summary
+              </h3>
+              {canApplyDeduction && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 print:hidden"
+                  onClick={openDeductionModal}
+                  data-testid="button-apply-deduction"
+                >
+                  {hasDeduction ? "Edit Deduction" : "Apply Deduction"}
+                </Button>
+              )}
+            </div>
             {/* Bug 3: use a real table so description (left) and LKR amounts (right) stay
                 aligned across screen sizes and in print, instead of collapsing flex rows. */}
             <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
@@ -735,6 +839,21 @@ export default function InPatientProfilePage() {
                   <td className="py-1 text-left text-muted-foreground align-top">Extra Expenses</td>
                   <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-extra-expenses-total">LKR {formatMoney(extraExpenseTotal)}</td>
                 </tr>
+                <tr className="border-t border-border/60">
+                  <td className="pt-2 text-left font-medium align-top">Subtotal</td>
+                  <td className="pt-2 text-right font-medium whitespace-nowrap" data-testid="text-subtotal">LKR {formatMoney(subtotal)}</td>
+                </tr>
+                {hasDeduction && (
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">
+                      {deductionLabel}
+                      {(patient as any).deductionReason ? (
+                        <span className="block text-xs text-muted-foreground/80">{(patient as any).deductionReason}</span>
+                      ) : null}
+                    </td>
+                    <td className="py-1 text-right font-medium text-red-600 whitespace-nowrap" data-testid="text-deduction">- LKR {formatMoney(deductionAmount)}</td>
+                  </tr>
+                )}
                 <tr className="border-t border-border/60">
                   <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
                   <td className="pt-2 text-right font-bold whitespace-nowrap" data-testid="text-grand-total">LKR {formatMoney(grandTotal)}</td>
@@ -776,6 +895,18 @@ export default function InPatientProfilePage() {
                     <td className="py-1 text-left text-muted-foreground align-top">Other Charges</td>
                     <td className="py-1 text-right font-medium whitespace-nowrap">LKR {formatMoney(Number(discharge.otherTotal))}</td>
                   </tr>
+                  {Number((discharge as any).deductionAmount) > 0 && (
+                    <tr>
+                      <td className="py-1 text-left text-muted-foreground align-top">
+                        Deduction
+                        {(discharge as any).deductionType === "percentage" ? ` (${Number((discharge as any).deductionValue)}%)` : ""}
+                        {(discharge as any).deductionReason ? (
+                          <span className="block text-xs text-muted-foreground/80">{(discharge as any).deductionReason}</span>
+                        ) : null}
+                      </td>
+                      <td className="py-1 text-right font-medium text-red-600 whitespace-nowrap">- LKR {formatMoney(Number((discharge as any).deductionAmount))}</td>
+                    </tr>
+                  )}
                   <tr className="border-t border-border/60">
                     <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
                     <td className="pt-2 text-right font-bold whitespace-nowrap">LKR {formatMoney(Number(discharge.grandTotal))}</td>
@@ -1328,6 +1459,100 @@ export default function InPatientProfilePage() {
                 {updateInPatient.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bug 3: apply a fixed or percentage deduction against the bill subtotal. */}
+      <Dialog open={showDeductionModal} onOpenChange={setShowDeductionModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{hasDeduction ? "Edit Deduction" : "Apply Deduction"}</DialogTitle>
+            <DialogDescription>
+              Applied against the subtotal of LKR {formatMoney(subtotal)}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Deduction Type</Label>
+              <Select
+                value={deductionForm.deductionType}
+                onValueChange={(v) => setDeductionForm((prev) => ({ ...prev, deductionType: v as "fixed" | "percentage" }))}
+              >
+                <SelectTrigger className="h-12" data-testid="select-deduction-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fixed">Fixed amount (LKR)</SelectItem>
+                  <SelectItem value="percentage">Percentage (%)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="deductionValue">
+                {deductionForm.deductionType === "percentage" ? "Percentage (%)" : "Amount (LKR)"}
+              </Label>
+              <Input
+                id="deductionValue"
+                type="number"
+                min="0"
+                value={deductionForm.deductionValue}
+                onChange={(e) => setDeductionForm((prev) => ({ ...prev, deductionValue: e.target.value }))}
+                placeholder={deductionForm.deductionType === "percentage" ? "e.g. 10" : "e.g. 500"}
+                className="h-12"
+                data-testid="input-deduction-value"
+              />
+              {(() => {
+                const v = parseFloat(deductionForm.deductionValue) || 0;
+                const preview =
+                  deductionForm.deductionType === "percentage"
+                    ? Math.min(subtotal, subtotal * (v / 100))
+                    : Math.min(subtotal, v);
+                if (v <= 0) return null;
+                return (
+                  <p className="text-xs text-muted-foreground" data-testid="text-deduction-preview">
+                    Deduction: - LKR {formatMoney(preview)} → New total: LKR {formatMoney(subtotal - preview)}
+                  </p>
+                );
+              })()}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="deductionReason">Reason (optional)</Label>
+              <Textarea
+                id="deductionReason"
+                value={deductionForm.deductionReason}
+                onChange={(e) => setDeductionForm((prev) => ({ ...prev, deductionReason: e.target.value }))}
+                placeholder="e.g. Loyalty discount, goodwill adjustment"
+                data-testid="input-deduction-reason"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              {hasDeduction && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 h-12 text-destructive"
+                  onClick={handleClearDeduction}
+                  disabled={setDeduction.isPending}
+                  data-testid="button-clear-deduction"
+                >
+                  Remove
+                </Button>
+              )}
+              <Button
+                type="button"
+                className="flex-1 h-12"
+                onClick={handleSaveDeduction}
+                disabled={setDeduction.isPending}
+                data-testid="button-save-deduction"
+              >
+                {setDeduction.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                 Save
               </Button>
             </div>

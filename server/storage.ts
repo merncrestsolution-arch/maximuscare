@@ -122,6 +122,7 @@ import type {
   InsertTask,
   UpdateTask,
   InsertTaskAssignment,
+  TaskAssignment,
   AuditLog,
   InsertAuditLog,
   AuthSession,
@@ -355,6 +356,9 @@ export interface IStorage {
   updateTask(id: string, data: UpdateTask): Promise<Task | undefined>;
   deleteTask(id: string, deletedBy?: string): Promise<boolean>;
   createTaskAssignment(data: InsertTaskAssignment): Promise<void>;
+  getTaskAssignmentForStaff(taskId: string, staffId: string): Promise<TaskAssignment | undefined>;
+  updateTaskAssignmentStatus(taskId: string, staffId: string, status: string): Promise<void>;
+  areAllTaskAssignmentsComplete(taskId: string): Promise<boolean>;
 
   createAuditLog(data: InsertAuditLog): Promise<AuditLog>;
   getAuditLogs(params: { entityType?: string; module?: string; limit: number }): Promise<AuditLog[]>;
@@ -2074,6 +2078,34 @@ export class DatabaseStorage implements IStorage {
 
   async createTaskAssignment(data: InsertTaskAssignment): Promise<void> {
     await db.insert(taskAssignments).values(data);
+  }
+
+  async getTaskAssignmentForStaff(taskId: string, staffId: string): Promise<TaskAssignment | undefined> {
+    const rows = await db
+      .select()
+      .from(taskAssignments)
+      .where(and(eq(taskAssignments.taskId, taskId), eq(taskAssignments.staffId, staffId)))
+      .limit(1);
+    return rows[0];
+  }
+
+  async updateTaskAssignmentStatus(taskId: string, staffId: string, status: string): Promise<void> {
+    await db
+      .update(taskAssignments)
+      .set({
+        status,
+        completedAt: status === "Completed" ? new Date() : null,
+      } as any)
+      .where(and(eq(taskAssignments.taskId, taskId), eq(taskAssignments.staffId, staffId)));
+  }
+
+  async areAllTaskAssignmentsComplete(taskId: string): Promise<boolean> {
+    const rows = await db
+      .select({ status: taskAssignments.status })
+      .from(taskAssignments)
+      .where(eq(taskAssignments.taskId, taskId));
+    if (rows.length === 0) return false;
+    return rows.every((r: { status: string }) => String(r.status) === "Completed");
   }
 
   async createAuditLog(data: InsertAuditLog): Promise<AuditLog> {

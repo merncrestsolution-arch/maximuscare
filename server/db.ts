@@ -214,6 +214,8 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart19PatientTransferLogs();
   const { runPart20PatientCodeFormatMigration } = await import("./migrations/part20PatientCodeFormatMigration");
   await runPart20PatientCodeFormatMigration();
+  const { runPart22InpatientDeduction } = await import("./migrations/part22InpatientDeduction");
+  await runPart22InpatientDeduction();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -255,4 +257,6 @@ export async function ensurePostgresSchemaCompatibility() {
   await runPart20PatientCodeFormatMigration();
   const { runPart21SalaryAdjustments } = await import("./migrations/part21SalaryAdjustments");
   await runPart21SalaryAdjustments();
+  const { runPart22InpatientDeduction } = await import("./migrations/part22InpatientDeduction");
+  await runPart22InpatientDeduction();
 }

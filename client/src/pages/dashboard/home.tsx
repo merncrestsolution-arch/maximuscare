@@ -297,17 +297,6 @@ export default function Dashboard() {
               accent="success"
               icon={<DollarSign className="h-5 w-5" />}
             />
-            <StatCard
-              title="Attendance Today"
-              value={loadingKpis ? "—" : (dashboardKpis?.todayAttendance?.present ?? 0)}
-              subtitle={
-                loadingKpis ? undefined : (
-                  <>Present · Absent {dashboardKpis?.todayAttendance?.absent ?? 0} · Leave {dashboardKpis?.todayAttendance?.leave ?? 0}</>
-                )
-              }
-              accent="neutral"
-              icon={<Users className="h-5 w-5" />}
-            />
           </KpiGrid>
 
           <KpiGrid className="lg:grid-cols-3">
@@ -478,17 +467,6 @@ export default function Dashboard() {
               value={loadingKpis ? "—" : (dashboardKpis?.inpatientSessionCount ?? 0)}
               accent="secondary"
               icon={<Activity className="h-5 w-5" />}
-            />
-            <StatCard
-              title="Attendance Today"
-              value={loadingKpis ? "—" : (dashboardKpis?.todayAttendance?.present ?? 0)}
-              subtitle={
-                loadingKpis ? undefined : (
-                  <>Present · Absent {dashboardKpis?.todayAttendance?.absent ?? 0} · Leave {dashboardKpis?.todayAttendance?.leave ?? 0}</>
-                )
-              }
-              accent="neutral"
-              icon={<Users className="h-5 w-5" />}
             />
           </KpiGrid>
           {dashboardKpis?.charts && (

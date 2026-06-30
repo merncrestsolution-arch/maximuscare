@@ -433,6 +433,19 @@ export function useUpdateInPatientAdmitDate() {
   });
 }
 
+export function useSetInPatientDeduction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: {
+      id: string;
+      data: { deductionType: "fixed" | "percentage" | null; deductionValue: number; deductionReason?: string | null };
+    }) => inPatientApi.setDeduction(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
+    },
+  });
+}
+
 export function useTransferInPatient() {
   const queryClient = useQueryClient();
   return useMutation({

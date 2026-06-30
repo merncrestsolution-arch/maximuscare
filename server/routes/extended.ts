@@ -367,20 +367,44 @@ export function registerExtendedRoutes(app: Express) {
       const user = (req as any).user;
       const existing = await storage.getTask(param(req, "id"));
       if (!existing) return errorResponse(res, "Task not found", 404);
+      // A user may act on a task when they are management, the directly-assigned
+      // owner, OR a recipient of a "Common" task via task_assignments. Common tasks
+      // store the primary assignee in assignedToStaffId, so other recipients would
+      // otherwise be wrongly rejected (Bug: "Mark Complete" throws an error).
+      const assignment = await storage.getTaskAssignmentForStaff(existing.id, user.staffId);
       const canEdit =
-        isManagementRole(user.role) || existing.assignedToStaffId === user.staffId;
+        isManagementRole(user.role) ||
+        existing.assignedToStaffId === user.staffId ||
+        !!assignment;
       if (!canEdit) return errorResponse(res, "Forbidden", 403);
       const raw = req.body as Record<string, unknown>;
       const data = updateTaskSchema.parse({
         ...raw,
         status: raw.status ? normalizeStatus(String(raw.status)) : undefined,
       });
-      if (data.status && normalizeStatus(data.status) === "Completed") {
+      const isCompleting = !!data.status && normalizeStatus(String(data.status)) === "Completed";
+      if (isCompleting) {
         (data as any).completionNotes = raw.completionNotes ?? existing.completionNotes;
         if (raw.completionFiles) {
           (data as any).completionFiles = JSON.stringify(raw.completionFiles);
         }
       }
+
+      // Common tasks track completion per recipient. When a non-management recipient
+      // completes their copy, flip their assignment row and only mark the shared task
+      // Completed once every recipient is done — so one staff member completing does
+      // not close the task for everyone else.
+      if (existing.taskType === "Common" && assignment && !isManagementRole(user.role)) {
+        await storage.updateTaskAssignmentStatus(
+          existing.id,
+          user.staffId,
+          isCompleting ? "Completed" : normalizeStatus(String(data.status ?? assignment.status)),
+        );
+        if (isCompleting && !(await storage.areAllTaskAssignmentsComplete(existing.id))) {
+          delete (data as any).status;
+        }
+      }
+
       const task = await storage.updateTask(existing.id, data);
       const action =
         data.status && normalizeStatus(data.status) === "Completed" ? "complete" : "update";

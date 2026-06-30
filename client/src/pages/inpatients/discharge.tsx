@@ -33,6 +33,12 @@ export default function DischargeInPatientPage() {
   const [amountPaid, setAmountPaid] = useState("");
   const [paymentMode, setPaymentMode] = useState<"Cash" | "Online">("Cash");
   const [notes, setNotes] = useState("");
+  // Bug 3: deduction on the discharge bill. Pre-filled from any deduction already
+  // applied on the admission so it carries over, but editable here before discharge.
+  const [deductionType, setDeductionType] = useState<"fixed" | "percentage">("fixed");
+  const [deductionValue, setDeductionValue] = useState("");
+  const [deductionReason, setDeductionReason] = useState("");
+  const [deductionPrefilled, setDeductionPrefilled] = useState(false);
 
   useEffect(() => {
     if (patient) {
@@ -43,6 +49,19 @@ export default function DischargeInPatientPage() {
       setDaysCount(Math.max(1, days));
     }
   }, [patient, dischargeDate]);
+
+  useEffect(() => {
+    if (patient && !deductionPrefilled) {
+      const t = (patient as any).deductionType as "fixed" | "percentage" | null;
+      const v = parseFloat((patient as any).deductionValue ?? "0") || 0;
+      if (t && v > 0) {
+        setDeductionType(t);
+        setDeductionValue(String(v));
+        setDeductionReason((patient as any).deductionReason || "");
+      }
+      setDeductionPrefilled(true);
+    }
+  }, [patient, deductionPrefilled]);
 
   useEffect(() => {
     if (paymentTotalData && !amountPaid) {
@@ -57,13 +76,21 @@ export default function DischargeInPatientPage() {
     const caretakerDays = patient?.careTakerDaysOverride || daysCount;
     const caretakerTotal = caretakerRate * caretakerDays;
     const otherTotal = otherCharges.reduce((sum, charge) => sum + (charge.amount || 0), 0) + (extraExpenseTotalData?.total || 0);
-    const grandTotal = stayAmount + caretakerTotal + otherTotal;
+    const subtotal = stayAmount + caretakerTotal + otherTotal;
+    const dValue = parseFloat(deductionValue) || 0;
+    const deductionAmount =
+      dValue > 0
+        ? deductionType === "percentage"
+          ? Math.min(subtotal, subtotal * (dValue / 100))
+          : Math.min(subtotal, dValue)
+        : 0;
+    const grandTotal = subtotal - deductionAmount;
     const paid = parseFloat(amountPaid) || 0;
     const balance = grandTotal - paid;
     const paymentStatus = balance <= 0 ? "Paid" : "Unpaid";
-    
-    return { stayAmount, caretakerTotal, otherTotal, grandTotal, balance, paymentStatus };
-  }, [amountPerDay, daysCount, otherCharges, amountPaid, patient, extraExpenseTotalData]);
+
+    return { stayAmount, caretakerTotal, otherTotal, subtotal, deductionAmount, grandTotal, balance, paymentStatus };
+  }, [amountPerDay, daysCount, otherCharges, amountPaid, patient, extraExpenseTotalData, deductionValue, deductionType]);
 
   const addOtherCharge = () => {
     setOtherCharges(prev => [...prev, { label: "", amount: 0 }]);
@@ -94,6 +121,10 @@ export default function DischargeInPatientPage() {
           stayAmount: calculations.stayAmount.toFixed(2),
           otherAmounts: JSON.stringify(otherCharges),
           otherTotal: calculations.otherTotal.toFixed(2),
+          deductionType: calculations.deductionAmount > 0 ? deductionType : null,
+          deductionValue: (parseFloat(deductionValue) || 0).toFixed(2),
+          deductionAmount: calculations.deductionAmount.toFixed(2),
+          deductionReason: calculations.deductionAmount > 0 ? (deductionReason.trim() || null) : null,
           grandTotal: calculations.grandTotal.toFixed(2),
           amountPaid: amountPaid || "0",
           balance: calculations.balance.toFixed(2),
@@ -269,6 +300,46 @@ export default function DischargeInPatientPage() {
             ))}
           </div>
 
+          {/* Bug 3: deduction (discount/adjustment) applied against the bill subtotal. */}
+          <div className="space-y-3 rounded-lg border border-border/60 p-4">
+            <Label>Deduction (optional)</Label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">Type</span>
+                <Select value={deductionType} onValueChange={(v) => setDeductionType(v as "fixed" | "percentage")}>
+                  <SelectTrigger className="h-11" data-testid="select-deduction-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="fixed">Fixed amount (LKR)</SelectItem>
+                    <SelectItem value="percentage">Percentage (%)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground">
+                  {deductionType === "percentage" ? "Percentage (%)" : "Amount (LKR)"}
+                </span>
+                <Input
+                  type="number"
+                  min="0"
+                  value={deductionValue}
+                  onChange={(e) => setDeductionValue(e.target.value)}
+                  placeholder={deductionType === "percentage" ? "e.g. 10" : "e.g. 500"}
+                  className="h-11"
+                  data-testid="input-deduction-value"
+                />
+              </div>
+            </div>
+            <Input
+              value={deductionReason}
+              onChange={(e) => setDeductionReason(e.target.value)}
+              placeholder="Reason (optional, e.g. goodwill discount)"
+              className="h-11"
+              data-testid="input-deduction-reason"
+            />
+          </div>
+
           <div className="bg-blue-50 rounded-lg p-4 space-y-2">
             <div className="flex justify-between text-sm">
               <span>Stay Amount ({daysCount} days x LKR {amountPerDay}):</span>
@@ -282,6 +353,18 @@ export default function DischargeInPatientPage() {
               <span>Other Charges:</span>
               <span className="font-medium" data-testid="text-other-total">LKR {calculations.otherTotal.toFixed(2)}</span>
             </div>
+            <div className="flex justify-between text-sm border-t pt-2 mt-2">
+              <span>Subtotal:</span>
+              <span className="font-medium" data-testid="text-subtotal">LKR {calculations.subtotal.toFixed(2)}</span>
+            </div>
+            {calculations.deductionAmount > 0 && (
+              <div className="flex justify-between text-sm">
+                <span>
+                  Deduction{deductionType === "percentage" ? ` (${parseFloat(deductionValue) || 0}%)` : ""}:
+                </span>
+                <span className="font-medium text-red-600" data-testid="text-deduction">- LKR {calculations.deductionAmount.toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex justify-between font-semibold border-t pt-2 mt-2">
               <span>Grand Total:</span>
               <span data-testid="text-grand-total">LKR {calculations.grandTotal.toFixed(2)}</span>

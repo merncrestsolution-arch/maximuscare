@@ -561,6 +561,13 @@ export const inPatientApi = {
     method: 'PATCH',
     body: JSON.stringify({ admitDate }),
   }),
+  setDeduction: (
+    id: string,
+    data: { deductionType: "fixed" | "percentage" | null; deductionValue: number; deductionReason?: string | null },
+  ) => apiRequest<any>(`/inpatients/${id}/deduction`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  }),
   transfer: (id: string, data: { targetBranchId: string; transferDate?: string; transferNote?: string }) =>
     apiRequest<any>(`/inpatients/${id}/transfer`, {
       method: 'POST',

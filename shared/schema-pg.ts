@@ -246,6 +246,14 @@ export const inPatientAdmissions = pgTable("in_patient_admissions", {
   amountPerDay: decimal("amount_per_day", { precision: 10, scale: 2 }).notNull(),
   careTakerRatePerDay: decimal("care_taker_rate_per_day", { precision: 10, scale: 2 }).notNull().default("0"),
   careTakerDaysOverride: integer("care_taker_days_override"),
+  // Bug 3: optional bill deduction (discount/adjustment) applied against the subtotal.
+  // deductionType is "fixed" (LKR) or "percentage"; deductionValue holds the raw figure.
+  deductionType: text("deduction_type"),
+  deductionValue: decimal("deduction_value", { precision: 12, scale: 2 }).notNull().default("0"),
+  deductionReason: text("deduction_reason"),
+  deductionAppliedBy: text("deduction_applied_by"),
+  deductionAppliedById: text("deduction_applied_by_id"),
+  deductionAppliedAt: timestamp("deduction_applied_at", { mode: "date" }),
   reportsAttachments: text("reports_attachments").array(),
   idCopyAttachments: text("id_copy_attachments").array(),
   status: text("status").notNull().default("Admitted"),
@@ -331,6 +339,11 @@ export const inPatientDischarges = pgTable("in_patient_discharges", {
   stayAmount: decimal("stay_amount", { precision: 10, scale: 2 }).notNull(),
   otherAmounts: text("other_amounts"),
   otherTotal: decimal("other_total", { precision: 10, scale: 2 }).notNull().default("0"),
+  // Bug 3: deduction snapshot captured at discharge (applied against the subtotal).
+  deductionType: text("deduction_type"),
+  deductionValue: decimal("deduction_value", { precision: 12, scale: 2 }).notNull().default("0"),
+  deductionAmount: decimal("deduction_amount", { precision: 12, scale: 2 }).notNull().default("0"),
+  deductionReason: text("deduction_reason"),
   grandTotal: decimal("grand_total", { precision: 10, scale: 2 }).notNull(),
   amountPaid: decimal("amount_paid", { precision: 10, scale: 2 }).notNull(),
   balance: decimal("balance", { precision: 10, scale: 2 }).notNull(),
