@@ -19,3 +19,6 @@ test.cjs
 test-pw.cjs
 test-puppeteer.cjs
 test-puppeteer-login.cjs
+
+.vercel
+.env*
