@@ -16,7 +16,8 @@ import {
   requireStaffManage,
   requireReportsExport,
 } from "../middleware/secureApi";
-import { attachBranchContext, requireBranchContext, getBranchFilter } from "../middleware/branchContext";
+import { attachBranchContext, requireBranchContext, getBranchFilter, loadBranchContext } from "../middleware/branchContext";
+import { branchStaffIdSet } from "../services/staffService";
 import { assertOverviewAccess } from "../services/branchService";
 import { computeOverviewKpis, computeMaximusComparison, computeNexusComparison, computeOverviewExpenseBreakdown } from "../services/overviewService";
 import { successResponse, errorResponse } from "../response";
@@ -70,12 +71,42 @@ export function registerExtendedRoutes(app: Express) {
         return errorResponse(res, "startDate and endDate are required", 400);
       }
 
-      // Bug 14: management sees any staff; everyone else (incl. branch leads &
-      // receptionists) may always view their own salary. This prevents the
-      // "salary not showing" 403 for non-management roles viewing themselves.
       let staffIds: string[] | undefined;
-      if (isManagementRole(user.role)) {
-        staffIds = staffId ? [staffId] : undefined;
+      const isManagement = isManagementRole(user.role);
+      const isLead = isOperationalLead(user.role);
+
+      if (isManagement || isLead) {
+        if (staffId) {
+          const target = await storage.getStaff(staffId);
+          if (!target) return errorResponse(res, "Staff not found", 404);
+          
+          if (!isManagement) {
+            const ctx = await loadBranchContext(req as any);
+            const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
+            if (!allowedNames.has((target.branch ?? "").toLowerCase())) {
+              return errorResponse(res, "Access denied to staff in this branch", 403);
+            }
+          }
+          staffIds = [staffId];
+        } else {
+          const ctx = await loadBranchContext(req as any);
+          const ids = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
+          
+          if (isLead || ids === null) {
+            const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
+            const allStaff = await storage.getAllStaff();
+            const filteredStaff = allStaff.filter((s) => allowedNames.has((s.branch ?? "").toLowerCase()));
+            const allowedIds = filteredStaff.map((s) => s.id);
+            
+            if (ids !== null) {
+              staffIds = allowedIds.filter((id) => ids.has(id));
+            } else {
+              staffIds = allowedIds;
+            }
+          } else {
+            staffIds = Array.from(ids);
+          }
+        }
       } else if (user.staffId) {
         staffIds = [user.staffId];
       } else {
@@ -96,6 +127,18 @@ export function registerExtendedRoutes(app: Express) {
       if (!staffId || !periodStart || !periodEnd) {
         return errorResponse(res, "staffId, periodStart, periodEnd required", 400);
       }
+
+      const isManagement = isManagementRole(user.role);
+      if (!isManagement) {
+        const target = await storage.getStaff(staffId);
+        if (!target) return errorResponse(res, "Staff not found", 404);
+        const ctx = await loadBranchContext(req as any);
+        const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
+        if (!allowedNames.has((target.branch ?? "").toLowerCase())) {
+          return errorResponse(res, "Access denied to staff in this branch", 403);
+        }
+      }
+
       const { summaries } = await computePayrollReport(storage, periodStart, periodEnd, [staffId]);
       const summary = summaries[0];
       if (!summary) return errorResponse(res, "Staff not found or not eligible", 404);
@@ -132,9 +175,23 @@ export function registerExtendedRoutes(app: Express) {
     try {
       const user = (req as any).user;
       const staffId = (req.query.staffId as string) || user.staffId;
-      if (!isManagementRole(user.role) && staffId !== user.staffId) {
+      const isManagement = isManagementRole(user.role);
+      const isLead = isOperationalLead(user.role);
+
+      if (!isManagement && !isLead && staffId !== user.staffId) {
         return errorResponse(res, "Forbidden", 403);
       }
+
+      if (isLead && staffId) {
+        const target = await storage.getStaff(staffId);
+        if (!target) return errorResponse(res, "Staff not found", 404);
+        const ctx = await loadBranchContext(req as any);
+        const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
+        if (!allowedNames.has((target.branch ?? "").toLowerCase())) {
+          return errorResponse(res, "Access denied to staff in this branch", 403);
+        }
+      }
+
       const snapshots = await storage.getPayrollSnapshotsByStaff(staffId);
       return successResponse(res, snapshots);
     } catch (error: any) {
@@ -588,7 +645,13 @@ export function registerExtendedRoutes(app: Express) {
       const endDate = req.query.endDate as string;
       if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
       const staffId = isManagementRole(user.role) ? (req.query.staffId as string | undefined) : user.staffId;
-      const rows = await computeIncentiveReport(storage, startDate, endDate, staffId);
+      let rows = await computeIncentiveReport(storage, startDate, endDate, staffId);
+      // Branch-scope the management-wide incentive report to the selected branch.
+      if (isManagementRole(user.role) && !staffId) {
+        const ctx = await loadBranchContext(req as any);
+        const ids = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
+        if (ids) rows = rows.filter((r: any) => ids.has(r.staffId));
+      }
       return successResponse(res, { startDate, endDate, rows });
     } catch (error: any) {
       return errorResponse(res, error.message, 500);

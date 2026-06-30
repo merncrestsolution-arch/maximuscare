@@ -4,7 +4,7 @@ import { schema } from "../db";
 import { requireAuth } from "../auth";
 import { requireSalaryManage, requireSalaryApprove } from "../middleware/secureApi";
 import { successResponse, errorResponse } from "../response";
-import { isManagementRole } from "../permissions";
+import { isManagementRole, isOperationalLead } from "../permissions";
 import { logAudit } from "../services/auditService";
 import {
   previewSalary,
@@ -42,6 +42,42 @@ async function editorName(staffId: string) {
   return s?.name ?? "";
 }
 
+/**
+ * The set of staff IDs belonging to the currently selected branch (honouring
+ * multi-branch / "Both" assignments via filterStaffByBranchAccess). Salary &
+ * payroll listings/dashboards/bulk generation must scope to this so a branch only
+ * ever sees its own staff. Returns null when no specific branch is selected
+ * (e.g. a management overview context), meaning "do not branch-scope".
+ */
+async function branchScopedStaffIds(req: Request): Promise<Set<string> | null> {
+  const user = (req as any).user;
+  if (!user) return new Set();
+
+  const ctx = await loadBranchContext(req as any);
+  const isManagement = isManagementRole(user.role);
+  const isLead = isOperationalLead(user.role);
+
+  const { branchStaffIdSet } = await import("../services/staffService");
+  const selectedIds = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
+
+  if (isLead) {
+    // Scoped to allowed branches
+    const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
+    const allStaff = await storage.getAllStaff();
+    const filteredStaff = allStaff.filter((s) => allowedNames.has((s.branch ?? "").toLowerCase()));
+    const allowedIds = filteredStaff.map((s) => s.id);
+
+    if (selectedIds !== null) {
+      return new Set(allowedIds.filter((id) => selectedIds.has(id)));
+    } else {
+      return new Set(allowedIds);
+    }
+  }
+
+  // Full Admin/MD
+  return selectedIds;
+}
+
 const SALARY_REPORT_ROLES = [
   "Admin",
   "MD",
@@ -54,8 +90,8 @@ const SALARY_REPORT_ROLES = [
 
 // Shared read-access check for the Bug-K salary report/history endpoints:
 //   • Staff / Physiotherapist → own record only
-//   • Manager / Branch Manager → staff within their allowed branches
-//   • Admin / MD / Nexus MD → any staff
+//   • Manager / Branch Manager / Nexus MD → staff within their allowed branches
+//   • Admin / MD → any staff
 async function checkSalaryReportAccess(
   req: Request,
   targetId: string
@@ -66,7 +102,7 @@ async function checkSalaryReportAccess(
   if ((role === "Staff" || role === "Physiotherapist") && targetId !== user.staffId) {
     return { status: 403, message: "Access denied" };
   }
-  if (role === "Manager" || role === "Branch Manager") {
+  if (role === "Manager" || role === "Branch Manager" || role === "Nexus MD") {
     const target = await storage.getStaff(targetId);
     if (!target) return { status: 404, message: "Staff not found" };
     const ctx = await loadBranchContext(req as any);
@@ -322,6 +358,9 @@ export function registerSalaryRoutes(app: Express) {
         return errorResponse(res, "periodStart and periodEnd required", 400);
       }
       const editor = await editorName(user.staffId);
+      // Scope bulk generation to the selected branch so "all staff" never spills
+      // across branches.
+      const allowedStaffIds = (await branchScopedStaffIds(req as any)) ?? undefined;
 
       if (all) {
         const { enqueueJob } = await import("../jobs/jobQueue");
@@ -332,7 +371,8 @@ export function registerSalaryRoutes(app: Express) {
             periodStart,
             periodEnd,
             user.staffId,
-            editor
+            editor,
+            allowedStaffIds
           );
           for (const record of result.created) {
             await logAudit(storage, {
@@ -356,7 +396,8 @@ export function registerSalaryRoutes(app: Express) {
           periodStart,
           periodEnd,
           user.staffId,
-          editor
+          editor,
+          allowedStaffIds
         );
         for (const record of result.created) {
           await logAudit(storage, {
@@ -416,26 +457,37 @@ export function registerSalaryRoutes(app: Express) {
         staffId: req.query.staffId as string | undefined,
         status: req.query.status as string | undefined,
       };
-      if (!isManagementRole(user.role)) {
+      const isManagement = isManagementRole(user.role);
+      const isLead = isOperationalLead(user.role);
+      if (!isManagement && !isLead) {
         filters.staffId = user.staffId;
       }
+      // Branch-scope management/lead views to the selected branch's staff.
+      const allowedStaffIds = (isManagement || isLead)
+        ? await branchScopedStaffIds(req as any)
+        : null;
+      const scopeRows = (rows: any[]) =>
+        allowedStaffIds ? rows.filter((r) => allowedStaffIds.has(r.staffId)) : rows;
+
       const page = req.query.page ? Number(req.query.page) : undefined;
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
       if (page && limit) {
         const { parsePagination } = await import("../helpers/pagination");
         const { page: p, limit: l } = parsePagination({ page, limit });
-        const result = await storage.getSalariesPaginated(filters, p, l);
+        const allFiltered = scopeRows(await getSalaryHistory(storage, filters));
+        const total = allFiltered.length;
+        const offset = (p - 1) * l;
         return successResponse(res, {
-          data: result.data,
+          data: allFiltered.slice(offset, offset + l),
           pagination: {
             page: p,
             limit: l,
-            total: result.total,
-            totalPages: Math.max(1, Math.ceil(result.total / l)),
+            total,
+            totalPages: Math.max(1, Math.ceil(total / l)),
           },
         });
       }
-      const rows = await getSalaryHistory(storage, filters);
+      const rows = scopeRows(await getSalaryHistory(storage, filters));
       return successResponse(res, rows);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);
@@ -443,9 +495,10 @@ export function registerSalaryRoutes(app: Express) {
   });
 
   // ── Dashboard & export (before :id) ──
-  app.get("/api/salary/dashboard", requireAuth, requireSalaryManage, async (_req, res) => {
+  app.get("/api/salary/dashboard", requireAuth, requireSalaryManage, async (req, res) => {
     try {
-      const data = await getSalaryDashboardData(storage);
+      const allowedStaffIds = (await branchScopedStaffIds(req as any)) ?? undefined;
+      const data = await getSalaryDashboardData(storage, allowedStaffIds);
       return successResponse(res, data);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);
@@ -461,7 +514,11 @@ export function registerSalaryRoutes(app: Express) {
         staffId: req.query.staffId as string | undefined,
         status: req.query.status as string | undefined,
       });
-      return successResponse(res, rows);
+      const allowedStaffIds = await branchScopedStaffIds(req as any);
+      const scoped = allowedStaffIds
+        ? rows.filter((r: any) => allowedStaffIds.has(r.employeeId))
+        : rows;
+      return successResponse(res, scoped);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);
     }
@@ -477,8 +534,9 @@ export function registerSalaryRoutes(app: Express) {
         const rows = await storage.getStaffDeductionsByStaffAndRange(staffId, startDate, endDate);
         return successResponse(res, rows);
       }
+      const allowedStaffIds = await branchScopedStaffIds(req as any);
       const rows = await storage.getAllStaffDeductions();
-      return successResponse(res, rows);
+      return successResponse(res, allowedStaffIds ? rows.filter((r) => allowedStaffIds.has(r.staffId)) : rows);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);
     }
@@ -561,8 +619,9 @@ export function registerSalaryRoutes(app: Express) {
         const rows = await storage.getStaffOtEntriesByStaffAndRange(staffId, startDate, endDate);
         return successResponse(res, rows);
       }
+      const allowedStaffIds = await branchScopedStaffIds(req as any);
       const rows = await storage.getAllStaffOtEntries();
-      return successResponse(res, rows);
+      return successResponse(res, allowedStaffIds ? rows.filter((r) => allowedStaffIds.has(r.staffId)) : rows);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);
     }
