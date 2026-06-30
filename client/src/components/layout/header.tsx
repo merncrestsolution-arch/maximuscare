@@ -29,6 +29,9 @@ export default function Header({ before }: { before?: ReactNode }) {
     .map((p) => p.charAt(0).toUpperCase())
     .join("");
   const mobileSubtitle = selectedBranchName?.trim() || user.role;
+  // Profile picture from the staff record (persisted via /staff/:id/photo and
+  // returned by /auth/me). Render it when present; otherwise fall back to initials.
+  const photoUri = (user as { photoUri?: string }).photoUri?.trim() || "";
 
   return (
     <header className="sticky top-0 z-40 w-full bg-white/95 backdrop-blur-sm shadow-[0_2px_12px_rgba(16,86,145,0.08)] safe-top">
@@ -62,8 +65,27 @@ export default function Header({ before }: { before?: ReactNode }) {
           <BranchSwitcher />
           <NotificationBell />
           <div className="flex items-center gap-2.5 border-l border-[#E2ECF5] pl-3" data-testid="header-user-identity">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#1873A8] to-[#105691] text-white text-xs font-bold ring-2 ring-[#F45627] ring-offset-1" aria-hidden="true">
-              {initials || "U"}
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-[#1873A8] to-[#105691] text-white text-xs font-bold ring-2 ring-[#F45627] ring-offset-1">
+              {photoUri ? (
+                <img
+                  src={photoUri}
+                  alt={user.name}
+                  className="h-full w-full object-cover"
+                  data-testid="img-header-avatar"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                    const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                    if (fallback) fallback.style.display = "flex";
+                  }}
+                />
+              ) : null}
+              <span
+                className="h-full w-full items-center justify-center"
+                style={{ display: photoUri ? "none" : "flex" }}
+                aria-hidden="true"
+              >
+                {initials || "U"}
+              </span>
             </div>
             <div className="flex flex-col leading-tight min-w-0">
               <span className="text-sm font-semibold text-[#1E293B] truncate" data-testid="text-header-username">{user.name}</span>
