@@ -18,7 +18,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
-import { canManageAttendance } from "@/lib/permissions";
+import { canManageAttendance, canViewAttendanceLocation } from "@/lib/permissions";
+import { ViewLocationButton } from "@/components/attendance/view-location-button";
 import { clinicTodayString } from "@/lib/utils";
 
 function isoToDatetimeLocal(iso: string | undefined): string {
@@ -197,12 +198,14 @@ function PaginatedAttendanceList({
   records,
   showActions,
   isManagement,
+  canViewLocation,
   onEdit,
   onDelete,
 }: {
   records: Array<any>;
   showActions?: boolean;
   isManagement: boolean;
+  canViewLocation?: boolean;
   onEdit: (record: any) => void;
   onDelete: (id: string) => void;
 }) {
@@ -237,6 +240,11 @@ function PaginatedAttendanceList({
                             OT: {moduleFormatOt(record.overtimeHours)} hours
                           </div>
                         )}
+                      </div>
+                    )}
+                    {canViewLocation && record.status === 'Present' && record.latitude != null && record.latitude !== "" && record.longitude != null && record.longitude !== "" && (
+                      <div className="mt-1 text-xs">
+                        <ViewLocationButton attendanceId={record.id} />
                       </div>
                     )}
                   </div>
@@ -291,6 +299,9 @@ export default function AttendancePage() {
   const today = clinicTodayString();
   const userId = user?.id ?? "";
   const isManagement = canManageAttendance(user?.role);
+  // Captured GPS is Admin/MD-only (server strips it for everyone else). Operational
+  // leads count as "management" for editing but must never see location data.
+  const canViewLocation = canViewAttendanceLocation(user?.role);
 
   const [otInput, setOtInput] = useState("");
   const [markingStatus, setMarkingStatus] = useState<string | null>(null);
@@ -386,19 +397,35 @@ export default function AttendancePage() {
     if (!user) return;
     if (todayRecord || markingStatus) return;
 
+    // Location-gated attendance: every role except Admin/MD must grant a one-time
+    // location capture to mark themselves Present. Admin/MD are exempt.
+    const locationExempt = canViewAttendanceLocation(user.role);
+
     setMarkingStatus(status);
     try {
-      // Bug 6: capture the real GPS location at check-in. Permission denial is handled
-      // gracefully — we simply store no coordinates rather than blocking attendance.
+      // Capture a single GPS snapshot at check-in (one-time getCurrentPosition — NOT
+      // continuous watchPosition). For non-exempt roles, denial/unavailability blocks
+      // the submission entirely; there is no "present without location" fallback.
       let geo: { latitude: number; longitude: number } | null = null;
-      if (status === 'Present' && typeof navigator !== "undefined" && navigator.geolocation) {
-        geo = await new Promise((resolve) => {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-            () => resolve(null),
-            { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-          );
-        });
+      if (status === 'Present') {
+        const geolocationSupported = typeof navigator !== "undefined" && !!navigator.geolocation;
+        if (geolocationSupported) {
+          geo = await new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+              () => resolve(null),
+              { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+          });
+        }
+        if (!geo && !locationExempt) {
+          toast({
+            title: "Location required",
+            description: "Location access is required to mark attendance. Please enable location and try again.",
+            variant: "destructive",
+          });
+          return;
+        }
       }
       await createAttendance.mutateAsync({
         staffId: user.id,
@@ -975,6 +1002,7 @@ export default function AttendancePage() {
               records={myHistory}
               showActions={isManagement}
               isManagement={isManagement}
+              canViewLocation={canViewLocation}
               onEdit={setEditRecord}
               onDelete={(id) => { setDeletingRecordId(id); setDeleteConfirmOpen(true); }}
             />
@@ -1026,6 +1054,7 @@ export default function AttendancePage() {
                 records={allHistory}
                 showActions={true}
                 isManagement={isManagement}
+                canViewLocation={canViewLocation}
                 onEdit={setEditRecord}
                 onDelete={(id) => { setDeletingRecordId(id); setDeleteConfirmOpen(true); }}
               />

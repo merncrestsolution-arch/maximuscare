@@ -152,6 +152,16 @@ export function canManageAttendance(role: string | undefined): boolean {
   return isManagementRole(role) || isOperationalLead(role);
 }
 
+/**
+ * View captured check-in GPS locations / location short-links. Admin & MD only —
+ * mirrors the server, which strips location fields and 403s the location endpoints
+ * for every other role. Also the set of roles EXEMPT from the location requirement
+ * when marking their own attendance present.
+ */
+export function canViewAttendanceLocation(role: string | undefined): boolean {
+  return isManagementRole(role);
+}
+
 /** View the system-wide activity / audit log dashboard (Admin & MD only). */
 export function canViewAuditLogs(role: string | undefined): boolean {
   return isManagementRole(role);

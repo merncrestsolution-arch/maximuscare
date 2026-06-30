@@ -42,6 +42,7 @@ import {
   canEditAllVisits,
   canViewStaff,
   canViewStaffFinancials,
+  isManagementRole,
 } from "./permissions";
 import { hasPermission } from "./rbac/permissions";
 import { registerExtendedRoutes } from "./routes/extended";
@@ -49,6 +50,7 @@ import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
 import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
 import { signPatientQrToken, verifyPatientQrToken } from "./services/qrTokenService";
+import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
 import { logAudit } from "./services/auditService";
 
@@ -69,6 +71,20 @@ function requestIp(req: Request): string {
 function requestDevice(req: Request): string {
   const ua = req.headers["user-agent"];
   return typeof ua === "string" ? ua : "";
+}
+
+/**
+ * Captured check-in GPS is admin-only data. For non-Admin/MD roles we strip the
+ * location fields from every attendance record before sending — staff/receptionist/
+ * managers must not be able to retrieve their own or coworkers' coordinates, even
+ * via direct API inspection. This is the server-side enforcement that backs the
+ * UI hiding; never rely on the frontend alone.
+ */
+function stripAttendanceLocation<T extends Record<string, any>>(records: T[]): T[] {
+  return records.map((r) => {
+    const { latitude, longitude, locationLabel, ...rest } = r;
+    return rest as unknown as T;
+  });
 }
 
 /**
@@ -1687,6 +1703,9 @@ export async function registerRoutes(
       const currentUser = (req as any).user;
       // Management and operational leads (Manager/Branch Manager/Nexus MD) may view team attendance.
       const isAdmin = canViewStaff(currentUser.role);
+      // Only Admin/MD may ever see captured GPS coordinates; everyone else gets
+      // location fields stripped from the response.
+      const canViewLocation = isManagementRole(currentUser.role);
 
       // Attendance records historically were created without a branch, so we scope
       // by the *staff member's* branch (the reliable source) rather than the
@@ -1719,7 +1738,7 @@ export async function registerRoutes(
           limit: l,
         });
         return res.json({
-          data: result.data,
+          data: canViewLocation ? result.data : stripAttendanceLocation(result.data as any[]),
           pagination: {
             page: p,
             limit: l,
@@ -1768,6 +1787,10 @@ export async function registerRoutes(
       // Strictly scope admin/management cross-staff results to the active branch.
       if (branchStaffIds) {
         attendance = attendance.filter((a: any) => branchStaffIds!.has(a.staffId));
+      }
+
+      if (!canViewLocation) {
+        attendance = stripAttendanceLocation(attendance as any[]);
       }
 
       return res.json(attendance);
@@ -1839,6 +1862,19 @@ export async function registerRoutes(
       const latitude = hasGeo ? String(body.latitude) : null;
       const longitude = hasGeo ? String(body.longitude) : null;
       const locationLabel = body.locationLabel ? String(body.locationLabel) : null;
+
+      // Location-gated attendance: every role EXCEPT Admin/MD must capture a GPS
+      // location when marking themselves Present. Admin/MD are exempt, and marking
+      // attendance on behalf of another staff member (admin-mark flow) is exempt too
+      // — only a staff member's own "Present" check-in requires location. This is
+      // enforced server-side so the requirement cannot be bypassed via the API.
+      const isSelfCheckIn = targetStaffId === currentUser.staffId;
+      const isLocationExempt = isManagementRole(currentUser.role);
+      if (status === "Present" && isSelfCheckIn && !isLocationExempt && !hasGeo) {
+        return res.status(422).json({
+          message: "Location access is required to mark attendance. Please enable location and try again.",
+        });
+      }
 
       console.log(`[ATTENDANCE] staffId=${targetStaffId}, date=${attendanceDate}, status=${status}`);
 
@@ -2009,6 +2045,71 @@ export async function registerRoutes(
         oldValue: existing,
       });
       return res.json({ message: "Attendance record deleted" });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Generate a signed, unguessable short-link token for ONE attendance record's
+  // captured location (Admin/MD only). The token is single-record-scoped and never
+  // exposes any other staff member's data.
+  app.get("/api/attendance/:id/location-token", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const currentUser = (req as any).user;
+      if (!isManagementRole(currentUser.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const id = param(req, "id");
+      const record = await storage.getAttendance(id);
+      if (!record) {
+        return res.status(404).json({ message: "Attendance record not found" });
+      }
+      const hasGeo =
+        (record as any).latitude != null && (record as any).latitude !== "" &&
+        (record as any).longitude != null && (record as any).longitude !== "";
+      if (!hasGeo) {
+        return res.status(404).json({ message: "No location captured for this attendance record" });
+      }
+      const token = signAttendanceLocationToken(id);
+      return res.json({ token });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Resolve a location short-link token to the single attendance record's location.
+  // RBAC is enforced here independently of the token: a valid token alone never
+  // bypasses authorization — the caller must still be an authenticated Admin/MD.
+  // The response is strictly scoped to that one record (never a list).
+  app.get("/api/attendance/location/:token", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const currentUser = (req as any).user;
+      if (!isManagementRole(currentUser.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const token = param(req, "token");
+      const verified = verifyAttendanceLocationToken(token);
+      if (!verified.ok || !verified.payload) {
+        return res.status(404).json({ message: "Invalid or expired location link" });
+      }
+      const record = await storage.getAttendance(verified.payload.attendanceId);
+      if (!record) {
+        return res.status(404).json({ message: "Attendance record not found" });
+      }
+      const lat = (record as any).latitude;
+      const lng = (record as any).longitude;
+      if (lat == null || lat === "" || lng == null || lng === "") {
+        return res.status(404).json({ message: "No location captured for this attendance record" });
+      }
+      return res.json({
+        staffName: (record as any).staffName,
+        role: (record as any).role,
+        date: (record as any).date,
+        checkInTime: (record as any).checkInTime,
+        latitude: lat,
+        longitude: lng,
+        locationLabel: (record as any).locationLabel ?? null,
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

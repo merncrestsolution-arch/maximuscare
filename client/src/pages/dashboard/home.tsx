@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Users, Calendar, DollarSign, Activity, TrendingUp, Loader2, Plus, Pencil, Trash2, Wallet, ArrowDownLeft, ArrowUpRight, MapPin } from "lucide-react";
+import { Users, Calendar, DollarSign, Activity, TrendingUp, Loader2, Plus, Pencil, Trash2, Wallet, ArrowDownLeft, ArrowUpRight } from "lucide-react";
 import { Bar, BarChart, Line, LineChart, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { ReportDateFilters } from "@/components/reports/report-date-filters";
 import { getDateRangeForPreset, type DatePreset } from "@/lib/reportDatePresets";
@@ -22,6 +22,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { SiteCreditFooter } from "@/components/site-credit-footer";
 import { StaffHomeWidgets } from "@/components/dashboard/staff-home-widgets";
+import { ViewLocationButton } from "@/components/attendance/view-location-button";
 import { computeOutstanding } from "@/lib/paymentStatus";
 import { isManagementRole, canViewFinancialSummary, isManager, isBranchManager, canViewAllVisits } from "@/lib/permissions";
 import { StatCard, KpiGrid } from "@/components/ui/stat-card";
@@ -870,7 +871,9 @@ export default function Dashboard() {
                {attendance
                  .filter(a => a.date === todayStr)
                  .map(record => {
-                   // Bug 6: show check-in time and a Google Maps link to the captured GPS location.
+                   // Captured GPS is Admin/MD-only. The coordinates are stripped from the
+                   // API response for every other role, so a location link is only ever
+                   // offered to Admin/MD — and as an unguessable, single-record short link.
                    const lat = (record as any).latitude;
                    const lng = (record as any).longitude;
                    const hasLocation = lat != null && lat !== "" && lng != null && lng !== "";
@@ -884,18 +887,12 @@ export default function Dashboard() {
                          <span className="text-muted-foreground">
                            {checkIn ? format(new Date(checkIn), 'hh:mm a') : '—'}
                          </span>
-                         {hasLocation ? (
-                           <a
-                             href={`https://www.google.com/maps?q=${lat},${lng}`}
-                             target="_blank"
-                             rel="noopener noreferrer"
-                             className="inline-flex items-center gap-0.5 text-primary hover:underline"
-                             data-testid={`link-location-${record.id}`}
-                           >
-                             <MapPin className="h-3 w-3" /> Location
-                           </a>
-                         ) : (
-                           <span className="text-muted-foreground/70">Location not captured</span>
+                         {isManagement && record.status === 'Present' && (
+                           hasLocation ? (
+                             <ViewLocationButton attendanceId={record.id} />
+                           ) : (
+                             <span className="text-muted-foreground/70">Location not captured</span>
+                           )
                          )}
                        </div>
                      </div>

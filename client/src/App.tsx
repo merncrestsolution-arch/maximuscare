@@ -20,6 +20,7 @@ import PatientEditPage from "@/pages/patients/edit";
 import PatientHistoryPage from "@/pages/patients/history";
 import NewVisit from "@/pages/visits/new";
 import AttendancePage from "@/pages/attendance/index";
+import AttendanceLocationPage from "@/pages/attendance/location";
 import PhysioSummaryPage from "@/pages/physio-summary";
 import ProfilePage from "@/pages/profile";
 import StaffListPage from "@/pages/staff/list";
@@ -186,6 +187,9 @@ function Router() {
       </Route>
       <Route path="/attendance">
         <ProtectedRoute component={AttendancePage} />
+      </Route>
+      <Route path="/loc/:token">
+        <ProtectedRoute component={AttendanceLocationPage} allowWithoutBranch />
       </Route>
       <Route path="/reports">
         <ProtectedRoute component={ReportsHubPage} />

@@ -512,6 +512,20 @@ export const attendanceApi = {
   delete: (id: string) => apiRequest<any>(`/attendance/${id}`, {
     method: 'DELETE',
   }),
+  // Admin/MD only: get an unguessable short-link token for one record's location.
+  locationToken: (id: string) =>
+    apiRequest<{ token: string }>(`/attendance/${id}/location-token`),
+  // Admin/MD only: resolve a location short-link token to a single record's location.
+  location: (token: string) =>
+    apiRequest<{
+      staffName: string;
+      role: string;
+      date: string;
+      checkInTime: string | null;
+      latitude: string;
+      longitude: string;
+      locationLabel: string | null;
+    }>(`/attendance/location/${encodeURIComponent(token)}`),
 };
 
 // Incentive Settings API
