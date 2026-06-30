@@ -22,6 +22,7 @@ import { assertOverviewAccess } from "../services/branchService";
 import { computeOverviewKpis, computeMaximusComparison, computeNexusComparison, computeOverviewExpenseBreakdown } from "../services/overviewService";
 import { successResponse, errorResponse } from "../response";
 import { isManagementRole, isOperationalLead } from "../permissions";
+import { normalizeBranchName } from "@shared/branches";
 import { computePayrollReport, persistPayrollSnapshotRecords } from "../services/payrollService";
 import { logAudit } from "../services/auditService";
 import { handleCreateTask } from "./hrm";
@@ -73,17 +74,21 @@ export function registerExtendedRoutes(app: Express) {
 
       let staffIds: string[] | undefined;
       const isManagement = isManagementRole(user.role);
-      const isLead = isOperationalLead(user.role);
+      const isMultiStaffAllowed = user.role === "Admin" || user.role === "MD" || user.role === "Nexus MD";
 
-      if (isManagement || isLead) {
+      if (isMultiStaffAllowed) {
         if (staffId) {
           const target = await storage.getStaff(staffId);
           if (!target) return errorResponse(res, "Staff not found", 404);
           
           if (!isManagement) {
             const ctx = await loadBranchContext(req as any);
-            const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
-            if (!allowedNames.has((target.branch ?? "").toLowerCase())) {
+            const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
+            const targetBranch = normalizeBranchName(target.branch).toLowerCase();
+            const matchesAllowed = targetBranch === "both"
+              ? (allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation"))
+              : allowedNames.has(targetBranch);
+            if (!matchesAllowed) {
               return errorResponse(res, "Access denied to staff in this branch", 403);
             }
           }
@@ -92,10 +97,16 @@ export function registerExtendedRoutes(app: Express) {
           const ctx = await loadBranchContext(req as any);
           const ids = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
           
-          if (isLead || ids === null) {
-            const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
+          if (!isManagement || ids === null) {
+            const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
             const allStaff = await storage.getAllStaff();
-            const filteredStaff = allStaff.filter((s) => allowedNames.has((s.branch ?? "").toLowerCase()));
+            const filteredStaff = allStaff.filter((s) => {
+              const staffBranch = normalizeBranchName(s.branch).toLowerCase();
+              if (staffBranch === "both") {
+                return allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation");
+              }
+              return allowedNames.has(staffBranch);
+            });
             const allowedIds = filteredStaff.map((s) => s.id);
             
             if (ids !== null) {
@@ -133,8 +144,12 @@ export function registerExtendedRoutes(app: Express) {
         const target = await storage.getStaff(staffId);
         if (!target) return errorResponse(res, "Staff not found", 404);
         const ctx = await loadBranchContext(req as any);
-        const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
-        if (!allowedNames.has((target.branch ?? "").toLowerCase())) {
+        const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
+        const targetBranch = normalizeBranchName(target.branch).toLowerCase();
+        const matchesAllowed = targetBranch === "both"
+          ? (allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation"))
+          : allowedNames.has(targetBranch);
+        if (!matchesAllowed) {
           return errorResponse(res, "Access denied to staff in this branch", 403);
         }
       }
@@ -186,8 +201,12 @@ export function registerExtendedRoutes(app: Express) {
         const target = await storage.getStaff(staffId);
         if (!target) return errorResponse(res, "Staff not found", 404);
         const ctx = await loadBranchContext(req as any);
-        const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
-        if (!allowedNames.has((target.branch ?? "").toLowerCase())) {
+        const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
+        const targetBranch = normalizeBranchName(target.branch).toLowerCase();
+        const matchesAllowed = targetBranch === "both"
+          ? (allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation"))
+          : allowedNames.has(targetBranch);
+        if (!matchesAllowed) {
           return errorResponse(res, "Access denied to staff in this branch", 403);
         }
       }

@@ -62,9 +62,15 @@ async function branchScopedStaffIds(req: Request): Promise<Set<string> | null> {
 
   if (isLead) {
     // Scoped to allowed branches
-    const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => (b.branchName ?? b.name).toLowerCase()));
+    const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
     const allStaff = await storage.getAllStaff();
-    const filteredStaff = allStaff.filter((s) => allowedNames.has((s.branch ?? "").toLowerCase()));
+    const filteredStaff = allStaff.filter((s) => {
+      const staffBranch = normalizeBranchName(s.branch).toLowerCase();
+      if (staffBranch === "both") {
+        return allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation");
+      }
+      return allowedNames.has(staffBranch);
+    });
     const allowedIds = filteredStaff.map((s) => s.id);
 
     if (selectedIds !== null) {
