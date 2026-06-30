@@ -33,6 +33,10 @@ function isoToDatetimeLocal(iso: string | undefined): string {
 const ATTENDANCE_ROW_HEIGHT = 44;
 const ATTENDANCE_MAX_VISIBLE_ROWS = 15;
 
+function hasCapturedLocation(r: any): boolean {
+  return r.latitude != null && r.latitude !== "" && r.longitude != null && r.longitude !== "";
+}
+
 function AttendanceReportTable({
   records,
   title,
@@ -40,6 +44,7 @@ function AttendanceReportTable({
   searchable,
   showActions,
   isManagement,
+  canViewLocation,
   onEdit,
   onDelete,
 }: {
@@ -49,6 +54,7 @@ function AttendanceReportTable({
   searchable?: boolean;
   showActions?: boolean;
   isManagement?: boolean;
+  canViewLocation?: boolean;
   onEdit?: (record: any) => void;
   onDelete?: (id: string) => void;
 }) {
@@ -123,6 +129,9 @@ function AttendanceReportTable({
                   {r.checkOutTime ? ` · Out: ${format(new Date(r.checkOutTime), "hh:mm a")}` : ""}
                 </div>
                 {r.branch && <div className="text-xs text-muted-foreground">Branch: {r.branch}</div>}
+                {canViewLocation && r.status === "Present" && hasCapturedLocation(r) && (
+                  <div className="text-xs"><ViewLocationButton attendanceId={r.id} /></div>
+                )}
                 <div className="text-sm">OT: <strong>{Number(r.overtimeHours || 0).toFixed(1)}h</strong></div>
                 {canActOnRows && (
                   <div className="flex justify-end gap-1 border-t pt-2">
@@ -160,8 +169,13 @@ function AttendanceReportTable({
                 {r.status}
               </div>
               <div className="text-xs text-muted-foreground">
-                {r.checkInTime ? format(new Date(r.checkInTime), "hh:mm a") : "-"}
-                {r.checkOutTime ? ` / ${format(new Date(r.checkOutTime), "hh:mm a")}` : ""}
+                <div>
+                  {r.checkInTime ? format(new Date(r.checkInTime), "hh:mm a") : "-"}
+                  {r.checkOutTime ? ` / ${format(new Date(r.checkOutTime), "hh:mm a")}` : ""}
+                </div>
+                {canViewLocation && r.status === "Present" && hasCapturedLocation(r) && (
+                  <div className="mt-0.5"><ViewLocationButton attendanceId={r.id} /></div>
+                )}
               </div>
               <div className="text-right">{Number(r.overtimeHours || 0).toFixed(1)}</div>
               {canActOnRows && (
@@ -995,7 +1009,7 @@ export default function AttendancePage() {
                 <div>Prepared by: {user.name}</div>
               </div>
             </div>
-            <AttendanceReportTable records={myHistory} title="My Attendance Records" scrollable />
+            <AttendanceReportTable records={myHistory} title="My Attendance Records" scrollable canViewLocation={canViewLocation} />
           </div>
           <div className="max-h-[60vh] overflow-y-auto overscroll-contain rounded-xl border border-border/60 bg-white px-3 pb-3">
             <PaginatedAttendanceList
@@ -1045,6 +1059,7 @@ export default function AttendancePage() {
                 searchable
                 showActions
                 isManagement={isManagement}
+                canViewLocation={canViewLocation}
                 onEdit={setEditRecord}
                 onDelete={(id) => { setDeletingRecordId(id); setDeleteConfirmOpen(true); }}
               />
