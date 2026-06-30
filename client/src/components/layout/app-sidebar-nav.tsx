@@ -63,6 +63,10 @@ export function AppSidebarNav() {
     .map((p) => p.charAt(0).toUpperCase())
     .join("") || "U";
 
+  // Profile picture comes from the staff record (persisted via /staff/:id/photo and
+  // returned by /auth/me). Render it when present; otherwise fall back to initials.
+  const photoUri = (user as { photoUri?: string }).photoUri?.trim() || "";
+
   const closeMobile = () => {
     if (isMobile) setOpenMobile(false);
   };
@@ -305,8 +309,26 @@ export function AppSidebarNav() {
           className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-white/10"
           data-testid="sidebar-user"
         >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15 text-sm font-bold text-white ring-2 ring-[#F45627]">
-            {initials}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/15 text-sm font-bold text-white ring-2 ring-[#F45627]">
+            {photoUri ? (
+              <img
+                src={photoUri}
+                alt={user.name}
+                className="h-full w-full object-cover"
+                onError={(e) => {
+                  // Broken/missing image → fall back to initials.
+                  e.currentTarget.style.display = "none";
+                  const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+                  if (fallback) fallback.style.display = "flex";
+                }}
+              />
+            ) : null}
+            <span
+              className="h-full w-full items-center justify-center"
+              style={{ display: photoUri ? "none" : "flex" }}
+            >
+              {initials}
+            </span>
           </div>
           <div className="flex min-w-0 flex-col leading-tight">
             <span className="truncate text-sm font-semibold text-white">{user.name}</span>

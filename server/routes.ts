@@ -1033,7 +1033,9 @@ export async function registerRoutes(
     }
   );
 
-  // Resolve a scanned patient QR token to a patient — scoped to the session's org/branch.
+  // Resolve a scanned patient QR token to a patient. Access is ORGANIZATION-scoped,
+  // never branch-scoped: any staff member at any branch within the same organization
+  // can scan a patient regardless of which branch the patient was registered at.
   app.post(
     "/api/patients/scan",
     requireAuth,
@@ -1053,19 +1055,35 @@ export async function registerRoutes(
           }
           return res.status(400).json({ message: "Invalid QR code, please try again", code: "QR_INVALID" });
         }
-        // Reject cross-org scans before any DB read so we never leak existence.
+        // Reject cross-ORG scans before any DB read so we never leak existence. The
+        // payload's branch (if any, on legacy cards) is intentionally ignored.
         if (verified.payload.organizationId !== organizationId) {
-          return res.status(404).json({ message: "Patient not found in this branch", code: "QR_SCOPE" });
+          return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
         }
         const patient = await storage.getPatient(verified.payload.patientId);
         if (!patient || patient.deletedAt) {
-          return res.status(404).json({ message: "Patient not found in this branch", code: "QR_SCOPE" });
+          return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
         }
         // Defense in depth: the patient's current org must still match the session org.
+        // This is an ORG comparison (any branch in the org is allowed), not a branch lock.
         if (organizationForBranch(patient.branch) !== organizationId) {
-          return res.status(404).json({ message: "Patient not found in this branch", code: "QR_SCOPE" });
+          return res.status(404).json({ message: "Patient not found in this organization", code: "QR_SCOPE" });
         }
-        return res.json({ patient });
+        // Surface current in-patient status so the scanner can offer context-aware
+        // actions (Add Session for an admitted patient vs. Add In-Patient otherwise).
+        let activeAdmissionId: string | null = null;
+        try {
+          const admissions = await storage.getInPatientAdmissionsForPatient(patient.id);
+          const active = admissions.find((a) => a.status === "Admitted");
+          activeAdmissionId = active?.id ?? null;
+        } catch {
+          activeAdmissionId = null;
+        }
+        return res.json({
+          patient,
+          isAdmitted: !!activeAdmissionId,
+          activeAdmissionId,
+        });
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }
@@ -1094,7 +1112,6 @@ export async function registerRoutes(
         const token = signPatientQrToken({
           patientId: patient.id,
           organizationId,
-          branchId: patient.branchId ?? null,
         });
         return res.json({ token, patientCode: patient.patientCode ?? null, organizationId });
       } catch (error: any) {
@@ -2212,7 +2229,6 @@ export async function registerRoutes(
         const token = signPatientQrToken({
           patientId: admission.patientId ?? admission.id,
           organizationId,
-          branchId: admission.branchId ?? null,
         });
         return res.json({
           token,
@@ -2384,10 +2400,14 @@ export async function registerRoutes(
       }
       const treatingStaff = await storage.getStaff(sd.treatingStaffId);
       // Persist branch attribution so the session can be scoped/filtered by
-      // organisation & branch. Admissions carry no branch, so the reliable
-      // source is the treating staff member's branch (falling back to any
-      // branchId explicitly supplied by the client).
+      // organisation & branch. The parent ADMISSION reliably carries a branchId
+      // (set from the branch context at admission time), so prefer it — the
+      // treating staff member can treat in-patients at a branch other than their
+      // home branch, which previously mis-attributed (or dropped) sessions from
+      // the branch-scoped dashboard. Fall back to any explicit client branchId,
+      // then the treating staff member's branch.
       const resolvedBranchId =
+        (admission.branchId as string | undefined) ??
         ((sd as any).branchId as string | undefined) ??
         (await resolveBranchIdByName(storage, treatingStaff?.branch)) ??
         null;

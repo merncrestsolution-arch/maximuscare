@@ -420,10 +420,13 @@ export const patientApi = {
       `/patients/${id}/qr-token`
     ),
   scan: (token: string) =>
-    apiRequest<{ patient: any }>(`/patients/scan`, {
-      method: "POST",
-      body: JSON.stringify({ token }),
-    }),
+    apiRequest<{ patient: any; isAdmitted: boolean; activeAdmissionId: string | null }>(
+      `/patients/scan`,
+      {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }
+    ),
   history: (id: string) =>
     apiRequest<{
       patientId: string;

@@ -6,8 +6,11 @@ import type { OrganizationId } from "@shared/branchAccess";
  *
  * A patient QR encodes a tamper-proof HMAC-signed payload — never the raw patient
  * ID — so a scanned code cannot be forged to pull another patient (or another
- * organization's patient) record. The payload carries the patient's organization
- * and home branch so the scan endpoint can reject cross-org/cross-branch scans.
+ * organization's patient) record. The payload carries only the patient's
+ * organization (NOT a home branch): access control is organization-scoped, so any
+ * staff member at any branch within the same organization can scan a patient
+ * regardless of which branch the patient was originally registered at. Branch was
+ * only ever used for ID-numbering, never for scan access.
  */
 const QR_SECRET =
   process.env.QR_TOKEN_SECRET ||
@@ -21,7 +24,12 @@ const QR_TTL_SEC = Number(process.env.QR_TOKEN_TTL_SEC || 365 * 24 * 60 * 60); /
 export interface QrTokenPayload {
   patientId: string;
   organizationId: OrganizationId;
-  branchId: string | null;
+  /**
+   * Legacy field. Older cards encoded a home branch; it is no longer written and is
+   * ignored on verify (kept optional only so old tokens still parse). Scan access is
+   * organization-scoped, never branch-scoped.
+   */
+  branchId?: string | null;
   iat: number;
   exp: number;
 }
@@ -37,7 +45,6 @@ function sign(body: string): string {
 export interface SignQrInput {
   patientId: string;
   organizationId: OrganizationId;
-  branchId: string | null;
 }
 
 /** Produce a compact `<payload>.<sig>` token to encode in the patient QR code. */
@@ -46,7 +53,6 @@ export function signPatientQrToken(input: SignQrInput): string {
   const payload: QrTokenPayload = {
     patientId: input.patientId,
     organizationId: input.organizationId,
-    branchId: input.branchId,
     iat: now,
     exp: now + QR_TTL_SEC,
   };

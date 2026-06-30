@@ -643,6 +643,7 @@ export default function InPatientProfilePage() {
             patientName={patient.patientName}
             patientCode={patient.patientCode ?? patient.patientIdNo}
             phone={patient.phone}
+            address={patient.address}
           />
         </div>
 

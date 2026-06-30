@@ -10,16 +10,19 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, User, History, BedDouble, RefreshCw } from "lucide-react";
+import { Loader2, User, History, BedDouble, RefreshCw, Stethoscope, NotebookPen } from "lucide-react";
 
 type Phase = "scanning" | "loading" | "result" | "error";
 
 const READER_ID = "qr-reader-region";
 
 /**
- * Camera QR scanner + post-scan action sheet. On a successful, in-scope scan it
- * offers View Patient / View History / Add In-Patient. Cross-org/expired/garbled
- * codes surface a clear, non-leaking error from the server.
+ * Camera QR scanner + post-scan action sheet. Scans resolve org-wide (any branch in
+ * the same organization), never branch-locked. The action sheet is context-aware:
+ *  - non-admitted patient → View Patient / View History / Add In-Patient
+ *  - currently admitted in-patient → View Patient / View History / Add Session /
+ *    Add Experience (a quick clinical note tied to the admission)
+ * Cross-org/expired/garbled codes surface a clear, non-leaking error from the server.
  */
 export function ScanQrDialog({
   open,
@@ -34,6 +37,8 @@ export function ScanQrDialog({
   const handledRef = useRef(false);
   const [phase, setPhase] = useState<Phase>("scanning");
   const [patient, setPatient] = useState<any>(null);
+  const [isAdmitted, setIsAdmitted] = useState(false);
+  const [activeAdmissionId, setActiveAdmissionId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
   const stopScanner = async () => {
@@ -59,6 +64,8 @@ export function ScanQrDialog({
     try {
       const res = await scan.mutateAsync(token.trim());
       setPatient(res.patient);
+      setIsAdmitted(!!res.isAdmitted);
+      setActiveAdmissionId(res.activeAdmissionId ?? null);
       setPhase("result");
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "Invalid QR code, please try again");
@@ -114,6 +121,8 @@ export function ScanQrDialog({
       void stopScanner();
       setPhase("scanning");
       setPatient(null);
+      setIsAdmitted(false);
+      setActiveAdmissionId(null);
       setErrorMsg("");
       handledRef.current = false;
     }
@@ -121,6 +130,8 @@ export function ScanQrDialog({
 
   const reset = () => {
     setPatient(null);
+    setIsAdmitted(false);
+    setActiveAdmissionId(null);
     setErrorMsg("");
     handledRef.current = false;
     setPhase("scanning");
@@ -177,14 +188,35 @@ export function ScanQrDialog({
             >
               <History className="h-5 w-5" /> View History
             </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-3 h-12 bg-white border-2"
-              onClick={() => go(`/inpatients/new?patientId=${patient.id}`)}
-              data-testid="button-scan-add-inpatient"
-            >
-              <BedDouble className="h-5 w-5" /> Add In-Patient
-            </Button>
+            {isAdmitted && activeAdmissionId ? (
+              <>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start gap-3 h-12 bg-white border-2"
+                  onClick={() => go(`/inpatients/${activeAdmissionId}/session/new`)}
+                  data-testid="button-scan-add-session"
+                >
+                  <Stethoscope className="h-5 w-5" /> Add Session
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start gap-3 h-12 bg-white border-2"
+                  onClick={() => go(`/patients/${patient.id}?tab=notes`)}
+                  data-testid="button-scan-add-experience"
+                >
+                  <NotebookPen className="h-5 w-5" /> Add Experience
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-full justify-start gap-3 h-12 bg-white border-2"
+                onClick={() => go(`/inpatients/new?patientId=${patient.id}`)}
+                data-testid="button-scan-add-inpatient"
+              >
+                <BedDouble className="h-5 w-5" /> Add In-Patient
+              </Button>
+            )}
           </div>
         )}
 

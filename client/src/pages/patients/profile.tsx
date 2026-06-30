@@ -63,6 +63,16 @@ export default function PatientProfile() {
   const { user } = useAuth();
   const { logoUri } = useBranding();
   const patientId = params?.id || "";
+  // Allow deep-linking straight to a tab (e.g. the QR scan "Add Experience" action
+  // routes to ?tab=notes). Falls back to the default Visits tab.
+  const ALLOWED_TABS = ["overview", "visits", "notes", "documents"] as const;
+  const requestedTab =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("tab")
+      : null;
+  const initialTab = (ALLOWED_TABS as readonly string[]).includes(requestedTab ?? "")
+    ? (requestedTab as string)
+    : "visits";
   
   const { data: patient, isLoading: patientLoading, error: patientError } = usePatient(patientId);
   const { data: allVisits = [], isLoading: visitsLoading } = useVisits({ patientId });
@@ -334,6 +344,7 @@ export default function PatientProfile() {
               patientName={patient.name}
               patientCode={patient.patientCode}
               phone={patient.phone}
+              address={patient.address}
             />
             <Button
               type="button"
@@ -363,7 +374,7 @@ export default function PatientProfile() {
         </div>
       )}
 
-      <Tabs defaultValue="visits" className="w-full">
+      <Tabs defaultValue={initialTab} className="w-full">
         <TabsList className="w-full flex flex-wrap h-auto">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="visits">Visits</TabsTrigger>
