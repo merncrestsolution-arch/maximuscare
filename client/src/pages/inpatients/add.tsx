@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useCreateInPatient, usePatientLookup, usePatient } from "@/hooks/useData";
 import { useBranch } from "@/context/branch-context";
+import { useBranchOptions } from "@/hooks/use-branch-options";
 import { patientApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,9 +48,13 @@ const DEFAULT_FORM: FormData = {
 export default function AddInPatientPage() {
   const [, setLocation] = useLocation();
   const search = useSearch();
-  const prefillId = new URLSearchParams(search).get("patientId") || "";
+  const searchParams = new URLSearchParams(search);
+  const prefillId = searchParams.get("patientId") || "";
+  // Transfer mode = converting an existing out-patient into an in-patient admission.
+  const isTransfer = searchParams.get("transfer") === "1" && !!prefillId;
   const { toast } = useToast();
   const { selectedBranchName } = useBranch();
+  const { options: branchOptions } = useBranchOptions({ forRegistration: true });
   const createInPatient = useCreateInPatient();
   const lookup = usePatientLookup();
   const { data: prefillPatient } = usePatient(prefillId);
@@ -59,7 +64,16 @@ export default function AddInPatientPage() {
   // Patient ID instead of generating a new one.
   const [existing, setExisting] = useState<Patient | null>(null);
   const [generatedCode, setGeneratedCode] = useState<string>("");
+  // Target ward branch (transfers may admit to a different branch than registration).
+  const [branchId, setBranchId] = useState<string>("");
   const prefilledRef = useRef(false);
+
+  // Default the target branch to the current workspace branch once options load.
+  useEffect(() => {
+    if (branchId || branchOptions.length === 0) return;
+    const current = branchOptions.find((b) => b.value === selectedBranchName);
+    setBranchId(current?.id ?? branchOptions[0].id);
+  }, [branchOptions, selectedBranchName, branchId]);
 
   const applyPatient = (p: Patient) => {
     setExisting(p);
@@ -137,8 +151,17 @@ export default function AddInPatientPage() {
         status: "Admitted",
         // Server reuses this patient's Patient ID and links the admission.
         patientId: existing?.id ?? null,
+        // Target ward branch (allows admitting to a different branch on transfer).
+        branchId: branchId || undefined,
+        // Flag a converted out-patient so it's auditable/reportable as a transfer.
+        admissionSource: isTransfer ? "out_patient_transfer" : undefined,
       });
-      toast({ title: "Success", description: "In-patient admitted successfully" });
+      toast({
+        title: "Success",
+        description: isTransfer
+          ? "Out-patient transferred to in-patient successfully"
+          : "In-patient admitted successfully",
+      });
       setLocation("/inpatients");
     } catch (error) {
       toast({
@@ -167,8 +190,17 @@ export default function AddInPatientPage() {
           >
             <ArrowLeft className="h-5 w-5" />
           </Button>
-          <h1 className="text-xl font-bold text-foreground" data-testid="page-title">Add In-Patient</h1>
+          <h1 className="text-xl font-bold text-foreground" data-testid="page-title">
+            {isTransfer ? "Transfer to In-Patient" : "Add In-Patient"}
+          </h1>
         </div>
+
+        {isTransfer && (
+          <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+            Converting an existing out-patient. Their Patient ID and details are reused — just
+            complete the in-patient fields below.
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Patient ID — read-only, reused on re-admission or auto-generated for new patients */}
@@ -196,6 +228,27 @@ export default function AddInPatientPage() {
               </p>
             )}
           </div>
+
+          {isTransfer && branchOptions.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="transferBranch">Admit to Branch *</Label>
+              <Select value={branchId} onValueChange={setBranchId}>
+                <SelectTrigger className="h-12" id="transferBranch" data-testid="select-transfer-branch">
+                  <SelectValue placeholder="Select branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branchOptions.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                You can admit this patient to a different branch's ward if needed.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="patientName">Patient Name *</Label>
@@ -373,7 +426,7 @@ export default function AddInPatientPage() {
               {createInPatient.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : null}
-              Admit Patient
+              {isTransfer ? "Transfer Patient" : "Admit Patient"}
             </Button>
           </div>
         </form>

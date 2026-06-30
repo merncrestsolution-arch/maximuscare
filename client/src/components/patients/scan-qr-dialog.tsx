@@ -10,16 +10,62 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, User, History, BedDouble, RefreshCw, Stethoscope, NotebookPen } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  Loader2,
+  User,
+  History,
+  BedDouble,
+  RefreshCw,
+  Stethoscope,
+  NotebookPen,
+  ArrowRightLeft,
+  type LucideIcon,
+} from "lucide-react";
 
 type Phase = "scanning" | "loading" | "result" | "error";
 
 const READER_ID = "qr-reader-region";
 
+/** A single action in the scan sheet: round icon + label + short subtext, 56px tall. */
+function ActionRow({
+  icon: Icon,
+  label,
+  subtext,
+  onClick,
+  testId,
+}: {
+  icon: LucideIcon;
+  label: string;
+  subtext: string;
+  onClick: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className="flex min-h-[56px] w-full items-center gap-3 rounded-xl border bg-white px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+        <Icon className="h-5 w-5" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-foreground">{label}</span>
+        <span className="block text-xs text-muted-foreground">{subtext}</span>
+      </span>
+    </button>
+  );
+}
+
 /**
  * Camera QR scanner + post-scan action sheet. Scans resolve org-wide (any branch in
- * the same organization), never branch-locked. The action sheet is context-aware:
- *  - non-admitted patient → View Patient / View History / Add In-Patient
+ * the same organization), never branch-locked. The sheet leads with a name + status
+ * badge (so staff confirm the right person) then offers context-aware actions as
+ * icon + label + subtext rows:
+ *  - non-admitted out-patient → View Patient / View History / Add In-Patient /
+ *    Transfer to In-Patient (convert the existing record into an admission)
  *  - currently admitted in-patient → View Patient / View History / Add Session /
  *    Add Experience (a quick clinical note tied to the admission)
  * Cross-org/expired/garbled codes surface a clear, non-leaking error from the server.
@@ -164,73 +210,105 @@ export function ScanQrDialog({
           </div>
         )}
 
-        {phase === "result" && patient && (
-          <div className="space-y-3">
-            <div className="rounded-lg border p-3">
-              <div className="font-semibold text-foreground">{patient.name}</div>
-              {patient.patientCode && (
-                <div className="text-xs font-mono text-muted-foreground">{patient.patientCode}</div>
-              )}
-              <div className="text-xs text-muted-foreground">
-                {patient.phone}
-                {patient.branch ? ` · ${patient.branch}` : ""}
+        {phase === "result" && patient && (() => {
+          const admitted = kind === "inpatient" || isAdmitted;
+          return (
+            <div className="space-y-3">
+              {/* Confirm-the-person header with a live status badge. */}
+              <div className="flex items-start justify-between gap-3 rounded-xl border bg-muted/30 p-3">
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-foreground">{patient.name}</div>
+                  {patient.patientCode && (
+                    <div className="truncate text-xs font-mono text-muted-foreground">
+                      {patient.patientCode}
+                    </div>
+                  )}
+                  <div className="truncate text-xs text-muted-foreground">
+                    {patient.phone}
+                    {patient.branch ? ` · ${patient.branch}` : ""}
+                  </div>
+                </div>
+                <Badge
+                  className={admitted ? "bg-success text-white" : "bg-muted text-foreground"}
+                  data-testid="badge-scan-status"
+                >
+                  {admitted ? "Admitted" : "Out-Patient"}
+                </Badge>
               </div>
-            </div>
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-3 h-12 bg-white border-2"
-              onClick={() =>
-                go(kind === "inpatient" ? `/inpatients/${patient.id}` : `/patients/${patient.id}`)
-              }
-              data-testid="button-scan-view-patient"
-            >
-              <User className="h-5 w-5" /> {kind === "inpatient" ? "View In-Patient" : "View Patient"}
-            </Button>
-            {kind !== "inpatient" && (
-              <Button
-                variant="outline"
-                className="w-full justify-start gap-3 h-12 bg-white border-2"
-                onClick={() => go(`/patients/${patient.id}/history`)}
-                data-testid="button-scan-view-history"
-              >
-                <History className="h-5 w-5" /> View History
-              </Button>
-            )}
-            {isAdmitted && activeAdmissionId ? (
-              <>
-                <Button
-                  variant="outline"
-                  className="w-full justify-start gap-3 h-12 bg-white border-2"
-                  onClick={() => go(`/inpatients/${activeAdmissionId}/session/new`)}
-                  data-testid="button-scan-add-session"
-                >
-                  <Stethoscope className="h-5 w-5" /> Add Session
-                </Button>
+
+              <div className="space-y-2">
+                <ActionRow
+                  icon={User}
+                  label={kind === "inpatient" ? "View In-Patient" : "View Patient"}
+                  subtext="View full patient profile"
+                  onClick={() =>
+                    go(kind === "inpatient" ? `/inpatients/${patient.id}` : `/patients/${patient.id}`)
+                  }
+                  testId="button-scan-view-patient"
+                />
+
                 {kind !== "inpatient" && (
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start gap-3 h-12 bg-white border-2"
-                    onClick={() => go(`/patients/${patient.id}?tab=notes`)}
-                    data-testid="button-scan-add-experience"
-                  >
-                    <NotebookPen className="h-5 w-5" /> Add Experience
-                  </Button>
+                  <ActionRow
+                    icon={History}
+                    label="View History"
+                    subtext="See past visits & sessions"
+                    onClick={() => go(`/patients/${patient.id}/history`)}
+                    testId="button-scan-view-history"
+                  />
                 )}
-              </>
-            ) : (
-              kind !== "inpatient" && (
-                <Button
-                  variant="outline"
-                  className="w-full justify-start gap-3 h-12 bg-white border-2"
-                  onClick={() => go(`/inpatients/new?patientId=${patient.id}`)}
-                  data-testid="button-scan-add-inpatient"
-                >
-                  <BedDouble className="h-5 w-5" /> Add In-Patient
-                </Button>
-              )
-            )}
-          </div>
-        )}
+
+                {admitted && activeAdmissionId ? (
+                  <>
+                    <ActionRow
+                      icon={Stethoscope}
+                      label="Add Session"
+                      subtext="Log a new therapy session"
+                      onClick={() => go(`/inpatients/${activeAdmissionId}/session/new`)}
+                      testId="button-scan-add-session"
+                    />
+                    {kind !== "inpatient" && (
+                      <ActionRow
+                        icon={NotebookPen}
+                        label="Add Experience"
+                        subtext="Add a clinical note"
+                        onClick={() => go(`/patients/${patient.id}?tab=notes`)}
+                        testId="button-scan-add-experience"
+                      />
+                    )}
+                  </>
+                ) : (
+                  kind !== "inpatient" && (
+                    <>
+                      <ActionRow
+                        icon={BedDouble}
+                        label="Add In-Patient"
+                        subtext="Start a new admission"
+                        onClick={() => go(`/inpatients/new?patientId=${patient.id}`)}
+                        testId="button-scan-add-inpatient"
+                      />
+                      <ActionRow
+                        icon={ArrowRightLeft}
+                        label="Transfer to In-Patient"
+                        subtext="Convert to in-patient using existing record"
+                        onClick={() => go(`/inpatients/new?patientId=${patient.id}&transfer=1`)}
+                        testId="button-scan-transfer-inpatient"
+                      />
+                    </>
+                  )
+                )}
+              </div>
+
+              <Button
+                variant="ghost"
+                className="h-11 w-full"
+                onClick={() => onOpenChange(false)}
+                data-testid="button-scan-cancel"
+              >
+                Cancel
+              </Button>
+            </div>
+          );
+        })()}
 
         {phase === "error" && (
           <div className="space-y-3 text-center py-4">

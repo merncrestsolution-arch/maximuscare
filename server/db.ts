@@ -218,6 +218,8 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart22InpatientDeduction();
   const { runPart23SessionBranchBackfill } = await import("./migrations/part23SessionBranchBackfill");
   await runPart23SessionBranchBackfill();
+  const { runPart24AdmissionSource } = await import("./migrations/part24AdmissionSource");
+  await runPart24AdmissionSource();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -263,4 +265,6 @@ export async function ensurePostgresSchemaCompatibility() {
   await runPart22InpatientDeduction();
   const { runPart23SessionBranchBackfill } = await import("./migrations/part23SessionBranchBackfill");
   await runPart23SessionBranchBackfill();
+  const { runPart24AdmissionSource } = await import("./migrations/part24AdmissionSource");
+  await runPart24AdmissionSource();
 }

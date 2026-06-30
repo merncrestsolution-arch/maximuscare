@@ -2331,14 +2331,34 @@ export async function registerRoutes(
         patientCode = await generateUniquePatientCode(storage, branchName, d.admitDate);
       }
 
+      // Distinguish a converted out-patient from a fresh admission (audit/reporting).
+      const rawSource = String((req.body as any)?.admissionSource ?? "").trim();
+      const admissionSource = rawSource === "out_patient_transfer" ? "out_patient_transfer" : null;
+
       const admission = await storage.createInPatientAdmission({
         ...d,
         branchId: d.branchId || branchId,
         patientId: linkedPatientId,
         patientCode,
+        admissionSource,
         reportsAttachments: (d as any).reportsAttachments ?? null,
         idCopyAttachments: (d as any).idCopyAttachments ?? null,
       } as any);
+
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "inpatient",
+        action: admissionSource === "out_patient_transfer" ? "transfer_to_inpatient" : "create_admission",
+        recordId: admission.id,
+        newValue: {
+          admissionId: admission.id,
+          patientId: linkedPatientId,
+          patientCode,
+          branchId: admission.branchId,
+          admissionSource,
+        },
+      });
       return res.status(201).json(admission);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });

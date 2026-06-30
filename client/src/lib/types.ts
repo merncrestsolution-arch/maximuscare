@@ -109,6 +109,7 @@ export interface InPatientAdmission {
   idCopyAttachments?: string[];
   branchId?: string | null;
   status: 'Admitted' | 'Discharged' | 'Transferred';
+  admissionSource?: string | null;
   createdAt: string;
   updatedAt: string;
 }

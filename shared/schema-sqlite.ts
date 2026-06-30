@@ -265,6 +265,9 @@ export const inPatientAdmissions = sqliteTable("in_patient_admissions", {
   reportsAttachments: text("reports_attachments"), // JSON string
   idCopyAttachments: text("id_copy_attachments"), // JSON string
   status: text("status").notNull().default("Admitted"),
+  // How the admission was created: a fresh admission vs. converting an existing
+  // out-patient ("out_patient_transfer") — kept for audit/reporting.
+  admissionSource: text("admission_source"),
   branchId: text("branch_id"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),

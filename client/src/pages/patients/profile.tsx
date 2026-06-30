@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ArrowLeft, Edit2, Pencil, FileText, Phone, MapPin, Calendar, User as UserIcon, Loader2, Trash2, History } from "lucide-react";
+import { ArrowLeft, Edit2, Pencil, FileText, Phone, MapPin, Calendar, User as UserIcon, Loader2, Trash2, History, ArrowRightLeft } from "lucide-react";
 import { PatientCredentials } from "@/components/patients/patient-credentials";
 import { Link } from "wouter";
 import { format } from "date-fns";
@@ -356,6 +356,18 @@ export default function PatientProfile() {
               <History className="h-4 w-4" />
               View History
             </Button>
+            {["Admin", "MD", "Receptionist"].includes(user?.role || "") && (
+              <Button
+                type="button"
+                variant="outline"
+                size="compact"
+                onClick={() => setLocation(`/inpatients/new?patientId=${patient.id}&transfer=1`)}
+                data-testid="button-transfer-inpatient"
+              >
+                <ArrowRightLeft className="h-4 w-4" />
+                Transfer to In-Patient
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
