@@ -19,23 +19,28 @@ export function isAdminRole(role: string | undefined): boolean {
   return String(role ?? "").trim() === "Admin";
 }
 
-/** Admin always; MD only when enabled in clinic settings. */
+/** Admin always; MD / Manager / Branch Manager when enabled on their staff profile. */
 export function canViewAttendanceLocation(
   role: string | undefined,
   mdCaps?: MdRoleCapabilities,
 ): boolean {
   if (isAdminRole(role)) return true;
-  if (String(role ?? "").trim() === "MD") return mdCaps?.viewAttendanceLocation ?? false;
+  const r = String(role ?? "").trim();
+  if (r === "MD" || r === "Manager" || r === "Branch Manager") {
+    return mdCaps?.viewAttendanceLocation ?? false;
+  }
   return false;
 }
 
-/** Admin always; MD when admin enables location-exempt present marking. */
+/** Admin always; MD / Manager / Branch Manager per staff profile flags. */
 export function isAttendanceLocationExempt(
   role: string | undefined,
   mdCaps?: MdRoleCapabilities,
 ): boolean {
   if (isAdminRole(role)) return true;
-  if (String(role ?? "").trim() === "MD") return mdCaps?.locationExempt ?? true;
+  const r = String(role ?? "").trim();
+  if (r === "MD") return mdCaps?.locationExempt ?? true;
+  if (r === "Manager" || r === "Branch Manager") return mdCaps?.locationExempt ?? false;
   return false;
 }
 
@@ -47,7 +52,7 @@ export function canViewAllStaffFines(
   const r = String(role ?? "").trim();
   if (r === "Admin" || r === "Nexus MD") return true;
   if (r === "MD") return mdCaps?.viewAllStaffFines ?? true;
-  if (canManageBranchFines(role)) return true;
+  if (canManageBranchFines(role)) return mdCaps?.viewAllStaffFines ?? true;
   return false;
 }
 
@@ -63,7 +68,7 @@ export function canManageStaffFines(
   mdCaps?: MdRoleCapabilities,
 ): boolean {
   if (isAdminRole(role)) return true;
-  if (canManageBranchFines(role)) return true;
+  if (canManageBranchFines(role)) return mdCaps?.manageStaffFines ?? true;
   if (String(role ?? "").trim() === "MD") return mdCaps?.manageStaffFines ?? false;
   return false;
 }

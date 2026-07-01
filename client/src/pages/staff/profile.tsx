@@ -11,7 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Edit2, CalendarCheck, Stethoscope, Pencil } from "lucide-react";
 import { isVisitForStaff } from "@/lib/visitAccess";
-import { canViewStaffList, canManageStaff, isManager, isBranchManager } from "@/lib/permissions";
+import { canViewStaffList, canManageStaff, isManager, isBranchManager, isAdminRole } from "@/lib/permissions";
+import { RoleCapabilitiesSection } from "@/components/staff/role-capabilities-section";
+import { roleHasConfigurableCapabilities, defaultCapabilitiesForRole } from "@shared/mdCapabilities";
 import { isPaidStatus, paymentStatusBadgeClass } from "@/lib/paymentStatus";
 
 export default function StaffProfilePage() {
@@ -47,6 +49,12 @@ export default function StaffProfilePage() {
   const canViewAnyStaff = canViewStaffList(currentUser.role);
   // Edit/photo/financial affordances stay limited to roles that manage staff accounts.
   const isManagement = canManageStaff(currentUser.role);
+  const isAdmin = isAdminRole(currentUser.role);
+  const staffRoleCaps =
+    (profileUser as any).roleCapabilities ??
+    (roleHasConfigurableCapabilities(profileUser.role)
+      ? defaultCapabilitiesForRole(profileUser.role)
+      : null);
   if (!canViewAnyStaff && currentUser.id !== params.id) {
     return <div>Unauthorized</div>;
   }
@@ -210,6 +218,27 @@ export default function StaffProfilePage() {
           <div>NIC: {(profileUser as any).nic || "—"} · Joined: {formatDateSafe((profileUser as any).joiningDate ?? (profileUser as any).createdAt)}</div>
         </div>
       </div>
+
+      {isAdmin && staffRoleCaps && roleHasConfigurableCapabilities(profileUser.role) && (
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
+            <CardTitle className="text-base">Role permissions</CardTitle>
+            <Link href={`/staff/${profileUser.id}/edit`}>
+              <Button variant="outline" size="sm" className="gap-1">
+                <Pencil className="h-4 w-4" />
+                Edit
+              </Button>
+            </Link>
+          </CardHeader>
+          <CardContent>
+            <RoleCapabilitiesSection
+              role={profileUser.role}
+              value={staffRoleCaps}
+              readOnly
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {hrmStats && (
         <Card>

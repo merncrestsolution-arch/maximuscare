@@ -10,7 +10,7 @@ import {
   canAccessNexusOverview,
   isManagingDirector,
 } from "@shared/branchAccess";
-import { loadMdCapabilities } from "./mdCapabilityService";
+import { loadStaffRoleCapabilities } from "./mdCapabilityService";
 
 export interface BranchAccessContext {
   selectedBranchId: string | null;
@@ -95,7 +95,7 @@ export async function resolveBranchAccessContext(
   let canMaximusOverview = canAccessMaximusOverview(role);
   let canNexusOverview = canAccessNexusOverview(role);
   if (isManagingDirector(role)) {
-    const mdCaps = await loadMdCapabilities(storage);
+    const mdCaps = await loadStaffRoleCapabilities(storage, staffId);
     if (mdCaps.maximusOverview) canMaximusOverview = true;
     if (mdCaps.nexusOverview) canNexusOverview = true;
   }

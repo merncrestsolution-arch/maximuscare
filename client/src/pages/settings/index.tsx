@@ -13,8 +13,6 @@ import { canManageSettings, canViewAuditLogs } from "@/lib/permissions";
 import { SaveStatus } from "@/components/ui/save-status";
 import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import { AppAboutCard } from "@/components/app-about-card";
-import { Switch } from "@/components/ui/switch";
-import { DEFAULT_MD_CAPABILITIES } from "@shared/mdCapabilities";
 
 function SettingsContent() {
   const { toast } = useToast();
@@ -34,12 +32,6 @@ function SettingsContent() {
     otRatePerHour: "250",
     extraHolidayDeduction: "1500",
     freeAbsentDays: "4",
-    mdLocationExempt: DEFAULT_MD_CAPABILITIES.locationExempt,
-    mdViewAttendanceLocation: DEFAULT_MD_CAPABILITIES.viewAttendanceLocation,
-    mdViewAllStaffFines: DEFAULT_MD_CAPABILITIES.viewAllStaffFines,
-    mdManageStaffFines: DEFAULT_MD_CAPABILITIES.manageStaffFines,
-    mdMaximusOverview: DEFAULT_MD_CAPABILITIES.maximusOverview,
-    mdNexusOverview: DEFAULT_MD_CAPABILITIES.nexusOverview,
   });
   const [incForm, setIncForm] = useState({
     incentiveEnabled: "true",
@@ -57,15 +49,6 @@ function SettingsContent() {
         otRatePerHour: String(clinic.otRatePerHour ?? "250"),
         extraHolidayDeduction: String(clinic.extraHolidayDeduction ?? "1500"),
         freeAbsentDays: String(clinic.freeAbsentDays ?? "4"),
-        mdLocationExempt: clinic.mdLocationExempt ?? DEFAULT_MD_CAPABILITIES.locationExempt,
-        mdViewAttendanceLocation:
-          clinic.mdViewAttendanceLocation ?? DEFAULT_MD_CAPABILITIES.viewAttendanceLocation,
-        mdViewAllStaffFines:
-          clinic.mdViewAllStaffFines ?? DEFAULT_MD_CAPABILITIES.viewAllStaffFines,
-        mdManageStaffFines:
-          clinic.mdManageStaffFines ?? DEFAULT_MD_CAPABILITIES.manageStaffFines,
-        mdMaximusOverview: clinic.mdMaximusOverview ?? DEFAULT_MD_CAPABILITIES.maximusOverview,
-        mdNexusOverview: clinic.mdNexusOverview ?? DEFAULT_MD_CAPABILITIES.nexusOverview,
       });
     }
   }, [clinic]);
@@ -90,12 +73,6 @@ function SettingsContent() {
         otRatePerHour: clinicForm.otRatePerHour,
         extraHolidayDeduction: clinicForm.extraHolidayDeduction,
         freeAbsentDays: Number(clinicForm.freeAbsentDays),
-        mdLocationExempt: clinicForm.mdLocationExempt,
-        mdViewAttendanceLocation: clinicForm.mdViewAttendanceLocation,
-        mdViewAllStaffFines: clinicForm.mdViewAllStaffFines,
-        mdManageStaffFines: clinicForm.mdManageStaffFines,
-        mdMaximusOverview: clinicForm.mdMaximusOverview,
-        mdNexusOverview: clinicForm.mdNexusOverview,
       });
       await refreshUser();
       toast({ title: "Clinic settings saved" });
@@ -193,68 +170,6 @@ function SettingsContent() {
             <SaveStatus isSaving={updateClinic.isPending} saved={clinicSaved} />
             <Button onClick={saveClinic} disabled={updateClinic.isPending}>
               {updateClinic.isPending ? "Saving..." : "Save clinic rates"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>MD Role Permissions</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <p className="text-sm text-muted-foreground">
-            Control what Medical Directors can do. Branch access is always limited to branches
-            assigned on their staff profile.
-          </p>
-          {[
-            {
-              key: "mdLocationExempt" as const,
-              label: "Location exempt for Present",
-              desc: "MD can mark Present without GPS capture",
-            },
-            {
-              key: "mdViewAttendanceLocation" as const,
-              label: "View attendance GPS",
-              desc: "MD can see captured check-in locations on attendance records",
-            },
-            {
-              key: "mdViewAllStaffFines" as const,
-              label: "View all staff fines",
-              desc: "MD can see fines for staff in their assigned branches",
-            },
-            {
-              key: "mdManageStaffFines" as const,
-              label: "Manage staff fines",
-              desc: "MD can add, edit, and waive fines (otherwise Admin only)",
-            },
-            {
-              key: "mdMaximusOverview" as const,
-              label: "Maximus organization overview",
-              desc: "MD can open the Dehiwala · Bandaragama · Neuro overview workspace",
-            },
-            {
-              key: "mdNexusOverview" as const,
-              label: "Nexus organization overview",
-              desc: "MD can open the Nexus Physio overview workspace",
-            },
-          ].map(({ key, label, desc }) => (
-            <div key={key} className="flex items-start justify-between gap-4 rounded-lg border border-border/60 p-3">
-              <div className="min-w-0 space-y-0.5">
-                <Label htmlFor={key}>{label}</Label>
-                <p className="text-sm text-muted-foreground">{desc}</p>
-              </div>
-              <Switch
-                id={key}
-                checked={clinicForm[key]}
-                onCheckedChange={(checked) => setClinicForm({ ...clinicForm, [key]: checked })}
-              />
-            </div>
-          ))}
-          <div className="flex items-center justify-between gap-3">
-            <SaveStatus isSaving={updateClinic.isPending} saved={clinicSaved} />
-            <Button onClick={saveClinic} disabled={updateClinic.isPending}>
-              {updateClinic.isPending ? "Saving..." : "Save MD permissions"}
             </Button>
           </div>
         </CardContent>

@@ -189,7 +189,10 @@ export function canViewAttendanceLocation(
   mdCaps?: MdRoleCapabilities,
 ): boolean {
   if (isAdminRole(role)) return true;
-  if (String(role ?? "").trim() === "MD") return mdCaps?.viewAttendanceLocation ?? false;
+  const r = String(role ?? "").trim();
+  if (r === "MD" || r === "Manager" || r === "Branch Manager") {
+    return mdCaps?.viewAttendanceLocation ?? false;
+  }
   return false;
 }
 
@@ -199,7 +202,9 @@ export function isAttendanceLocationExempt(
   mdCaps?: MdRoleCapabilities,
 ): boolean {
   if (isAdminRole(role)) return true;
-  if (String(role ?? "").trim() === "MD") return mdCaps?.locationExempt ?? true;
+  const r = String(role ?? "").trim();
+  if (r === "MD") return mdCaps?.locationExempt ?? true;
+  if (r === "Manager" || r === "Branch Manager") return mdCaps?.locationExempt ?? false;
   return false;
 }
 
@@ -221,7 +226,7 @@ export function canManageBranchFines(role: string | undefined): boolean {
 /** Only Admin by default; MD when admin enables; branch leads for their branch staff. */
 export function canManageFines(role: string | undefined, mdCaps?: MdRoleCapabilities): boolean {
   if (isAdminRole(role)) return true;
-  if (canManageBranchFines(role)) return true;
+  if (canManageBranchFines(role)) return mdCaps?.manageStaffFines ?? true;
   if (String(role ?? "").trim() === "MD") return mdCaps?.manageStaffFines ?? false;
   return false;
 }
@@ -231,7 +236,7 @@ export function canViewAllStaffFines(role: string | undefined, mdCaps?: MdRoleCa
   const r = String(role ?? "").trim();
   if (r === "Admin" || r === "Nexus MD") return true;
   if (r === "MD") return mdCaps?.viewAllStaffFines ?? true;
-  if (canManageBranchFines(role)) return true;
+  if (canManageBranchFines(role)) return mdCaps?.viewAllStaffFines ?? true;
   return false;
 }
 

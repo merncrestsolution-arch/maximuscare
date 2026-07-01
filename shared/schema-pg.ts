@@ -28,6 +28,12 @@ export const staff = pgTable("staff", {
   deactivatedBy: varchar("deactivated_by"),
   deletedAt: timestamp("deleted_at"),
   deletedBy: varchar("deleted_by"),
+  capLocationExempt: boolean("cap_location_exempt"),
+  capViewAttendanceLocation: boolean("cap_view_attendance_location"),
+  capViewAllStaffFines: boolean("cap_view_all_staff_fines"),
+  capManageStaffFines: boolean("cap_manage_staff_fines"),
+  capMaximusOverview: boolean("cap_maximus_overview"),
+  capNexusOverview: boolean("cap_nexus_overview"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

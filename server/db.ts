@@ -231,6 +231,8 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart29AttendanceDedup();
   const { runPart30MdRoleCapabilities } = await import("./migrations/part30MdRoleCapabilities");
   await runPart30MdRoleCapabilities();
+  const { runPart31StaffRoleCapabilities } = await import("./migrations/part31StaffRoleCapabilities");
+  await runPart31StaffRoleCapabilities();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */

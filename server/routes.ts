@@ -59,7 +59,13 @@ import { computePriorAdmissionBalance } from "./services/inPatientAdmissionServi
 import { getOrCreateAdmissionCardPdf, getOrCreatePatientCardPdf, invalidatePatientIdCard, patientIdCardFieldsChanged, bulkPatientCardPdfs } from "./services/patientIdCardCacheService";
 import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
-import { logAudit } from "./services/auditService";
+import {
+  roleHasConfigurableCapabilities,
+  parseRoleCapabilitiesInput,
+  staffPatchFromCapabilities,
+  defaultCapabilitiesForRole,
+} from "@shared/mdCapabilities";
+import { loadStaffRoleCapabilities, loadRoleCapabilitiesForUser } from "./services/mdCapabilityService";
 
 async function auditActor(req: Request) {
   const user = (req as any).user;
@@ -288,6 +294,7 @@ function normalizeStaffBody(body: Record<string, unknown>): Record<string, unkno
   delete normalized.id;
   delete normalized.joinDate;
   delete normalized.branchIds;
+  delete normalized.roleCapabilities;
   if (normalized.isActive !== undefined) {
     normalized.isActive = coerceBooleanField(normalized.isActive);
   }
@@ -301,6 +308,30 @@ function normalizeStaffBody(body: Record<string, unknown>): Record<string, unkno
     delete normalized.salaryDate;
   }
   return normalized;
+}
+
+function extractRoleCapabilities(body: Record<string, unknown>) {
+  return parseRoleCapabilitiesInput(body.roleCapabilities);
+}
+
+async function applyStaffRoleCapabilities(
+  staffId: string,
+  role: string,
+  caps: ReturnType<typeof parseRoleCapabilitiesInput>,
+) {
+  if (!roleHasConfigurableCapabilities(role)) {
+    await storage.updateStaff(staffId, {
+      capLocationExempt: null,
+      capViewAttendanceLocation: null,
+      capViewAllStaffFines: null,
+      capManageStaffFines: null,
+      capMaximusOverview: null,
+      capNexusOverview: null,
+    } as any);
+    return;
+  }
+  const resolved = caps ?? defaultCapabilitiesForRole(role);
+  await storage.updateStaff(staffId, staffPatchFromCapabilities(resolved) as any);
 }
 
 function extractBranchIds(body: Record<string, unknown>): string[] | undefined {
@@ -485,7 +516,6 @@ export async function registerRoutes(
       }
       const { password: _, ...userWithoutPassword } = staff;
       const { resolveBranchAccessContext, hasCompletedBranchSelection } = await import("./services/branchService");
-      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
       const session = sessionId ? await storage.getAuthSession(sessionId) : undefined;
       const branchContext = await resolveBranchAccessContext(
         storage,
@@ -493,8 +523,7 @@ export async function registerRoutes(
         user.role,
         session
       );
-      const mdCapabilities =
-        user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCapabilities = await loadRoleCapabilitiesForUser(storage, user.role, user.staffId);
       return res.json({
         ...userWithoutPassword,
         selectedBranchId: branchContext.selectedBranchId,
@@ -786,10 +815,14 @@ export async function registerRoutes(
       }
 
       const { password: _, ...staffWithoutPassword } = staff;
-      return res.json({
+      const payload: Record<string, unknown> = {
         ...staffWithoutPassword,
         branchIds: branchPermissions.map((p) => p.branchId),
-      });
+      };
+      if (isAdminRole(currentUser.role) && roleHasConfigurableCapabilities(staff.role)) {
+        payload.roleCapabilities = await loadStaffRoleCapabilities(storage, id);
+      }
+      return res.json(payload);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -800,6 +833,9 @@ export async function registerRoutes(
     try {
       const body = req.body as Record<string, unknown>;
       const branchIds = extractBranchIds(body);
+      const roleCapabilities = isAdminRole((req as any).user?.role)
+        ? extractRoleCapabilities(body)
+        : undefined;
       const joiningDate = joinDateString((body as any)?.joinDate);
       const validatedData = insertStaffSchema.parse(normalizeStaffBody(body));
       
@@ -830,6 +866,14 @@ export async function registerRoutes(
         await storage.syncStaffBranchAccess(staffForResponse.id, branchIds);
       }
 
+      if (isAdminRole((req as any).user?.role)) {
+        await applyStaffRoleCapabilities(
+          staffForResponse.id,
+          staffForResponse.role,
+          roleCapabilities,
+        );
+      }
+
       const actor = await auditActor(req);
       await logAudit(storage, {
         ...actor,
@@ -841,10 +885,14 @@ export async function registerRoutes(
 
       const permissions = await storage.getUserBranchPermissions(staffForResponse.id);
       const { password: _, ...staffWithoutPassword } = staffForResponse;
-      return res.status(201).json({
+      const response: Record<string, unknown> = {
         ...staffWithoutPassword,
         branchIds: permissions.map((p) => p.branchId),
-      });
+      };
+      if (isAdminRole((req as any).user?.role) && roleHasConfigurableCapabilities(staffForResponse.role)) {
+        response.roleCapabilities = await loadStaffRoleCapabilities(storage, staffForResponse.id);
+      }
+      return res.status(201).json(response);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation error", errors: error.errors });
@@ -860,6 +908,9 @@ export async function registerRoutes(
       const currentUser = (req as any).user;
       const body = req.body as Record<string, unknown>;
       const branchIds = extractBranchIds(body);
+      const roleCapabilities = isAdminRole(currentUser.role)
+        ? extractRoleCapabilities(body)
+        : undefined;
       const joiningDate = joinDateString((body as any)?.joinDate);
       
       // Allow user to update own profile, or Admin/MD to update any profile
@@ -906,6 +957,15 @@ export async function registerRoutes(
         await storage.syncStaffBranchAccess(id, branchIds);
       }
 
+      if (isAdminRole(currentUser.role)) {
+        const targetRole = String(validatedData.role ?? staff.role);
+        if (roleCapabilities !== undefined) {
+          await applyStaffRoleCapabilities(id, targetRole, roleCapabilities);
+        } else if (beforeStaff && validatedData.role && validatedData.role !== beforeStaff.role) {
+          await applyStaffRoleCapabilities(id, targetRole, undefined);
+        }
+      }
+
       if (beforeStaff && canManageOthers) {
         const actor = await auditActor(req);
         const action =
@@ -925,10 +985,14 @@ export async function registerRoutes(
 
       const permissions = await storage.getUserBranchPermissions(id);
       const { password: _, ...staffWithoutPassword } = staff;
-      return res.json({
+      const patchResponse: Record<string, unknown> = {
         ...staffWithoutPassword,
         branchIds: permissions.map((p) => p.branchId),
-      });
+      };
+      if (isAdminRole(currentUser.role) && roleHasConfigurableCapabilities(staff.role)) {
+        patchResponse.roleCapabilities = await loadStaffRoleCapabilities(storage, id);
+      }
+      return res.json(patchResponse);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation error", errors: error.errors });
@@ -1952,8 +2016,7 @@ export async function registerRoutes(
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
       const currentUser = (req as any).user;
       const { canViewAttendanceLocation } = await import("./permissions");
-      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
-      const mdCaps = currentUser.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCaps = await loadRoleCapabilitiesForUser(storage, currentUser.role, currentUser.staffId);
       // Management and operational leads (Manager/Branch Manager/Nexus MD) may view team attendance.
       const isAdmin = canViewStaff(currentUser.role);
       const canViewLocation = canViewAttendanceLocation(currentUser.role, mdCaps);
@@ -2127,8 +2190,7 @@ export async function registerRoutes(
       // enforced server-side so the requirement cannot be bypassed via the API.
       const isSelfCheckIn = targetStaffId === currentUser.staffId;
       const { isAttendanceLocationExempt } = await import("./permissions");
-      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
-      const mdCaps = currentUser.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCaps = await loadRoleCapabilitiesForUser(storage, currentUser.role, currentUser.staffId);
       const isLocationExempt = isAttendanceLocationExempt(currentUser.role, mdCaps);
       if (status === "Present" && isSelfCheckIn && !isLocationExempt && !hasGeo) {
         return res.status(422).json({
@@ -2315,8 +2377,7 @@ export async function registerRoutes(
     try {
       const currentUser = (req as any).user;
       const { canViewAttendanceLocation } = await import("./permissions");
-      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
-      const mdCaps = currentUser.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCaps = await loadRoleCapabilitiesForUser(storage, currentUser.role, currentUser.staffId);
       if (!canViewAttendanceLocation(currentUser.role, mdCaps)) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -3986,8 +4047,7 @@ export async function registerRoutes(
     try {
       const user = (req as any).user;
       const { canViewAllStaffFines } = await import("./permissions");
-      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
-      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCaps = await loadRoleCapabilitiesForUser(storage, user.role, user.staffId);
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       const queryStaffId = req.query.staffId as string | undefined;
@@ -4022,8 +4082,7 @@ export async function registerRoutes(
     try {
       const user = (req as any).user;
       const { canManageStaffFines } = await import("./permissions");
-      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
-      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCaps = await loadRoleCapabilitiesForUser(storage, user.role, user.staffId);
       if (!canManageStaffFines(user.role, mdCaps)) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -4083,8 +4142,7 @@ export async function registerRoutes(
     try {
       const user = (req as any).user;
       const { canManageStaffFines } = await import("./permissions");
-      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
-      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCaps = await loadRoleCapabilitiesForUser(storage, user.role, user.staffId);
       if (!canManageStaffFines(user.role, mdCaps)) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -4140,8 +4198,7 @@ export async function registerRoutes(
     try {
       const user = (req as any).user;
       const { canManageStaffFines } = await import("./permissions");
-      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
-      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCaps = await loadRoleCapabilitiesForUser(storage, user.role, user.staffId);
       if (!canManageStaffFines(user.role, mdCaps)) {
         return res.status(403).json({ message: "Forbidden" });
       }

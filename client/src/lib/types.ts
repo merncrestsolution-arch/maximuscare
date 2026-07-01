@@ -12,6 +12,8 @@ export interface User {
   branch?: string;
   branchIds?: string[];
   mdCapabilities?: MdRoleCapabilities;
+  /** Admin-only: per-staff MD/Manager permissions from GET /staff/:id */
+  roleCapabilities?: MdRoleCapabilities;
   address?: string;
   nic?: string;
   passportNo?: string;

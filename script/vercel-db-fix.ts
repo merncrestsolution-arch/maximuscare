@@ -45,6 +45,12 @@ const newColumns: Array<[string, string, string]> = [
   ["clinic_settings", "md_manage_staff_fines", "BOOLEAN NOT NULL DEFAULT FALSE"],
   ["clinic_settings", "md_maximus_overview", "BOOLEAN NOT NULL DEFAULT FALSE"],
   ["clinic_settings", "md_nexus_overview", "BOOLEAN NOT NULL DEFAULT FALSE"],
+  ["staff", "cap_location_exempt", "BOOLEAN"],
+  ["staff", "cap_view_attendance_location", "BOOLEAN"],
+  ["staff", "cap_view_all_staff_fines", "BOOLEAN"],
+  ["staff", "cap_manage_staff_fines", "BOOLEAN"],
+  ["staff", "cap_maximus_overview", "BOOLEAN"],
+  ["staff", "cap_nexus_overview", "BOOLEAN"],
 ];
 
 async function run() {

@@ -15,6 +15,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
 import { useBranchOptions } from "@/hooks/use-branch-options";
 import { BranchMultiSelectField } from "@/components/branch/branch-multi-select-field";
+import { RoleCapabilitiesSection } from "@/components/staff/role-capabilities-section";
+import { isAdminRole } from "@/lib/permissions";
+import {
+  defaultCapabilitiesForRole,
+  roleHasConfigurableCapabilities,
+  type MdRoleCapabilities,
+} from "@shared/mdCapabilities";
 
 const DEFAULT_STAFF: User = {
   id: "",
@@ -66,6 +73,9 @@ export default function StaffEditPage() {
   const deleteStaffMutation = useDeleteStaff();
 
   const [branchIds, setBranchIds] = useState<string[]>([]);
+  const [roleCapabilities, setRoleCapabilities] = useState<MdRoleCapabilities>(
+    defaultCapabilitiesForRole("Physiotherapist"),
+  );
   const [formData, setFormData] = useState<FormDataWithPassword>(
     { ...DEFAULT_STAFF, password: "", confirmPassword: "" }
   );
@@ -77,6 +87,11 @@ export default function StaffEditPage() {
         ...existing,
         joinDate: toDateInputValue((existing as any).joiningDate || (existing as any).joinDate || existing.createdAt),
       });
+      if ((existing as any).roleCapabilities) {
+        setRoleCapabilities((existing as any).roleCapabilities);
+      } else if (roleHasConfigurableCapabilities(existing.role)) {
+        setRoleCapabilities(defaultCapabilitiesForRole(existing.role));
+      }
       const existingIds = (existing as any).branchIds as string[] | undefined;
       if (existingIds?.length) {
         setBranchIds(existingIds);
@@ -101,6 +116,7 @@ export default function StaffEditPage() {
   if (!currentUser) return null;
 
   const canEditSensitive = ["Admin", "MD"].includes(currentUser.role);
+  const isAdmin = isAdminRole(currentUser.role);
 
   if (!canEditSensitive || (!isNew && !isEdit)) {
     return (
@@ -171,6 +187,9 @@ export default function StaffEditPage() {
     otherAdjustments: formData.otherAdjustments || "0",
     joinDate: formData.joinDate,
     photoUri: formData.photoUri,
+    ...(isAdmin && roleHasConfigurableCapabilities(formData.role)
+      ? { roleCapabilities }
+      : {}),
   });
 
   const handleSave = async () => {
@@ -302,7 +321,13 @@ export default function StaffEditPage() {
               </div>
               <div className="space-y-3">
                 <Label className="text-base font-semibold text-black">Role</Label>
-                <Select value={formData.role} onValueChange={(v) => setFormData({ ...formData, role: v as Role })}>
+                <Select value={formData.role} onValueChange={(v) => {
+                  const role = v as Role;
+                  setFormData({ ...formData, role });
+                  if (isAdmin && roleHasConfigurableCapabilities(role)) {
+                    setRoleCapabilities(defaultCapabilitiesForRole(role));
+                  }
+                }}>
                   <SelectTrigger className="h-12 text-base bg-white border-gray-300 text-black" data-testid="select-staff-role">
                     <SelectValue />
                   </SelectTrigger>
@@ -310,6 +335,7 @@ export default function StaffEditPage() {
                     <SelectItem value="Admin">Admin</SelectItem>
                     <SelectItem value="MD">Managing Director</SelectItem>
                     <SelectItem value="Manager">Manager</SelectItem>
+                    <SelectItem value="Branch Manager">Branch Manager</SelectItem>
                     <SelectItem value="Physiotherapist">Physiotherapist</SelectItem>
                     <SelectItem value="Receptionist">Receptionist</SelectItem>
                     <SelectItem value="Staff">Staff</SelectItem>
@@ -363,6 +389,14 @@ export default function StaffEditPage() {
               <Label className="text-base font-semibold text-black">Branches</Label>
               <BranchMultiSelectField value={branchIds} onChange={setBranchIds} />
             </div>
+
+            {isAdmin && roleHasConfigurableCapabilities(formData.role) && (
+              <RoleCapabilitiesSection
+                role={formData.role}
+                value={roleCapabilities}
+                onChange={setRoleCapabilities}
+              />
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-3 md:col-span-2">

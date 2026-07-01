@@ -29,6 +29,12 @@ export const staff = sqliteTable("staff", {
   deactivatedBy: text("deactivated_by"),
   deletedAt: integer("deleted_at", { mode: "timestamp" }),
   deletedBy: text("deleted_by"),
+  capLocationExempt: integer("cap_location_exempt", { mode: "boolean" }),
+  capViewAttendanceLocation: integer("cap_view_attendance_location", { mode: "boolean" }),
+  capViewAllStaffFines: integer("cap_view_all_staff_fines", { mode: "boolean" }),
+  capManageStaffFines: integer("cap_manage_staff_fines", { mode: "boolean" }),
+  capMaximusOverview: integer("cap_maximus_overview", { mode: "boolean" }),
+  capNexusOverview: integer("cap_nexus_overview", { mode: "boolean" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });

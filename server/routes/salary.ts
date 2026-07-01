@@ -23,6 +23,7 @@ import {
   salaryPeriodForDate,
 } from "../services/salaryService";
 import { loadPayrollSettings } from "../services/payrollService";
+import { loadRoleCapabilitiesForUser } from "../services/mdCapabilityService";
 import { resolveBranchScopedStaffIds, isStaffInBranchScope } from "../services/staffService";
 
 const {
@@ -154,6 +155,8 @@ async function createSalaryAdjustment(
     },
   });
 
+  const { invalidateOperationalCaches } = await import("../services/cacheService");
+  await invalidateOperationalCaches();
   return successResponse(res, record, "Adjustment recorded", 201);
 }
 
@@ -205,6 +208,8 @@ async function updateSalaryDecrement(req: Request, res: Response) {
     newValue: updated,
   });
 
+  const { invalidateOperationalCaches } = await import("../services/cacheService");
+  await invalidateOperationalCaches();
   return successResponse(res, updated);
 }
 
@@ -605,6 +610,8 @@ export function registerSalaryRoutes(app: Express) {
         recordId: record.id,
         newValue: record,
       });
+      const { invalidateOperationalCaches } = await import("../services/cacheService");
+      await invalidateOperationalCaches();
       return successResponse(res, record, "Deduction created", 201);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);
@@ -868,8 +875,7 @@ export function registerSalaryRoutes(app: Express) {
     try {
       const user = (req as any).user;
       const { canManageStaffFines, isAdminRole } = await import("../permissions");
-      const { loadMdCapabilities } = await import("../services/mdCapabilityService");
-      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const mdCaps = await loadRoleCapabilitiesForUser(storage, user.role, user.staffId);
       if (!canManageStaffFines(user.role, mdCaps)) {
         return errorResponse(res, "Forbidden", 403);
       }
