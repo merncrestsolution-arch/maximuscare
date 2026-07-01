@@ -1093,8 +1093,8 @@ export default function InPatientProfilePage() {
                 {canApplyDeduction && !showingPreviousBilling && (
                   <Button
                     variant="outline"
-                    size="sm"
-                    className="h-8 shrink-0 border-[#D6E8F5] bg-white text-xs print:hidden"
+                    size="compact"
+                    className="h-7 min-h-7 shrink-0 border-[#D6E8F5] bg-white px-2.5 py-0 text-[11px] font-medium print:hidden sm:h-8 sm:px-3 sm:text-xs"
                     onClick={openDeductionModal}
                     data-testid="button-apply-deduction"
                   >
