@@ -6,12 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useClinicSettings, useUpdateClinicSettings, useIncentiveSettings, useUpdateIncentiveSettings } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, ScrollText, ChevronRight } from "lucide-react";
+import { Loader2, ScrollText, ChevronRight, Database } from "lucide-react";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
 import { useAuth } from "@/context/auth-context";
 import { canManageSettings, canViewAuditLogs } from "@/lib/permissions";
 import { SaveStatus } from "@/components/ui/save-status";
 import { useSavedIndicator } from "@/hooks/useSavedIndicator";
+import { AppAboutCard } from "@/components/app-about-card";
 
 function SettingsContent() {
   const { toast } = useToast();
@@ -125,6 +126,20 @@ function SettingsContent() {
               </div>
               <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
             </button>
+            <button
+              type="button"
+              onClick={() => setLocation("/settings/data-health")}
+              className="flex w-full items-center gap-3 rounded-lg border border-border/60 bg-background px-4 py-3 text-left transition-colors hover:bg-muted mt-3"
+            >
+              <Database className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">Patient Data Health</div>
+                <div className="text-sm text-muted-foreground">
+                  ID/QR migration status and batch upgrade for old patient records
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 text-muted-foreground shrink-0" />
+            </button>
           </CardContent>
         </Card>
       )}
@@ -200,6 +215,8 @@ function SettingsContent() {
           </div>
         </CardContent>
       </Card>
+
+      <AppAboutCard />
     </div>
   );
 }

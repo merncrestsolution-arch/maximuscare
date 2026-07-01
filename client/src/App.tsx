@@ -51,6 +51,7 @@ import UnpaidVisitsPage from "@/pages/reports/unpaid-visits";
 import StaffReportPage from "@/pages/reports/staff-report";
 import SalaryReportPage from "@/pages/reports/salary-report";
 import SettingsPage from "@/pages/settings/index";
+import DataHealthPage from "@/pages/settings/data-health";
 import AuditLogPage from "@/pages/audit/index";
 import ExpensesListPage from "@/pages/expenses/list";
 import TasksPage from "@/pages/tasks/index";
@@ -232,6 +233,9 @@ function Router() {
       </Route>
       <Route path="/settings">
         <ProtectedRoute component={SettingsPage} allowWithoutBranch />
+      </Route>
+      <Route path="/settings/data-health">
+        <ProtectedRoute component={DataHealthPage} allowWithoutBranch />
       </Route>
       <Route path="/audit">
         <ProtectedRoute component={AuditLogPage} allowWithoutBranch />

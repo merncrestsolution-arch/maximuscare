@@ -1,8 +1,10 @@
+import type { Request } from "express";
 import type { IStorage } from "../storage";
 import type { Staff, Branch } from "@shared/schema";
 import { normalizeBranchName } from "@shared/branches";
 import { organizationForBranch, NEXUS_BRANCH_CODE, type OrganizationId } from "@shared/branchAccess";
 import { isClinicalRole, isOperationalLead } from "@shared/roles";
+import { loadBranchContext } from "../middleware/branchContext";
 import { clinicDateString } from "../clinicTime";
 import { computePayrollReport } from "./payrollService";
 import { summarizeAttendance, inDateRange, computeExtraHolidayCount, normalizeVisitType } from "./calculationEngine";
@@ -283,6 +285,63 @@ export async function branchStaffIdSet(
   const allStaff = await storage.getAllStaff();
   const scoped = await filterStaffByBranchAccess(storage, allStaff, branchName);
   return new Set(scoped.map((s) => s.id));
+}
+
+/**
+ * Staff IDs visible in the current session's branch context. Salary, payroll, and
+ * fines listings use this so each branch only sees its own staff. Returns null when
+ * no branch/org scope applies (rare — usually returns a non-empty Set).
+ */
+export async function resolveBranchScopedStaffIds(
+  storage: IStorage,
+  req: Request,
+): Promise<Set<string> | null> {
+  const user = (req as any).user;
+  if (!user) return new Set();
+
+  const ctx = await loadBranchContext(req as any);
+  const isLead = isOperationalLead(user.role);
+
+  const selectedIds = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
+
+  if (!ctx?.selectedBranchName && user.organizationId) {
+    const scoped = await filterStaffByOrganization(storage, await storage.getAllStaff(), user.organizationId);
+    return new Set(scoped.map((s) => s.id));
+  }
+
+  if (isLead) {
+    const allowedNames = new Set(
+      (ctx?.allowedBranches ?? []).map((b: Branch) =>
+        normalizeBranchName(b.branchName ?? b.name).toLowerCase(),
+      ),
+    );
+    const allStaff = await storage.getAllStaff();
+    const filteredStaff = allStaff.filter((s) => {
+      const staffBranch = normalizeBranchName(s.branch).toLowerCase();
+      if (staffBranch === "both") {
+        return allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation");
+      }
+      return allowedNames.has(staffBranch);
+    });
+    const allowedIds = filteredStaff.map((s) => s.id);
+
+    if (selectedIds !== null) {
+      return new Set(allowedIds.filter((id) => selectedIds.has(id)));
+    }
+    return new Set(allowedIds);
+  }
+
+  return selectedIds;
+}
+
+export async function isStaffInBranchScope(
+  storage: IStorage,
+  req: Request,
+  staffId: string,
+): Promise<boolean> {
+  const scoped = await resolveBranchScopedStaffIds(storage, req);
+  if (scoped === null) return true;
+  return scoped.has(staffId);
 }
 
 export interface TreatingStaffOption {

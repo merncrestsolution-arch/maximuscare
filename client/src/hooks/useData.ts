@@ -1,7 +1,23 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { patientApi, visitApi, attendanceApi, attendanceApiExtended, staffApi, reportsApi, inPatientApi, expenseApi, revenueApi, incentiveSettingsApi, appointmentApi, staffFinesApi, payrollApi, salaryApi, patientsApiExtended, visitPaymentsApi, homeVisitsApi, clinicSettingsApi, branchesApi, notificationsApi, tasksApi, reportsApiExtended, auditApi, unwrapPaginatedList } from '@/lib/api';
+import { patientApi, visitApi, attendanceApi, attendanceApiExtended, staffApi, reportsApi, inPatientApi, expenseApi, revenueApi, incentiveSettingsApi, appointmentApi, staffFinesApi, payrollApi, salaryApi, patientsApiExtended, visitPaymentsApi, homeVisitsApi, clinicSettingsApi, branchesApi, notificationsApi, tasksApi, reportsApiExtended, auditApi, adminApi, unwrapPaginatedList } from '@/lib/api';
 import { useAuth } from '@/context/auth-context';
 import { useBranch } from '@/context/branch-context';
+import {
+  invalidateAppointmentQueries,
+  invalidateAttendanceQueries,
+  invalidateClinicSettingsQueries,
+  invalidateExpenseQueries,
+  invalidateInPatientQueries,
+  invalidateNotificationQueries,
+  invalidatePatientQueries,
+  invalidateReportsQueries,
+  invalidateSalaryPayrollQueries,
+  invalidateStaffQueries,
+  invalidateTaskQueries,
+  invalidateVisitQueries,
+} from '@/lib/queryInvalidation';
+
+export { invalidateSalaryPayrollQueries } from '@/lib/queryInvalidation';
 
 // Patient hooks
 export function usePatients(params?: {
@@ -30,10 +46,7 @@ export function useCreatePatient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: patientApi.create,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['patients'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
-    },
+    onSuccess: () => invalidatePatientQueries(queryClient),
   });
 }
 
@@ -41,12 +54,7 @@ export function useUpdatePatient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => patientApi.update(id, data),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['patients'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-stats', variables.id] });
-      queryClient.invalidateQueries({ queryKey: ['patient-history', variables.id] });
-    },
+    onSuccess: (_data, variables) => invalidatePatientQueries(queryClient, variables.id),
   });
 }
 
@@ -55,9 +63,9 @@ export function useDeletePatient() {
   return useMutation({
     mutationFn: (id: string) => patientApi.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['patients'] });
-      queryClient.invalidateQueries({ queryKey: ['visits'] });
-      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+      void invalidatePatientQueries(queryClient);
+      void invalidateVisitQueries(queryClient);
+      void invalidateAppointmentQueries(queryClient);
     },
   });
 }
@@ -121,14 +129,7 @@ export function useCreateVisit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: visitApi.create,
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['visits'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-stats', variables.patientId] });
-      queryClient.invalidateQueries({ queryKey: ['patient-history', variables.patientId] });
-      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
-      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-    },
+    onSuccess: (_data, variables) => invalidateVisitQueries(queryClient, variables.patientId),
   });
 }
 
@@ -136,14 +137,7 @@ export function useUpdateVisit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => visitApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['visits'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-stats'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-history'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
-      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-    },
+    onSuccess: (_data, variables) => invalidateVisitQueries(queryClient, variables.data?.patientId),
   });
 }
 
@@ -151,14 +145,7 @@ export function useDeleteVisit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => visitApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['visits'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-stats'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-history'] });
-      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
-      queryClient.invalidateQueries({ queryKey: ['reports'] });
-      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-    },
+    onSuccess: () => invalidateVisitQueries(queryClient),
   });
 }
 
@@ -177,11 +164,8 @@ export function useCreateAttendance() {
   return useMutation({
     mutationFn: attendanceApi.create,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['attendance'] });
-      await queryClient.invalidateQueries({ queryKey: ['attendance-dashboard'] });
-      await queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
-      await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-      await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
+      await invalidateAttendanceQueries(queryClient);
+      await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'active' });
     },
   });
 }
@@ -191,11 +175,8 @@ export function useUpdateAttendance() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => attendanceApi.update(id, data),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['attendance'] });
-      await queryClient.invalidateQueries({ queryKey: ['attendance-dashboard'] });
-      await queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
-      await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-      await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
+      await invalidateAttendanceQueries(queryClient);
+      await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'active' });
     },
   });
 }
@@ -205,11 +186,8 @@ export function useDeleteAttendance() {
   return useMutation({
     mutationFn: (id: string) => attendanceApi.delete(id),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['attendance'] });
-      await queryClient.invalidateQueries({ queryKey: ['attendance-dashboard'] });
-      await queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
-      await queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-      await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'all' });
+      await invalidateAttendanceQueries(queryClient);
+      await queryClient.refetchQueries({ queryKey: ['attendance'], type: 'active' });
     },
   });
 }
@@ -255,10 +233,7 @@ export function useCreateStaff() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: staffApi.create,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['staff'] });
-      queryClient.invalidateQueries({ queryKey: ['staff-directory'] });
-    },
+    onSuccess: () => invalidateStaffQueries(queryClient),
   });
 }
 
@@ -266,9 +241,9 @@ export function useUpdateStaff() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => staffApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['staff'] });
-      queryClient.invalidateQueries({ queryKey: ['staff-directory'] });
+    onSuccess: (_data, variables) => {
+      void invalidateStaffQueries(queryClient, variables.id);
+      void invalidateSalaryPayrollQueries(queryClient);
     },
   });
 }
@@ -277,10 +252,7 @@ export function useDeleteStaff() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: staffApi.delete,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['staff'] });
-      queryClient.invalidateQueries({ queryKey: ['staff-directory'] });
-    },
+    onSuccess: () => invalidateStaffQueries(queryClient),
   });
 }
 
@@ -295,8 +267,9 @@ export function useVisitStats(params: { startDate: string; endDate: string; staf
 
 // Staff fines
 export function useStaffFines(params: { startDate: string; endDate: string; staffId?: string }, enabled = true) {
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['staff-fines', params],
+    queryKey: ['staff-fines', params, selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => staffFinesApi.getAll(params),
     enabled: enabled && !!params.startDate && !!params.endDate,
   });
@@ -306,9 +279,7 @@ export function useCreateStaffFine() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: staffFinesApi.create,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-    },
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
   });
 }
 
@@ -316,9 +287,7 @@ export function useUpdateStaffFine() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => staffFinesApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-    },
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
   });
 }
 
@@ -326,9 +295,7 @@ export function useDeleteStaffFine() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: staffFinesApi.delete,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
-    },
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
   });
 }
 
@@ -368,7 +335,9 @@ export function useUpdateIncentiveSettings() {
   return useMutation({
     mutationFn: incentiveSettingsApi.update,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['incentive-settings'] });
+      void invalidateClinicSettingsQueries(queryClient);
+      void invalidateSalaryPayrollQueries(queryClient);
+      void invalidateReportsQueries(queryClient);
     },
   });
 }
@@ -402,9 +371,7 @@ export function useCreateInPatient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: inPatientApi.create,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-    },
+    onSuccess: () => invalidateInPatientQueries(queryClient),
   });
 }
 
@@ -412,9 +379,7 @@ export function useUpdateInPatient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => inPatientApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.id),
   });
 }
 
@@ -422,9 +387,7 @@ export function useDeleteInPatient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: inPatientApi.delete,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-    },
+    onSuccess: () => invalidateInPatientQueries(queryClient),
   });
 }
 
@@ -437,7 +400,8 @@ export function useReadmitInPatient() {
       return inPatientApi.readmit(admissionId, admitDate);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
+      void invalidateInPatientQueries(queryClient);
+      void invalidatePatientQueries(queryClient);
     },
   });
 }
@@ -447,9 +411,7 @@ export function useUpdateInPatientAdmitDate() {
   return useMutation({
     mutationFn: ({ id, admitDate }: { id: string; admitDate: string }) =>
       inPatientApi.updateAdmitDate(id, admitDate),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.id),
   });
 }
 
@@ -460,9 +422,7 @@ export function useSetInPatientDeduction() {
       id: string;
       data: { deductionType: "fixed" | "percentage" | null; deductionValue: number; deductionReason?: string | null };
     }) => inPatientApi.setDeduction(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.id),
   });
 }
 
@@ -471,10 +431,7 @@ export function useTransferInPatient() {
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string; targetBranchId: string; transferDate?: string; transferNote?: string }) =>
       inPatientApi.transfer(id, data),
-    onSuccess: (_res, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatient-transfers', vars.id] });
-    },
+    onSuccess: (_res, vars) => invalidateInPatientQueries(queryClient, vars.id),
   });
 }
 
@@ -508,12 +465,9 @@ export function useCreateInPatientSession() {
   return useMutation({
     mutationFn: ({ admissionId, data }: { admissionId: string; data: any }) => 
       inPatientApi.createSession(admissionId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'sessions'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-range'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-all'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
+    onSuccess: (_data, variables) => {
+      void invalidateInPatientQueries(queryClient, variables.admissionId);
+      void invalidateSalaryPayrollQueries(queryClient);
     },
   });
 }
@@ -523,13 +477,9 @@ export function useUpdateInPatientSession() {
   return useMutation({
     mutationFn: ({ admissionId, sessionId, data }: { admissionId: string; sessionId: string; data: any }) => 
       inPatientApi.updateSession(sessionId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'sessions'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-range'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-all'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard-kpis'] });
-      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
+    onSuccess: (_data, variables) => {
+      void invalidateInPatientQueries(queryClient, variables.admissionId);
+      void invalidateSalaryPayrollQueries(queryClient);
     },
   });
 }
@@ -539,12 +489,9 @@ export function useDeleteInPatientSession() {
   return useMutation({
     mutationFn: ({ admissionId, sessionId }: { admissionId: string; sessionId: string }) => 
       inPatientApi.deleteSession(sessionId),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'sessions'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-range'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', 'sessions-all'] });
-      queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
+    onSuccess: (_data, variables) => {
+      void invalidateInPatientQueries(queryClient, variables.admissionId);
+      void invalidateSalaryPayrollQueries(queryClient);
     },
   });
 }
@@ -564,10 +511,9 @@ export function useCreateInPatientDischarge() {
   return useMutation({
     mutationFn: ({ admissionId, data }: { admissionId: string; data: any }) => 
       inPatientApi.createDischarge(admissionId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'discharge'] });
+    onSuccess: (_data, variables) => {
+      void invalidateInPatientQueries(queryClient, variables.admissionId);
+      void invalidatePatientQueries(queryClient);
     },
   });
 }
@@ -577,11 +523,7 @@ export function useUpdateInPatientDischarge() {
   return useMutation({
     mutationFn: ({ admissionId, dischargeId, data }: { admissionId: string; dischargeId: string; data: any }) => 
       inPatientApi.updateDischarge(dischargeId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'discharge'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.admissionId),
   });
 }
 
@@ -607,11 +549,7 @@ export function useCreateInPatientPayment() {
   return useMutation({
     mutationFn: ({ admissionId, data }: { admissionId: string; data: any }) => 
       inPatientApi.createPayment(admissionId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'payments'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'payments', 'total'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.admissionId),
   });
 }
 
@@ -620,11 +558,7 @@ export function useUpdateInPatientPayment() {
   return useMutation({
     mutationFn: ({ admissionId, paymentId, data }: { admissionId: string; paymentId: string; data: any }) =>
       inPatientApi.updatePayment(paymentId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'payments'] });
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'payments', 'total'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.admissionId),
   });
 }
 
@@ -650,9 +584,7 @@ export function useCreateInPatientExtraExpense() {
   return useMutation({
     mutationFn: ({ admissionId, data }: { admissionId: string; data: any }) =>
       inPatientApi.createExtraExpense(admissionId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'extra-expenses'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.admissionId),
   });
 }
 
@@ -661,9 +593,7 @@ export function useUpdateInPatientExtraExpense() {
   return useMutation({
     mutationFn: ({ admissionId, id, data }: { admissionId: string; id: string; data: any }) =>
       inPatientApi.updateExtraExpense(id, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'extra-expenses'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.admissionId),
   });
 }
 
@@ -672,9 +602,7 @@ export function useDeleteInPatientExtraExpense() {
   return useMutation({
     mutationFn: ({ admissionId, id }: { admissionId: string; id: string }) =>
       inPatientApi.deleteExtraExpense(id),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'extra-expenses'] });
-    },
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.admissionId),
   });
 }
 
@@ -709,11 +637,7 @@ export function useCreateExpense() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: expenseApi.create,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      queryClient.invalidateQueries({ queryKey: ['expenses', 'my'] });
-      queryClient.invalidateQueries({ queryKey: ['revenue-summary'] });
-    },
+    onSuccess: () => invalidateExpenseQueries(queryClient),
   });
 }
 
@@ -721,11 +645,7 @@ export function useUpdateExpense() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => expenseApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      queryClient.invalidateQueries({ queryKey: ['expenses', 'my'] });
-      queryClient.invalidateQueries({ queryKey: ['revenue-summary'] });
-    },
+    onSuccess: () => invalidateExpenseQueries(queryClient),
   });
 }
 
@@ -733,11 +653,7 @@ export function useDeleteExpense() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => expenseApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['expenses'] });
-      queryClient.invalidateQueries({ queryKey: ['expenses', 'my'] });
-      queryClient.invalidateQueries({ queryKey: ['revenue-summary'] });
-    },
+    onSuccess: () => invalidateExpenseQueries(queryClient),
   });
 }
 
@@ -761,9 +677,7 @@ export function useCreateAppointment() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: appointmentApi.create,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['appointments'] });
-    },
+    onSuccess: () => invalidateAppointmentQueries(queryClient),
   });
 }
 
@@ -771,9 +685,7 @@ export function useUpdateAppointment() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => appointmentApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['appointments'] });
-    },
+    onSuccess: () => invalidateAppointmentQueries(queryClient),
   });
 }
 
@@ -781,9 +693,7 @@ export function useDeleteAppointment() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => appointmentApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['appointments'] });
-    },
+    onSuccess: () => invalidateAppointmentQueries(queryClient),
   });
 }
 
@@ -798,8 +708,9 @@ export function useRevenueSummary(params?: { startDate?: string; endDate?: strin
 }
 
 export function usePayrollReport(params: { startDate: string; endDate: string; staffId?: string }, enabled = true) {
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['payroll-report', params],
+    queryKey: ['payroll-report', params, selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => payrollApi.getReport(params),
     enabled: enabled && !!params.startDate && !!params.endDate,
   });
@@ -817,10 +728,7 @@ export function useUpdateClinicSettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: clinicSettingsApi.update,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['clinic-settings'] });
-      queryClient.invalidateQueries({ queryKey: ['payroll-report'] });
-    },
+    onSuccess: () => invalidateClinicSettingsQueries(queryClient),
   });
 }
 
@@ -883,7 +791,7 @@ export function useArchiveNotification() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => notificationsApi.archive(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    onSuccess: () => invalidateNotificationQueries(queryClient),
   });
 }
 
@@ -891,10 +799,7 @@ export function useDeleteNotification() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => notificationsApi.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
-    },
+    onSuccess: () => invalidateNotificationQueries(queryClient),
   });
 }
 
@@ -903,10 +808,7 @@ export function useBroadcastNotification() {
   return useMutation({
     mutationFn: (data: { title: string; message: string; type?: string; branch?: string }) =>
       notificationsApi.broadcast(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
-    },
+    onSuccess: () => invalidateNotificationQueries(queryClient),
   });
 }
 
@@ -922,10 +824,7 @@ export function useMarkNotificationRead() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => notificationsApi.markRead(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
-    },
+    onSuccess: () => invalidateNotificationQueries(queryClient),
   });
 }
 
@@ -933,10 +832,7 @@ export function useMarkAllNotificationsRead() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => notificationsApi.markAllRead(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
-    },
+    onSuccess: () => invalidateNotificationQueries(queryClient),
   });
 }
 
@@ -944,10 +840,7 @@ export function useClearAllNotifications() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => notificationsApi.clearAll(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['notifications'] });
-      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
-    },
+    onSuccess: () => invalidateNotificationQueries(queryClient),
   });
 }
 
@@ -963,10 +856,7 @@ export function useCreateTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: tasksApi.create,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      queryClient.invalidateQueries({ queryKey: ['task-dashboard'] });
-    },
+    onSuccess: () => invalidateTaskQueries(queryClient),
   });
 }
 
@@ -974,10 +864,7 @@ export function useUpdateTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => tasksApi.update(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      queryClient.invalidateQueries({ queryKey: ['task-dashboard'] });
-    },
+    onSuccess: () => invalidateTaskQueries(queryClient),
   });
 }
 
@@ -985,10 +872,7 @@ export function useDeleteTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: tasksApi.delete,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      queryClient.invalidateQueries({ queryKey: ['task-dashboard'] });
-    },
+    onSuccess: () => invalidateTaskQueries(queryClient),
   });
 }
 
@@ -1069,23 +953,26 @@ export function useStaffReport(
 }
 
 export function useSalaryDashboard(enabled = true) {
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['salary-dashboard'],
+    queryKey: ['salary-dashboard', selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => salaryApi.dashboard(),
     enabled,
   });
 }
 
 export function useSalaryHistory(params?: { month?: string; year?: string; branch?: string; staffId?: string; status?: string }) {
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['salary-history', params],
+    queryKey: ['salary-history', params, selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => salaryApi.history(params),
   });
 }
 
 export function useSalaryPreview(params: { staffId: string; periodStart: string; periodEnd: string }, enabled = false) {
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['salary-preview', params],
+    queryKey: ['salary-preview', params, selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => salaryApi.preview(params),
     enabled: enabled && !!params.staffId && !!params.periodStart && !!params.periodEnd,
   });
@@ -1095,19 +982,13 @@ export function useGenerateSalary() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: salaryApi.generate,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['salary-history'] });
-      queryClient.invalidateQueries({ queryKey: ['salary-dashboard'] });
-    },
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
   });
 }
 
 export function useSalaryApprovalActions() {
   const queryClient = useQueryClient();
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ['salary-history'] });
-    queryClient.invalidateQueries({ queryKey: ['salary-dashboard'] });
-  };
+  const invalidate = () => invalidateSalaryPayrollQueries(queryClient);
   return {
     approve: useMutation({ mutationFn: salaryApi.approve, onSuccess: invalidate }),
     reject: useMutation({ mutationFn: ({ id, reason }: { id: string; reason: string }) => salaryApi.reject(id, reason), onSuccess: invalidate }),
@@ -1139,16 +1020,18 @@ export function useSalaryReport(
   params: { startDate: string; endDate: string },
   enabled = true
 ) {
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['salary-report', staffId, params],
+    queryKey: ['salary-report', staffId, params, selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => salaryApi.report(staffId, params),
     enabled: enabled && !!staffId && !!params.startDate && !!params.endDate,
   });
 }
 
 export function useSalaryReportHistory(staffId: string, months?: number, enabled = true) {
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['salary-report-history', staffId, months],
+    queryKey: ['salary-report-history', staffId, months, selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => salaryApi.reportHistory(staffId, months),
     enabled: enabled && !!staffId,
   });
@@ -1162,10 +1045,7 @@ function useSalaryAdjustmentMutation(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ staffId, ...data }: SalaryAdjustmentInput) => fn(staffId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['salary-report'] });
-      queryClient.invalidateQueries({ queryKey: ['salary-report-history'] });
-    },
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
   });
 }
 
@@ -1186,10 +1066,7 @@ export function useUpdateSalaryDecrement() {
         reason: data.reason,
         amount: data.amount,
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["salary-report"] });
-      queryClient.invalidateQueries({ queryKey: ["salary-report-history"] });
-    },
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
   });
 }
 
@@ -1215,7 +1092,16 @@ export function useCreateStaffDeduction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: salaryApi.deductions.create,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['staff-deductions'] }),
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
+  });
+}
+
+export function useUpdateStaffDeduction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { category?: string; amount?: number; deductionDate?: string; remarks?: string | null } }) =>
+      salaryApi.deductions.update(id, data),
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
   });
 }
 
@@ -1223,7 +1109,7 @@ export function useCreateStaffOt() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: salaryApi.ot.create,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['staff-ot'] }),
+    onSuccess: () => invalidateSalaryPayrollQueries(queryClient),
   });
 }
 
@@ -1299,10 +1185,29 @@ export function useCreatePatientDocument() {
 }
 
 export function usePatientExport(enabled = true) {
+  const { selectedBranchId, selectedBranchName } = useBranch();
   return useQuery({
-    queryKey: ['patient-export'],
+    queryKey: ['patient-export', selectedBranchId, selectedBranchName],
     queryFn: () => patientsApiExtended.export(),
     enabled,
+  });
+}
+
+export function usePatientDataHealth(enabled = true) {
+  return useQuery({
+    queryKey: ['admin-data-health'],
+    queryFn: () => adminApi.dataHealth(),
+    enabled,
+  });
+}
+
+export function useRunPatientDataBackfill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data?: { batchSize?: number; limit?: number }) => adminApi.runDataHealthBackfill(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-data-health'] });
+    },
   });
 }
 

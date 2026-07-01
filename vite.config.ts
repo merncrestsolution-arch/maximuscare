@@ -42,7 +42,12 @@ function appVersionPlugin(): Plugin {
       this.emitFile({
         type: "asset",
         fileName: "version.json",
-        source: JSON.stringify({ version: buildId, message: commitMessage }),
+        source: JSON.stringify({
+          version: buildId,
+          displayVersion,
+          buildDate: buildTimestamp,
+          message: commitMessage,
+        }),
       });
     },
   };

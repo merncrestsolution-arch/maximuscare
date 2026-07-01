@@ -26,6 +26,7 @@ import { filterByBranchName, resolveBranchIdByName } from "./services/branchServ
 import { normalizeBranchName } from "@shared/branches";
 import { recordMatchesBranchScope, branchIdsForName } from "./utils/branchScope";
 import { hasFullBranchAccess, organizationForBranch, type OrganizationId } from "@shared/branchAccess";
+import { APP_RELEASE } from "@shared/release";
 import { registerAutoFineJobs, startScheduledJobs } from "./jobs/scheduler";
 import { clinicDateString, clinicYesterdayString, clinicDateOffset } from "./clinicTime";
 import { registerHrmRoutes } from "./routes/hrm";
@@ -52,8 +53,8 @@ import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
 import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
 import { verifyPatientQrToken } from "./services/qrTokenService";
-import { ensureAdmissionQrToken, ensurePatientDataVersion } from "./services/patientDataVersionService";
-import { getOrCreateAdmissionCardPdf, getOrCreatePatientCardPdf } from "./services/patientIdCardCacheService";
+import { ensureAdmissionQrToken, ensurePatientDataVersion, getPatientDataHealthSummary, runPatientDataBackfill } from "./services/patientDataVersionService";
+import { getOrCreateAdmissionCardPdf, getOrCreatePatientCardPdf, invalidatePatientIdCard, patientIdCardFieldsChanged, bulkPatientCardPdfs } from "./services/patientIdCardCacheService";
 import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
 import { logAudit } from "./services/auditService";
@@ -377,7 +378,7 @@ export async function registerRoutes(
     res.json({
       status: "ok",
       app: "Maximus Care",
-      version: "1.0.0",
+      version: APP_RELEASE.version,
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV,
     })
@@ -1217,6 +1218,98 @@ export async function registerRoutes(
     }
   );
 
+  // Bulk ID card ZIP for branch export (server-side generation, one download).
+  app.post(
+    "/api/patients/id-cards/bulk-zip",
+    requireAuth,
+    requireBranchContext(),
+    async (req: Request, res: Response) => {
+      try {
+        const currentUser = (req as any).user;
+        const { hasPermission } = await import("./rbac/permissions");
+        if (!hasPermission(currentUser.role, "reports.export") && !hasPermission(currentUser.role, "patients.manage")) {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+        const { patientIds } = (req.body ?? {}) as { patientIds?: string[] };
+        if (!Array.isArray(patientIds) || patientIds.length === 0) {
+          return res.status(400).json({ message: "patientIds array is required" });
+        }
+        if (patientIds.length > 200) {
+          return res.status(400).json({ message: "Maximum 200 ID cards per ZIP" });
+        }
+
+        const { getBranchFilter } = await import("./middleware/branchContext");
+        const branchFilter = getBranchFilter(req as any);
+        const patients: Awaited<ReturnType<typeof storage.getPatient>>[] = [];
+        for (const id of patientIds) {
+          const patient = await storage.getPatient(id);
+          if (!patient || patient.deletedAt) continue;
+          if (branchFilter) {
+            const { normalizeBranchName } = await import("@shared/branches");
+            if (normalizeBranchName(patient.branch) !== normalizeBranchName(branchFilter)) continue;
+          }
+          if (!canViewAllPatients(currentUser.role)) {
+            const ids = await storage.getPatientIdsForStaff(currentUser.staffId);
+            if (!ids.includes(id)) continue;
+          }
+          patients.push(patient);
+        }
+        if (patients.length === 0) {
+          return res.status(404).json({ message: "No eligible patients found" });
+        }
+
+        const upgradedPatients: typeof patients = [];
+        const qrTokens = new Map<string, string>();
+        for (const p of patients) {
+          const { patient: upgraded, qrToken } = await ensurePatientDataVersion(storage, p);
+          upgradedPatients.push(upgraded);
+          qrTokens.set(upgraded.id, qrToken);
+        }
+
+        const { createZipBuffer } = await import("./utils/simpleZip");
+        const pdfs = await bulkPatientCardPdfs(
+          storage,
+          upgradedPatients.filter(Boolean) as any[],
+          (p) => organizationForBranch(p.branch),
+          (p) => qrTokens.get(p.id) ?? "",
+        );
+        const zip = createZipBuffer(pdfs.map((e) => ({ name: e.filename, data: e.pdf })));
+        const stamp = new Date().toISOString().slice(0, 10);
+        res.setHeader("Content-Type", "application/zip");
+        res.setHeader("Content-Disposition", `attachment; filename="patient-id-cards-${stamp}.zip"`);
+        return res.send(zip);
+      } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+      }
+    },
+  );
+
+  // Admin: patient data health (ID/QR migration status).
+  app.get("/api/admin/data-health", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!isManagementRole((req as any).user?.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const summary = await getPatientDataHealthSummary(storage);
+      return res.json(summary);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/admin/data-health/backfill", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!isManagementRole((req as any).user?.role)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const { batchSize, limit } = (req.body ?? {}) as { batchSize?: number; limit?: number };
+      const result = await runPatientDataBackfill(storage, { batchSize, limit });
+      return res.json(result);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Printable patient ID card (PDF download).
   app.get(
     "/api/patients/:id/id-card",
@@ -1384,6 +1477,9 @@ export async function registerRoutes(
       }
       if (validatedData.phone) {
         await assertNoDuplicatePatient(storage, validatedData.phone, (validatedData as any).nicOrPassport, id);
+      }
+      if (beforePatient && patientIdCardFieldsChanged(beforePatient, { ...beforePatient, ...validatedData } as any)) {
+        await invalidatePatientIdCard(storage, beforePatient);
       }
       const patient = await storage.updatePatient(id, validatedData);
       
@@ -2349,65 +2445,12 @@ export async function registerRoutes(
       const { status } = req.query;
       const branchId = getSelectedBranchId(req as any);
 
-      const resolveAdmissionKey = (entry: any): string => {
-        if (entry.patientId) return `patient:${entry.patientId}`;
-        if (entry.patientCode) return `code:${entry.patientCode}`;
-        const name = String(entry.patientName || "").trim().toLowerCase();
-        const phone = String(entry.phone || "").trim();
-        const idNo = String(entry.patientIdNo || "").trim();
-        return `legacy:${name}|${phone}|${idNo}`;
-      };
-
-      const compareAdmissionDates = (left: any, right: any): number => {
-        const leftAdmit = left?.admitDate ? new Date(left.admitDate) : null;
-        const rightAdmit = right?.admitDate ? new Date(right.admitDate) : null;
-        if (leftAdmit && rightAdmit && !Number.isNaN(leftAdmit.valueOf()) && !Number.isNaN(rightAdmit.valueOf())) {
-          if (leftAdmit > rightAdmit) return -1;
-          if (leftAdmit < rightAdmit) return 1;
-        }
-        const leftCreated = left?.createdAt ? new Date(left.createdAt) : null;
-        const rightCreated = right?.createdAt ? new Date(right.createdAt) : null;
-        if (leftCreated && rightCreated && !Number.isNaN(leftCreated.valueOf()) && !Number.isNaN(rightCreated.valueOf())) {
-          if (leftCreated > rightCreated) return -1;
-          if (leftCreated < rightCreated) return 1;
-        }
-        return 0;
-      };
-
-      const pickLatestAdmissions = (entries: any[]) => {
-        const latestByKey = new Map<string, any>();
-        for (const entry of entries) {
-          const key = resolveAdmissionKey(entry);
-          const current = latestByKey.get(key);
-          if (!current || compareAdmissionDates(entry, current) < 0) {
-            latestByKey.set(key, entry);
-          }
-        }
-        return Array.from(latestByKey.values()).sort(compareAdmissionDates);
-      };
+      const { filterInPatientsByListStatus } = await import("./services/inPatientAdmissionService");
 
       let admissions;
       if (status && typeof status === "string") {
-        const tokens = status
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean);
-        const normalized = tokens.map((value) => value.toLowerCase());
-        if (normalized.includes("all")) {
-          admissions = await storage.getAllInPatientAdmissions(branchId);
-        } else {
-          const allAdmissions = await storage.getAllInPatientAdmissions(branchId);
-          const latestAdmissions = pickLatestAdmissions(allAdmissions);
-          if (normalized.includes("active")) {
-            admissions = latestAdmissions.filter((entry) => {
-              const current = String(entry.status || "").toLowerCase();
-              return current === "admitted" || current === "active";
-            });
-          } else {
-            const allowed = new Set(normalized);
-            admissions = latestAdmissions.filter((entry) => allowed.has(String(entry.status || "").toLowerCase()));
-          }
-        }
+        const allAdmissions = await storage.getAllInPatientAdmissions(branchId);
+        admissions = filterInPatientsByListStatus(allAdmissions, status);
       } else {
         admissions = await storage.getAllInPatientAdmissions(branchId);
       }
@@ -2954,6 +2997,10 @@ export async function registerRoutes(
       // Update admission status to Discharged
       await storage.updateInPatientAdmission(param(req, "admissionId"), { status: 'Discharged' });
 
+      if (admission.patientId) {
+        await storage.updatePatient(admission.patientId, { status: "Discharged" });
+      }
+
       return res.status(201).json(discharge);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -3001,6 +3048,10 @@ export async function registerRoutes(
       };
 
       const newAdmission = await storage.createInPatientAdmission(newAdmissionData as any);
+
+      if (admission.patientId) {
+        await storage.updatePatient(admission.patientId, { status: "Active" });
+      }
 
       const actor = await auditActor(req);
       await logAudit(storage, {
@@ -3854,20 +3905,29 @@ export async function registerRoutes(
   app.get("/api/staff-fines", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { isManagementRole } = await import("./permissions");
+      const { canViewAllStaffFines } = await import("./permissions");
+      const { resolveBranchScopedStaffIds } = await import("./services/staffService");
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       const queryStaffId = req.query.staffId as string | undefined;
       if (!startDate || !endDate) {
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
-      if (isManagementRole(user.role)) {
+      if (canViewAllStaffFines(user.role)) {
+        const scoped = await resolveBranchScopedStaffIds(storage, req);
         if (queryStaffId) {
+          if (scoped && !scoped.has(queryStaffId)) {
+            return res.status(403).json({ message: "Access denied" });
+          }
           const rows = await storage.getStaffFinesByStaffAndDateRange(queryStaffId, startDate, endDate);
           return res.json(rows);
         }
         const rows = await storage.getStaffFinesByDateRange(startDate, endDate);
-        return res.json(rows);
+        const filtered = scoped ? rows.filter((r) => scoped.has(r.staffId)) : rows;
+        return res.json(filtered);
+      }
+      if (queryStaffId && queryStaffId !== user.staffId) {
+        return res.status(403).json({ message: "Access denied" });
       }
       const rows = await storage.getStaffFinesByStaffAndDateRange(user.staffId, startDate, endDate);
       return res.json(rows);

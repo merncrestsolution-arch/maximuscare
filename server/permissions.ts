@@ -13,6 +13,21 @@ export function isManagementRole(role: string | undefined): boolean {
   return role === "Admin" || role === "MD";
 }
 
+export function isAdminRole(role: string | undefined): boolean {
+  return String(role ?? "").trim() === "Admin";
+}
+
+/** Admin, MD, and Nexus MD may view fines for all staff (branch-scoped on the API). */
+export function canViewAllStaffFines(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return r === "Admin" || r === "MD" || r === "Nexus MD";
+}
+
+/** Only Admin may create, edit, or delete fines. */
+export function canManageStaffFines(role: string | undefined): boolean {
+  return isAdminRole(role);
+}
+
 export function isSessionRole(role: string | undefined): boolean {
   return role === "Physiotherapist" || role === "Staff" || role === "Manager";
 }

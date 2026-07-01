@@ -1,7 +1,7 @@
 import type { DatabaseStorage } from "./storage";
 import { ensureSalaryPeriodRecord, salaryPeriodForDate } from "./services/salaryService";
 
-/** Roles that conduct billable sessions — only they are subject to the “before noon” auto fine. */
+/** Roles that conduct billable sessions — only they are subject to the “before noon” auto fine. Managers are excluded. */
 export function isAutoFineSessionRole(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
   return r === "Physiotherapist" || r === "Staff";

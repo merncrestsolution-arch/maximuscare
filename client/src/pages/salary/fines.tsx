@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
 import { canManageFines } from "@/lib/permissions";
-import { useStaffFines, useStaff, useCreateStaffFine, useUpdateStaffFine, useDeleteStaffFine } from "@/hooks/useData";
+import { useStaffFines, useStaff, useCreateStaffFine, useUpdateStaffFine, useDeleteStaffFine, invalidateSalaryPayrollQueries } from "@/hooks/useData";
 import { salaryApi } from "@/lib/api";
 import { ReportPageShell } from "@/components/reports/report-page-shell";
 import { ReportDataTable } from "@/components/reports/report-data-table";
@@ -105,7 +105,7 @@ function SalaryFinesContent() {
 
   const waive = async (id: string) => {
     await salaryApi.waiveFine(id);
-    qc.invalidateQueries({ queryKey: ["staff-fines"] });
+    await invalidateSalaryPayrollQueries(qc);
     toast({ title: "Fine waived" });
   };
 

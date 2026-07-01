@@ -17,7 +17,7 @@ import {
   requireReportsExport,
 } from "../middleware/secureApi";
 import { attachBranchContext, requireBranchContext, getBranchFilter, loadBranchContext } from "../middleware/branchContext";
-import { branchStaffIdSet } from "../services/staffService";
+import { resolveBranchScopedStaffIds, isStaffInBranchScope } from "../services/staffService";
 import { assertOverviewAccess } from "../services/branchService";
 import { computeOverviewKpis, computeMaximusComparison, computeNexusComparison, computeOverviewExpenseBreakdown } from "../services/overviewService";
 import { successResponse, errorResponse } from "../response";
@@ -73,52 +73,28 @@ export function registerExtendedRoutes(app: Express) {
         return errorResponse(res, "startDate and endDate are required", 400);
       }
 
-      let staffIds: string[] | undefined;
-      const isManagement = isManagementRole(user.role);
-      const isMultiStaffAllowed = user.role === "Admin" || user.role === "MD" || user.role === "Nexus MD";
+      const role = String(user.role ?? "").trim();
+      const selfOnly = role === "Staff" || role === "Physiotherapist";
+      const canViewBranchPayroll =
+        isManagementRole(role) ||
+        role === "Nexus MD" ||
+        role === "Manager" ||
+        role === "Branch Manager";
 
-      if (isMultiStaffAllowed) {
+      let staffIds: string[] | undefined;
+
+      if (selfOnly) {
+        staffIds = user.staffId ? [user.staffId] : undefined;
+      } else if (canViewBranchPayroll) {
+        const scoped = await resolveBranchScopedStaffIds(storage, req);
         if (staffId) {
-          const target = await storage.getStaff(staffId);
-          if (!target) return errorResponse(res, "Staff not found", 404);
-          
-          if (!isManagement) {
-            const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
-            const targetBranch = normalizeBranchName(target.branch).toLowerCase();
-            const matchesAllowed = targetBranch === "both"
-              ? (allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation"))
-              : allowedNames.has(targetBranch);
-            if (!matchesAllowed) {
-              return errorResponse(res, "Access denied to staff in this branch", 403);
-            }
+          if (!(await isStaffInBranchScope(storage, req, staffId))) {
+            return errorResponse(res, "Access denied to staff in this branch", 403);
           }
           staffIds = [staffId];
         } else {
-          const ids = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
-          
-          if (!isManagement || ids === null) {
-            const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
-            const allStaff = await storage.getAllStaff();
-            const filteredStaff = allStaff.filter((s) => {
-              const staffBranch = normalizeBranchName(s.branch).toLowerCase();
-              if (staffBranch === "both") {
-                return allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation");
-              }
-              return allowedNames.has(staffBranch);
-            });
-            const allowedIds = filteredStaff.map((s) => s.id);
-            
-            if (ids !== null) {
-              staffIds = allowedIds.filter((id) => ids.has(id));
-            } else {
-              staffIds = allowedIds;
-            }
-          } else {
-            staffIds = Array.from(ids);
-          }
+          staffIds = scoped ? Array.from(scoped) : undefined;
         }
-      } else if (user.staffId) {
-        staffIds = [user.staffId];
       } else {
         return errorResponse(res, "Forbidden", 403);
       }
@@ -148,18 +124,8 @@ export function registerExtendedRoutes(app: Express) {
       }
 
       const isManagement = isManagementRole(user.role);
-      if (!isManagement) {
-        const target = await storage.getStaff(staffId);
-        if (!target) return errorResponse(res, "Staff not found", 404);
-        const ctx = await loadBranchContext(req as any);
-        const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
-        const targetBranch = normalizeBranchName(target.branch).toLowerCase();
-        const matchesAllowed = targetBranch === "both"
-          ? (allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation"))
-          : allowedNames.has(targetBranch);
-        if (!matchesAllowed) {
-          return errorResponse(res, "Access denied to staff in this branch", 403);
-        }
+      if (staffId !== user.staffId && !(await isStaffInBranchScope(storage, req, staffId))) {
+        return errorResponse(res, "Access denied to staff in this branch", 403);
       }
 
       const { summaries } = await computePayrollReport(storage, periodStart, periodEnd, [staffId]);
@@ -206,15 +172,7 @@ export function registerExtendedRoutes(app: Express) {
       }
 
       if (isLead && staffId) {
-        const target = await storage.getStaff(staffId);
-        if (!target) return errorResponse(res, "Staff not found", 404);
-        const ctx = await loadBranchContext(req as any);
-        const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
-        const targetBranch = normalizeBranchName(target.branch).toLowerCase();
-        const matchesAllowed = targetBranch === "both"
-          ? (allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation"))
-          : allowedNames.has(targetBranch);
-        if (!matchesAllowed) {
+        if (!(await isStaffInBranchScope(storage, req, staffId))) {
           return errorResponse(res, "Access denied to staff in this branch", 403);
         }
       }
@@ -290,9 +248,28 @@ export function registerExtendedRoutes(app: Express) {
 
   app.patch("/api/branches/:id", requireAuth, requireBranchesManage, async (req, res) => {
     try {
+      const user = (req as any).user;
+      const branchId = param(req, "id");
+      const existing = await storage.getBranchById(branchId);
+      if (!existing) return errorResponse(res, "Branch not found", 404);
       const data = updateBranchSchema.parse(req.body);
-      const branch = await storage.updateBranch(param(req, "id"), data as any);
+      const branch = await storage.updateBranch(branchId, data as any);
       if (!branch) return errorResponse(res, "Branch not found", 404);
+      if (
+        data.verifiedByAdmin !== undefined &&
+        Boolean(data.verifiedByAdmin) !== Boolean(existing.verifiedByAdmin)
+      ) {
+        const editor = await storage.getStaff(user.staffId);
+        await logAudit(storage, {
+          userId: user.staffId,
+          userName: editor?.name ?? "",
+          module: "branch",
+          action: data.verifiedByAdmin ? "verify" : "unverify",
+          recordId: branchId,
+          oldValue: { verifiedByAdmin: existing.verifiedByAdmin },
+          newValue: { verifiedByAdmin: branch.verifiedByAdmin, verifiedAt: new Date().toISOString() },
+        });
+      }
       return successResponse(res, branch);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);

@@ -403,8 +403,6 @@ export default function Dashboard() {
                       <Legend />
                       <Bar dataKey="present" stackId="a" fill="#16A34A" />
                       <Bar dataKey="absent" stackId="a" fill="#DC2626" />
-                      <Bar dataKey="leave" stackId="a" fill="#1873A8" />
-                      <Bar dataKey="holiday" stackId="a" fill="#EE862D" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -513,8 +511,6 @@ export default function Dashboard() {
                       <Legend />
                       <Bar dataKey="present" stackId="a" fill="#16A34A" />
                       <Bar dataKey="absent" stackId="a" fill="#DC2626" />
-                      <Bar dataKey="leave" stackId="a" fill="#1873A8" />
-                      <Bar dataKey="holiday" stackId="a" fill="#EE862D" />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>

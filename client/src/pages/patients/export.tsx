@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
 import { canExportPatients } from "@/lib/permissions";
 import { usePatientExport } from "@/hooks/useData";
@@ -12,8 +12,8 @@ import { formatLkr } from "@/lib/reportDatePresets";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
-import { downloadPatientIdCard } from "@/lib/idCard";
-import { ArrowLeft, Download, Loader2, Square } from "lucide-react";
+import { downloadPatientIdCardsZip } from "@/lib/idCard";
+import { ArrowLeft, Download, Loader2 } from "lucide-react";
 
 function PatientExportContent() {
   const { user } = useAuth();
@@ -21,40 +21,25 @@ function PatientExportContent() {
   const { data: rows = [], isLoading, error } = usePatientExport();
   const { toast } = useToast();
   const [bulkDownloading, setBulkDownloading] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
-  const cancelRef = useRef(false);
+  const [bulkTotal, setBulkTotal] = useState(0);
 
   const handleBulkDownload = async () => {
     if (!rows.length || bulkDownloading) return;
-    cancelRef.current = false;
     setBulkDownloading(true);
-    setBulkProgress({ current: 0, total: rows.length });
-    for (let i = 0; i < rows.length; i += 1) {
-      if (cancelRef.current) break;
-      const row = rows[i] as any;
-      try {
-        await downloadPatientIdCard({
-          kind: "outpatient",
-          recordId: row.patientId,
-          patientCode: row.patientCode ?? row.patientId,
-          qrToken: null,
-        });
-      } catch (err) {
-        toast({
-          title: "Could not download ID card",
-          description: err instanceof Error ? err.message : "Unknown error",
-          variant: "destructive",
-        });
-      } finally {
-        setBulkProgress((prev) => ({ ...prev, current: i + 1 }));
-      }
+    setBulkTotal(rows.length);
+    try {
+      const patientIds = rows.map((row: any) => String(row.patientId));
+      await downloadPatientIdCardsZip(patientIds);
+      toast({ title: `Downloaded ${patientIds.length} ID cards as ZIP` });
+    } catch (err) {
+      toast({
+        title: "Could not download ID cards",
+        description: err instanceof Error ? err.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setBulkDownloading(false);
     }
-    setBulkDownloading(false);
-  };
-
-  const handleCancelBulkDownload = () => {
-    cancelRef.current = true;
-    setBulkDownloading(false);
   };
 
   const exportRows = rows.map((r: any) => ({
@@ -68,9 +53,6 @@ function PatientExportContent() {
     outstandingAmount: formatLkr(r.outstandingAmount),
     status: r.status,
   }));
-
-  const bulkPercent =
-    bulkProgress.total > 0 ? Math.round((bulkProgress.current / bulkProgress.total) * 100) : 0;
 
   return (
     <ReportPageShell
@@ -118,14 +100,8 @@ function PatientExportContent() {
               ) : (
                 <Download className="h-4 w-4 mr-2" />
               )}
-              Download ID Cards
+              Download ID Cards (ZIP)
             </Button>
-            {bulkDownloading && (
-              <Button variant="ghost" onClick={handleCancelBulkDownload}>
-                <Square className="h-4 w-4 mr-2" />
-                Cancel
-              </Button>
-            )}
           </div>
         ) : null
       }
@@ -133,14 +109,12 @@ function PatientExportContent() {
       {bulkDownloading && (
         <div className="rounded-lg border bg-card p-3">
           <div className="flex items-center justify-between text-sm font-medium text-foreground">
-            <span>Downloading ID cards...</span>
-            <span>
-              {bulkProgress.current}/{bulkProgress.total}
-            </span>
+            <span>Generating {bulkTotal} ID cards…</span>
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
           </div>
-          <Progress className="mt-2" value={bulkPercent} />
+          <Progress className="mt-2" value={undefined} />
           <div className="mt-2 text-xs text-muted-foreground">
-            Keep this tab open while downloads continue.
+            Building a ZIP on the server — keep this tab open until the download starts.
           </div>
         </div>
       )}

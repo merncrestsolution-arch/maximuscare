@@ -3,6 +3,7 @@ import { useSearch } from "wouter";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
 import { canViewReportsHub } from "@/lib/permissions";
 import { useAuth } from "@/context/auth-context";
+import { useBranch } from "@/context/branch-context";
 import { useBranding } from "@/context/branding-context";
 import {
   useSalaryReport,
@@ -12,6 +13,7 @@ import {
   useAddSalaryDecrement,
   useAddSalaryFine,
   useUpdateSalaryDecrement,
+  useUpdateStaffDeduction,
 } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
 import { ReportPageShell } from "@/components/reports/report-page-shell";
@@ -35,6 +37,9 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { getDateRangeForPreset, formatMoney, type DatePreset } from "@/lib/reportDatePresets";
+import { canManageFines } from "@/lib/permissions";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import { Plus, Loader2, Pencil } from "lucide-react";
 
 const lkr = (n: number) => `LKR ${formatMoney(Number(n) || 0)}`;
@@ -47,6 +52,8 @@ type ReportLine = {
   reason: string;
   amount: number;
   source?: "adjustment" | "deduction" | "fine";
+  category?: string;
+  remarks?: string | null;
 };
 
 function todayStr() {
@@ -83,6 +90,7 @@ function AdjustmentDialog({
 
   const mutation =
     type === "addition" ? addAddition : type === "decrement" ? addDecrement : addFine;
+  const saved = useSavedIndicator(mutation.isSuccess);
 
   const title =
     type === "addition" ? "Add Addition" : type === "decrement" ? "Add Decrement" : "Add Fine";
@@ -143,13 +151,16 @@ function AdjustmentDialog({
             />
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={mutation.isPending}>
-            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-          </Button>
+        <DialogFooter className="flex items-center gap-3 sm:justify-between">
+          <SaveStatus isSaving={mutation.isPending} saved={saved} />
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={mutation.isPending}>
+              Cancel
+            </Button>
+            <Button onClick={submit} disabled={mutation.isPending}>
+              {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -168,18 +179,21 @@ function EditDecrementDialog({
   onClose: () => void;
 }) {
   const { toast } = useToast();
-  const update = useUpdateSalaryDecrement();
+  const updateAdjustment = useUpdateSalaryDecrement();
+  const updateDeduction = useUpdateStaffDeduction();
   const [date, setDate] = useState("");
   const [reason, setReason] = useState("");
   const [amount, setAmount] = useState("");
 
+  const isDeduction = line?.source === "deduction";
+
   useEffect(() => {
     if (open && line) {
       setDate(line.date);
-      setReason(line.reason);
+      setReason(isDeduction ? (line.remarks ?? line.category ?? line.reason) : line.reason);
       setAmount(String(line.amount ?? ""));
     }
-  }, [open, line]);
+  }, [open, line, isDeduction]);
 
   const submit = async () => {
     const numeric = Number(amount);
@@ -193,13 +207,25 @@ function EditDecrementDialog({
       return;
     }
     try {
-      await update.mutateAsync({
-        staffId,
-        adjustmentId: line.id,
-        date,
-        reason: reason.trim(),
-        amount: numeric,
-      });
+      if (isDeduction) {
+        await updateDeduction.mutateAsync({
+          id: line.id,
+          data: {
+            deductionDate: date,
+            remarks: reason.trim(),
+            amount: numeric,
+            ...(line.category ? { category: line.category } : {}),
+          },
+        });
+      } else {
+        await updateAdjustment.mutateAsync({
+          staffId,
+          adjustmentId: line.id,
+          date,
+          reason: reason.trim(),
+          amount: numeric,
+        });
+      }
       toast({ title: "Decrement updated" });
       onClose();
     } catch (e) {
@@ -210,6 +236,9 @@ function EditDecrementDialog({
       });
     }
   };
+
+  const pending = updateAdjustment.isPending || updateDeduction.isPending;
+  const saved = useSavedIndicator(updateAdjustment.isSuccess || updateDeduction.isSuccess);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -244,13 +273,16 @@ function EditDecrementDialog({
             />
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={update.isPending}>
-            Cancel
-          </Button>
-          <Button onClick={submit} disabled={update.isPending}>
-            {update.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
-          </Button>
+        <DialogFooter className="flex items-center gap-3 sm:justify-between">
+          <SaveStatus isSaving={pending} saved={saved} />
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={pending}>
+              Cancel
+            </Button>
+            <Button onClick={submit} disabled={pending}>
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -301,7 +333,7 @@ function LineSection({
                   {sign === "-" ? "-" : ""}
                   {lkr(l.amount)}
                 </span>
-                {onEdit && canManage && l.source === "adjustment" ? (
+                {onEdit && canManage && (l.source === "adjustment" || l.source === "deduction") ? (
                   <Button variant="ghost" size="icon" onClick={() => onEdit(l)} aria-label="Edit decrement">
                     <Pencil className="h-4 w-4" />
                   </Button>
@@ -333,6 +365,7 @@ function LineSection({
 
 function SalaryReportContent() {
   const { user } = useAuth();
+  const { selectedBranchName } = useBranch();
   const { logoUri } = useBranding();
   const search = useSearch();
 
@@ -340,6 +373,7 @@ function SalaryReportContent() {
   const isSelfOnly = ["Staff", "Physiotherapist"].includes(user?.role ?? "");
   const canPickStaff = !isSelfOnly;
   const canManageAdjustments = ["Admin", "MD", "Nexus MD"].includes(user?.role ?? "");
+  const canManageFinesRole = canManageFines(user?.role);
 
   // Bug L: the staff profile links here pre-filtered with ?staffId=…
   const presetStaffId = useMemo(() => {
@@ -368,6 +402,21 @@ function SalaryReportContent() {
   useEffect(() => {
     if (presetStaffId && !isSelfOnly) setSelectedStaffId(presetStaffId);
   }, [presetStaffId, isSelfOnly]);
+
+  // Clear report when switching branch so stale cross-branch data is not shown.
+  useEffect(() => {
+    if (!isSelfOnly) {
+      setSelectedStaffId("");
+      setSubmitted(null);
+    }
+  }, [selectedBranchName, isSelfOnly]);
+
+  // Live sync: refresh report whenever staff or date range changes.
+  useEffect(() => {
+    const staffId = isSelfOnly ? user?.id ?? "" : selectedStaffId;
+    if (!staffId || !startDate || !endDate) return;
+    setSubmitted({ staffId, startDate, endDate });
+  }, [selectedStaffId, startDate, endDate, isSelfOnly, user?.id]);
 
   const { data: staffList = [] } = useStaffDirectory(undefined, canPickStaff);
 
@@ -401,6 +450,9 @@ function SalaryReportContent() {
       });
     }
     rows.push({ item: "Home Visits Total", amount: lkr(report.homeVisitsTotal) });
+    if (report.incentiveTotal > 0) {
+      rows.push({ item: "Incentive", amount: lkr(report.incentiveTotal) });
+    }
     rows.push({
       item: `OT Hours (${report.otHours} × ${formatMoney(report.otRatePerHour)})`,
       amount: lkr(report.otTotal),
@@ -411,6 +463,9 @@ function SalaryReportContent() {
     rows.push({ item: "Fines Total", amount: `-${lkr(report.finesTotal)}` });
     for (const d of report.decrements) rows.push({ item: `Decrement — ${d.date} ${d.reason}`, amount: `-${lkr(d.amount)}` });
     rows.push({ item: "Decrements Total", amount: `-${lkr(report.decrementsTotal)}` });
+    if (report.extraHolidayDeduction > 0) {
+      rows.push({ item: "Extra Holiday Deduction", amount: `-${lkr(report.extraHolidayDeduction)}` });
+    }
     rows.push({ item: "FINAL SALARY", amount: lkr(report.finalSalary) });
     return rows;
   }, [report]);
@@ -452,8 +507,9 @@ function SalaryReportContent() {
             <Button
               onClick={handleGenerate}
               disabled={(!isSelfOnly && !selectedStaffId) || !startDate || !endDate}
+              variant="outline"
             >
-              Generate Report
+              Refresh Report
             </Button>
           </div>
         </div>
@@ -525,6 +581,13 @@ function SalaryReportContent() {
                   <td className="py-1 text-right font-medium whitespace-nowrap">{lkr(report.homeVisitsTotal)}</td>
                 </tr>
 
+                {report.incentiveTotal > 0 ? (
+                  <tr className="border-t border-border/60">
+                    <td className="pt-2 py-1 text-left">Incentive</td>
+                    <td className="pt-2 py-1 text-right whitespace-nowrap">{lkr(report.incentiveTotal)}</td>
+                  </tr>
+                ) : null}
+
                 <tr className="border-t border-border/60">
                   <td className="pt-2 py-1 text-left">
                     OT Hours ({report.otHours} × {formatMoney(report.otRatePerHour)})
@@ -546,7 +609,7 @@ function SalaryReportContent() {
                   sign="-"
                   lines={report.fines}
                   total={report.finesTotal}
-                  canManage={canManageAdjustments}
+                  canManage={canManageFinesRole}
                   onAdd={() => setDialog("fine")}
                   addLabel="Add Fine"
                 />
@@ -560,6 +623,13 @@ function SalaryReportContent() {
                   addLabel="Add Decrement"
                   onEdit={(line) => setEditLine(line)}
                 />
+
+                {report.extraHolidayDeduction > 0 ? (
+                  <tr className="border-t border-border/60">
+                    <td className="pt-2 py-1 text-left text-red-600">Extra Holiday Deduction</td>
+                    <td className="pt-2 py-1 text-right text-red-600 whitespace-nowrap">-{lkr(report.extraHolidayDeduction)}</td>
+                  </tr>
+                ) : null}
 
                 <tr className="border-t-2 border-[#105691]">
                   <td className="pt-2 text-left font-bold text-[#105691]">FINAL SALARY</td>

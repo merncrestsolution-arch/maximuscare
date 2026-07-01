@@ -15,9 +15,10 @@ export const APP_RELEASE: AppRelease = {
   version: "1.2.4",
   title: "App Updated — What's New",
   highlights: [
-    "Branch picker: close (X) button added on the workspace drawer.",
-    "Notifications: new card-style drawer (replaces old dropdown); tapping an update notification refreshes the app.",
-    "Data fix: patients, visits, and expenses with branch ID or legacy records now show correctly on dashboard and lists.",
+    "Version & build date now auto-generated at deploy — visible in footer, Profile, and Settings.",
+    "Notifications: clear individual items or clear all (soft-deleted, kept for audit).",
+    "Desktop alerts when admins send messages or assign tasks (enable via the in-app prompt).",
+    "Attendance charts simplified to Present/Absent; duplicate day records cleaned up.",
     "Please refresh your browser after this update to load the latest version.",
   ],
 };

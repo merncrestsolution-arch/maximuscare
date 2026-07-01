@@ -518,6 +518,8 @@ export interface SalaryReportLine {
   reason: string;
   amount: number;
   source?: "adjustment" | "deduction" | "fine";
+  category?: string;
+  remarks?: string | null;
 }
 
 export interface SalaryReportHomeVisit {
@@ -534,6 +536,8 @@ export interface SalaryReport {
   branch: string | null;
   period: { startDate: string; endDate: string };
   basicSalary: number;
+  incentiveTotal: number;
+  extraHolidayDeduction: number;
   homeVisits: SalaryReportHomeVisit[];
   homeVisitsTotal: number;
   otHours: number;
@@ -546,6 +550,16 @@ export interface SalaryReport {
   decrements: SalaryReportLine[];
   decrementsTotal: number;
   finalSalary: number;
+}
+
+/** Shared live net-pay calculation — used by salary report view and generate workflow. */
+export async function calculateNetPay(
+  storage: IStorage,
+  staffId: string,
+  startDate: string,
+  endDate: string,
+): Promise<SalaryReport | null> {
+  return buildSalaryReport(storage, staffId, startDate, endDate);
 }
 
 export interface SalaryHistoryEntry {
@@ -609,7 +623,7 @@ export async function buildSalaryReport(
     date: a.adjustmentDate,
     reason: a.reason,
     amount: Number(a.amount) || 0,
-    source: "adjustment",
+    source: "adjustment" as const,
   });
   const additions = adjustments.filter((a) => a.type === "addition").map(toLine);
   const decrements = adjustments.filter((a) => a.type === "decrement").map(toLine);
@@ -623,12 +637,14 @@ export async function buildSalaryReport(
       date: f.fineDate,
       reason: f.reason,
       amount: Number(f.amount) || 0,
-      source: "fine",
+      source: "fine" as const,
     }))
-    .concat(fineAdjustments);
+    .concat(fineAdjustments) as SalaryReportLine[];
   const deductionLines = staffDeductions.map((d) => ({
     id: d.id,
     date: d.deductionDate,
+    category: d.category,
+    remarks: d.remarks,
     reason: d.remarks ? `${d.category} - ${d.remarks}` : d.category,
     amount: Number(d.amount) || 0,
     source: "deduction" as const,
@@ -641,8 +657,10 @@ export async function buildSalaryReport(
   const decrementsTotal = sumLines(allDecrements);
 
   const basicSalary = Number(staff.basicSalary || 0);
-  const finalSalary =
-    basicSalary + homeVisitsTotal + otTotal + additionsTotal - finesTotal - decrementsTotal;
+  const incentiveTotal = Number(summary.incentiveTotal || 0);
+  const extraHolidayDeduction = Number(summary.extraHolidayDeduction || 0);
+  // Align with buildEnhancedPayrollSummary / generateSalaryRecord — live fines & decrements included.
+  const finalSalary = Number(summary.finalSalary ?? 0);
 
   return {
     staffId: staff.id,
@@ -650,11 +668,13 @@ export async function buildSalaryReport(
     branch: staff.branch,
     period: { startDate, endDate },
     basicSalary,
+    incentiveTotal,
+    extraHolidayDeduction,
     homeVisits,
     homeVisitsTotal,
+    otTotal: otTotal,
     otHours,
     otRatePerHour,
-    otTotal,
     additions,
     additionsTotal,
     fines,

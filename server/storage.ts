@@ -19,6 +19,7 @@ function parseJsonArrays<T extends Record<string, unknown>>(row: T, keys: (keyof
 import { db, schema } from "./db";
 import { isStrictlyBeforeNoon } from "./clinicTime";
 import { ensurePostgresColumn } from "./pgBootstrap";
+import { dedupeAttendanceByDate, normalizeAttendanceDate } from "./services/calculationEngine";
 
 /** Same check as server/db.ts — raw SQL below must run on the active driver. */
 const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
@@ -102,7 +103,7 @@ async function fetchBranchesRaw(opts: {
   name?: string;
   activeOnly?: boolean;
 }): Promise<Branch[]> {
-  let statement = `SELECT id, name, branch_name, code, address, is_active, created_at, updated_at FROM branches WHERE 1=1`;
+  let statement = `SELECT id, name, branch_name, code, address, is_active, verified_by_admin, created_at, updated_at FROM branches WHERE 1=1`;
   if (opts.activeOnly) statement += " AND is_active = true";
   if (opts.name) statement += ` AND name = '${opts.name.replace(/'/g, "''")}'`;
   if (opts.activeOnly) statement += " ORDER BY name";
@@ -113,11 +114,7 @@ async function fetchBranchesRaw(opts: {
     string,
     unknown
   >[];
-  return rows.map((row) => mapBranchRow({ ...row, verifiedByAdmin: false }));
-}
-
-function withDefaultVerifiedFlag(rows: Omit<Branch, "verifiedByAdmin">[]): Branch[] {
-  return rows.map((row) => ({ ...row, verifiedByAdmin: false }));
+  return rows.map((row) => mapBranchRow(row));
 }
 
 async function fetchBranches(opts: {
@@ -143,7 +140,7 @@ async function fetchBranches(opts: {
     if (opts.name) {
       query = query.limit(1) as typeof query;
     }
-    return withDefaultVerifiedFlag(await query);
+    return (await query) as Branch[];
   } catch (error: unknown) {
     console.warn("[storage] branch select fallback:", String((error as Error)?.message ?? error));
     return fetchBranchesRaw(opts);
@@ -193,6 +190,7 @@ function branchCoreSelect() {
     code: branches.code,
     address: branches.address,
     isActive: branches.isActive,
+    verifiedByAdmin: branches.verifiedByAdmin,
     createdAt: branches.createdAt,
     updatedAt: branches.updatedAt,
   };
@@ -563,6 +561,7 @@ export interface IStorage {
   getAutoFineAmount(): Promise<string>;
 
   getAllBranches(): Promise<Branch[]>;
+  getBranchById(id: string): Promise<Branch | undefined>;
   createBranch(data: InsertBranch): Promise<Branch>;
   updateBranch(id: string, data: UpdateBranch): Promise<Branch | undefined>;
   deleteBranch(id: string): Promise<boolean>;
@@ -900,7 +899,7 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(attendance.date))
       .limit(filters.limit)
       .offset(offset);
-    return { data, total };
+    return { data: dedupeAttendanceByDate(data), total };
   }
 
   async getSalariesPaginated(
@@ -1136,34 +1135,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllAttendance(): Promise<Attendance[]> {
-    return await db
+    const rows = await db
       .select()
       .from(attendance)
       .where(isNull(attendance.deletedAt))
       .orderBy(desc(attendance.date));
+    return dedupeAttendanceByDate(rows);
   }
 
   async getAttendanceByStaff(staffId: string): Promise<Attendance[]> {
-    return await db
+    const rows = await db
       .select()
       .from(attendance)
       .where(and(eq(attendance.staffId, staffId), isNull(attendance.deletedAt)))
       .orderBy(desc(attendance.date));
+    return dedupeAttendanceByDate(rows);
   }
 
   async getAttendanceByDateRange(startDate: string, endDate: string): Promise<Attendance[]> {
-    return await db
+    const rows = await db
       .select()
       .from(attendance)
       .where(and(gte(attendance.date, startDate), lte(attendance.date, endDate), isNull(attendance.deletedAt)))
       .orderBy(desc(attendance.date));
+    return dedupeAttendanceByDate(rows);
   }
 
   async getAttendanceByStaffAndMonth(staffId: string, month: string): Promise<Attendance[]> {
     // month format: YYYY-MM
     const startDate = `${month}-01`;
     const endDate = `${month}-31`;
-    return await db
+    const rows = await db
       .select()
       .from(attendance)
       .where(
@@ -1175,12 +1177,33 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(asc(attendance.date));
+    return dedupeAttendanceByDate(rows);
   }
 
   async createAttendance(data: InsertAttendance): Promise<Attendance> {
     const staffId = data.staffId;
-    const rawDate = data.date;
-    const normalizedDate = rawDate ? rawDate.split('T')[0] : new Date().toISOString().split('T')[0];
+    const normalizedDate = normalizeAttendanceDate(
+      data.date ? String(data.date) : new Date().toISOString()
+    );
+
+    const applyUpdate = async (existingId: string) => {
+      const updateData: Record<string, any> = { status: data.status, updatedAt: new Date() };
+      if (data.checkInTime) updateData.checkInTime = data.checkInTime;
+      if (data.checkOutTime) updateData.checkOutTime = data.checkOutTime;
+      if (data.staffName) updateData.staffName = data.staffName;
+      if (data.role) updateData.role = data.role;
+      if (data.overtimeHours !== undefined) updateData.overtimeHours = data.overtimeHours;
+      if (data.latitude !== undefined) updateData.latitude = data.latitude;
+      if (data.longitude !== undefined) updateData.longitude = data.longitude;
+      if (data.branch) updateData.branch = data.branch;
+
+      const updated = await db
+        .update(attendance)
+        .set(updateData)
+        .where(eq(attendance.id, existingId))
+        .returning();
+      return updated[0];
+    };
 
     if (staffId) {
       const existing = await db
@@ -1192,23 +1215,33 @@ export class DatabaseStorage implements IStorage {
         .limit(1);
 
       if (existing.length > 0) {
-        const updateData: Record<string, any> = { status: data.status, updatedAt: new Date() };
-        if (data.checkInTime) updateData.checkInTime = data.checkInTime;
-        if (data.staffName) updateData.staffName = data.staffName;
-        if (data.role) updateData.role = data.role;
-
-        const updated = await db
-          .update(attendance)
-          .set(updateData)
-          .where(eq(attendance.id, existing[0].id))
-          .returning();
-        return updated[0];
+        return applyUpdate(existing[0].id);
       }
     }
 
     const insertData = { ...data, date: normalizedDate } as any;
-    const result = await db.insert(attendance).values(insertData).returning();
-    return result[0];
+    try {
+      const result = await db.insert(attendance).values(insertData).returning();
+      return result[0];
+    } catch (error: unknown) {
+      const msg = String((error as { message?: string })?.message ?? "");
+      const code = String((error as { code?: string })?.code ?? "");
+      const isUnique =
+        code === "23505" || code === "SQLITE_CONSTRAINT_UNIQUE" || msg.includes("UNIQUE constraint failed");
+      if (staffId && isUnique) {
+        const existing = await db
+          .select()
+          .from(attendance)
+          .where(
+            and(eq(attendance.staffId, staffId), eq(attendance.date, normalizedDate), isNull(attendance.deletedAt))
+          )
+          .limit(1);
+        if (existing.length > 0) {
+          return applyUpdate(existing[0].id);
+        }
+      }
+      throw error;
+    }
   }
 
   async updateAttendance(id: string, data: UpdateAttendance): Promise<Attendance | undefined> {
@@ -2025,12 +2058,27 @@ export class DatabaseStorage implements IStorage {
     return fetchBranches({ activeOnly: true });
   }
 
+  async getBranchById(id: string): Promise<Branch | undefined> {
+    void ensureBranchVerificationColumn();
+    try {
+      const result = await db
+        .select(branchCoreSelect())
+        .from(branches)
+        .where(eq(branches.id, id))
+        .limit(1);
+      return result[0] ? mapBranchRow(result[0] as Record<string, unknown>) : undefined;
+    } catch {
+      const rows = await fetchBranchesRaw({});
+      return rows.find((b) => b.id === id);
+    }
+  }
+
   async createBranch(data: InsertBranch): Promise<Branch> {
     const result = await db
       .insert(branches)
       .values(data)
       .returning(branchCoreSelect());
-    return { ...result[0], verifiedByAdmin: false };
+    return { ...result[0] };
   }
 
   async updateBranch(id: string, data: UpdateBranch): Promise<Branch | undefined> {
@@ -2046,10 +2094,7 @@ export class DatabaseStorage implements IStorage {
         .where(eq(branches.id, id))
         .returning(branchCoreSelect());
       if (!result[0]) return undefined;
-      return {
-        ...result[0],
-        verifiedByAdmin: Boolean((data as { verifiedByAdmin?: boolean }).verifiedByAdmin ?? false),
-      };
+      return mapBranchRow(result[0] as Record<string, unknown>);
     } catch (error: unknown) {
       const msg = String((error as Error)?.message ?? "");
       if (!msg.includes("verified_by_admin")) throw error;
@@ -2062,7 +2107,7 @@ export class DatabaseStorage implements IStorage {
         .where(eq(branches.id, id))
         .returning(branchCoreSelect());
       if (!result[0]) return undefined;
-      return { ...result[0], verifiedByAdmin: false };
+      return mapBranchRow({ ...result[0], verifiedByAdmin: false } as Record<string, unknown>);
     }
   }
 

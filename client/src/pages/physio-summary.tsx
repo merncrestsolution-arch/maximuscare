@@ -34,7 +34,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canViewSalaryReports } from "@/lib/permissions";
+import { canViewSalaryReports, canManageFines, canViewAllStaffFines, canViewOwnFines } from "@/lib/permissions";
 
 function clampDate(dateStr: string, fromStr: string, toStr: string) {
   if (!dateStr) return false;
@@ -68,7 +68,12 @@ function PhysioSummaryContent() {
   const updateIncentiveSettings = useUpdateIncentiveSettings();
 
   const role = (user?.role || "").toLowerCase();
-  const isManagement = role === "admin" || role === "md";
+  const isManagement =
+    role === "admin" || role === "md" || role === "nexus md" || role === "manager" || role === "branch manager";
+  const canManageFinesRole = canManageFines(user?.role);
+  const canViewAllFines = canViewAllStaffFines(user?.role);
+  const canViewOwnFinesOnly = canViewOwnFines(user?.role);
+  const showFinesCard = canViewAllFines || canViewOwnFinesOnly;
 
   const endExclusive = useMemo(() => format(addDays(parseISO(rangeTo), 1), "yyyy-MM-dd"), [rangeTo]);
 
@@ -84,8 +89,12 @@ function PhysioSummaryContent() {
   const loadingIp = isManagement ? loadingIpAll : loadingIpMine;
 
   const { data: finesList = [], isLoading: loadingFines } = useStaffFines(
-    { startDate: rangeFrom, endDate: endExclusive },
-    !!rangeFrom && !!rangeTo
+    {
+      startDate: rangeFrom,
+      endDate: endExclusive,
+      ...(canViewOwnFinesOnly && user?.id ? { staffId: user.id } : {}),
+    },
+    showFinesCard && !!rangeFrom && !!rangeTo
   );
 
   const createStaffFine = useCreateStaffFine();
@@ -141,13 +150,16 @@ function PhysioSummaryContent() {
 
   const physios = useMemo(() => {
     if (!user) return [];
+    const summaryIds = new Set((payrollReport?.summaries ?? []).map((s: any) => s.staffId));
     const all = staff.filter((s: any) => {
       const r = (s.role || "").toLowerCase();
       return r === "physiotherapist" || r === "staff" || r === "manager";
     });
-    if (isManagement) return all;
+    if (isManagement) {
+      return summaryIds.size > 0 ? all.filter((s) => summaryIds.has(s.id)) : all;
+    }
     return all.filter((s) => s.id === user.id);
-  }, [isManagement, staff, user]);
+  }, [isManagement, staff, user, payrollReport]);
 
   const summaries = useMemo(() => {
     const serverSummaries = payrollReport?.summaries ?? [];
@@ -467,11 +479,12 @@ function PhysioSummaryContent() {
         </Card>
       )}
 
+        {showFinesCard ? (
         <Card className="bg-white border border-border/60 shadow-sm" data-testid="card-staff-fines">
             <CardContent className="p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-bold text-foreground">Staff fines</div>
-                {isManagement ? (
+                {canManageFinesRole ? (
                   <Button size="compact" onClick={openAddFine} data-testid="button-add-fine">
                     <Plus className="h-4 w-4" />
                     Add fine
@@ -483,18 +496,18 @@ function PhysioSummaryContent() {
                   <thead>
                     <tr className="bg-muted/40 text-left text-xs font-semibold text-muted-foreground">
                       <th className="p-2">Date</th>
-                      <th className="p-2">Staff</th>
+                      {canViewAllFines ? <th className="p-2">Staff</th> : null}
                       <th className="p-2 text-right">LKR</th>
                       <th className="p-2">Reason</th>
                       <th className="p-2">Source</th>
-                      {isManagement ? <th className="p-2">Created by</th> : null}
-                      {isManagement ? <th className="p-2 w-24"> </th> : null}
+                      {canViewAllFines ? <th className="p-2">Created by</th> : null}
+                      {canManageFinesRole ? <th className="p-2 w-24"> </th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {(finesList || []).length === 0 ? (
                       <tr>
-                        <td colSpan={isManagement ? 7 : 5} className="p-4 text-center text-muted-foreground">
+                        <td colSpan={canViewAllFines ? (canManageFinesRole ? 7 : 6) : 4} className="p-4 text-center text-muted-foreground">
                           No fines in this date range.
                         </td>
                       </tr>
@@ -502,18 +515,18 @@ function PhysioSummaryContent() {
                       (finesList || []).map((f: any) => (
                         <tr key={f.id} className="border-t border-border/50">
                           <td className="p-2 whitespace-nowrap">{f.fineDate}</td>
-                          <td className="p-2">{f.staffName}</td>
+                          {canViewAllFines ? <td className="p-2">{f.staffName}</td> : null}
                           <td className="p-2 text-right tabular-nums">{Number(f.amount).toLocaleString()}</td>
                           <td className="p-2 max-w-[200px] truncate" title={f.reason}>
                             {f.reason}
                           </td>
                           <td className="p-2 text-xs text-muted-foreground">{f.source === "auto_no_session" ? "Auto" : "Manual"}</td>
-                          {isManagement ? (
+                          {canViewAllFines ? (
                             <td className="p-2 text-xs text-muted-foreground max-w-[120px] truncate" title={f.createdByName || ""}>
                               {f.createdByName || "—"}
                             </td>
                           ) : null}
-                          {isManagement ? (
+                          {canManageFinesRole ? (
                             <td className="p-2">
                               <div className="flex gap-1">
                                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditFine(f)} data-testid={`button-edit-fine-${f.id}`}>
@@ -533,7 +546,9 @@ function PhysioSummaryContent() {
               </div>
             </CardContent>
           </Card>
+        ) : null}
 
+        {canManageFinesRole ? (
         <Dialog open={fineDialogOpen} onOpenChange={setFineDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
@@ -578,6 +593,7 @@ function PhysioSummaryContent() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        ) : null}
 
         <div className="space-y-3" data-testid="list-physio-summaries">
         {summaries.length === 0 ? (

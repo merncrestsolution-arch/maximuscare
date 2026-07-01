@@ -28,7 +28,7 @@ function AttendanceReportContent() {
   const summary = data?.summary;
 
   const chartData = summary
-    ? [{ name: "Attendance", present: summary.present, absent: summary.absent, leave: summary.leave, holiday: summary.holiday }]
+    ? [{ name: "Attendance", present: summary.present, absent: summary.absent }]
     : [];
 
   return (
@@ -61,11 +61,9 @@ function AttendanceReportContent() {
     >
       {data && summary && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
             <ReportSummaryCard label="Present" value={String(summary.present)} />
             <ReportSummaryCard label="Absent" value={String(summary.absent)} />
-            <ReportSummaryCard label="Leave" value={String(summary.leave)} />
-            <ReportSummaryCard label="Holiday" value={String(summary.holiday)} />
             <ReportSummaryCard label="Attendance %" value={`${data.attendancePercent}%`} />
           </div>
           <div className="h-56 mb-6">
@@ -78,8 +76,6 @@ function AttendanceReportContent() {
                 <Legend />
                 <Bar dataKey="present" fill="#16A34A" name="Present" />
                 <Bar dataKey="absent" fill="#DC2626" name="Absent" />
-                <Bar dataKey="leave" fill="#1873A8" name="Leave" />
-                <Bar dataKey="holiday" fill="#EE862D" name="Holiday" />
               </BarChart>
             </ResponsiveContainer>
           </div>

@@ -75,6 +75,34 @@ describe("home visit engine", () => {
   });
 });
 
+describe("attendance dedupe", () => {
+  it("keeps Present over Absent for the same staff and day", async () => {
+    const { dedupeAttendanceByDate } = await import("./calculationEngine");
+    const staffId = "staff-1";
+    const date = "2026-06-01";
+    const rows = [
+      { id: "a", staffId, date, status: "Absent", updatedAt: new Date("2026-06-02") },
+      { id: "b", staffId, date, status: "Present", updatedAt: new Date("2026-06-01") },
+    ] as any[];
+    const deduped = dedupeAttendanceByDate(rows);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].status).toBe("Present");
+  });
+
+  it("normalizes ISO date strings to YYYY-MM-DD keys", async () => {
+    const { dedupeAttendanceByDate } = await import("./calculationEngine");
+    const staffId = "staff-1";
+    const rows = [
+      { id: "a", staffId, date: "2026-06-01T00:00:00.000Z", status: "Absent" },
+      { id: "b", staffId, date: "2026-06-01", status: "Present" },
+    ] as any[];
+    const deduped = dedupeAttendanceByDate(rows);
+    expect(deduped).toHaveLength(1);
+    expect(deduped[0].status).toBe("Present");
+    expect(deduped[0].date).toBe("2026-06-01");
+  });
+});
+
 describe("OT and salary engine", () => {
   it("computes OT at Rs.250/hour", () => {
     expect(computeOtAmount(10, DEFAULT_RATES.otPerHour)).toBe(2500);

@@ -55,3 +55,9 @@ export async function downloadPatientIdCard(input: PatientIdCardDownloadInput): 
   const fallback = `${(input.patientCode || input.recordId).replace(/[^a-z0-9._-]+/gi, "-")}-card.pdf`;
   await downloadAuthenticatedFile(endpoint, fallback);
 }
+
+/** Download many ID cards as a single ZIP (server-side generation). */
+export async function downloadPatientIdCardsZip(patientIds: string[]): Promise<void> {
+  const { patientsApiExtended } = await import("@/lib/api");
+  await patientsApiExtended.bulkIdCardsZip(patientIds);
+}

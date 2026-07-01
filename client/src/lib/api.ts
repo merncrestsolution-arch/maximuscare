@@ -262,6 +262,64 @@ export async function downloadAuthenticatedFile(endpoint: string, fallbackFilena
   }, 100);
 }
 
+/** POST + download blob (e.g. bulk ID card ZIP). */
+export async function downloadAuthenticatedPost(
+  endpoint: string,
+  body: unknown,
+  fallbackFilename: string = "download.zip",
+): Promise<void> {
+  const token = getAccessToken();
+  const response = await fetch(apiUrl(endpoint), {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    let errorMsg = "Failed to download file";
+    try {
+      const errorData = await response.json();
+      if (errorData.message) errorMsg = errorData.message;
+    } catch {
+      // ignore
+    }
+    throw new Error(errorMsg);
+  }
+
+  const disposition = response.headers.get("Content-Disposition");
+  let filename = fallbackFilename;
+  if (disposition && disposition.indexOf("attachment") !== -1) {
+    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+    const matches = filenameRegex.exec(disposition);
+    if (matches != null && matches[1]) {
+      filename = matches[1].replace(/['"]/g, "");
+    }
+  }
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.style.display = "none";
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  }, 100);
+}
+
+export const adminApi = {
+  dataHealth: () => apiRequest<any>("/admin/data-health"),
+  runDataHealthBackfill: (data?: { batchSize?: number; limit?: number }) =>
+    apiRequest<any>("/admin/data-health/backfill", { method: "POST", body: JSON.stringify(data ?? {}) }),
+};
+
 // Auth API
 export const authApi = {
   login: async (email: string, password: string) => {
@@ -793,6 +851,8 @@ export const auditApi = {
 
 export const patientsApiExtended = {
   export: () => apiRequest<any>("/patients/export").then(unwrapApiData),
+  bulkIdCardsZip: (patientIds: string[]) =>
+    downloadAuthenticatedPost("/patients/id-cards/bulk-zip", { patientIds }, "patient-id-cards.zip"),
   dashboard: () => apiRequest<any>("/patients/dashboard").then(unwrapApiData),
   stats: (patientId: string) => apiRequest<any>(`/patients/${patientId}/stats`).then(unwrapApiData),
   documents: {

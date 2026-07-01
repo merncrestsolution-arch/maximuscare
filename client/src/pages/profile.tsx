@@ -6,6 +6,7 @@ import { LogOut, CalendarCheck, Stethoscope, Pencil, Loader2 } from "lucide-reac
 import { format } from "date-fns";
 import { Link } from "wouter";
 import { isVisitForStaff } from "@/lib/visitAccess";
+import { AppAboutCard } from "@/components/app-about-card";
 
 export default function ProfilePage() {
   const { user, logout } = useAuth();
@@ -182,6 +183,8 @@ export default function ProfilePage() {
           )}
         </CardContent>
       </Card>
+
+      <AppAboutCard />
 
       <div className="pt-4 pb-8">
         <Button

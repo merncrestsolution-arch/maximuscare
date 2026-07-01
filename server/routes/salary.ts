@@ -23,8 +23,7 @@ import {
   salaryPeriodForDate,
 } from "../services/salaryService";
 import { loadPayrollSettings } from "../services/payrollService";
-import { loadBranchContext } from "../middleware/branchContext";
-import { normalizeBranchName } from "@shared/branches";
+import { resolveBranchScopedStaffIds, isStaffInBranchScope } from "../services/staffService";
 
 const {
   insertStaffDeductionSchema,
@@ -42,55 +41,6 @@ function param(req: Request, name: string): string {
 async function editorName(staffId: string) {
   const s = await storage.getStaff(staffId);
   return s?.name ?? "";
-}
-
-/**
- * The set of staff IDs belonging to the currently selected branch (honouring
- * multi-branch / "Both" assignments via filterStaffByBranchAccess). Salary &
- * payroll listings/dashboards/bulk generation must scope to this so a branch only
- * ever sees its own staff. Returns null when no specific branch is selected
- * (e.g. a management overview context), meaning "do not branch-scope".
- */
-async function branchScopedStaffIds(req: Request): Promise<Set<string> | null> {
-  const user = (req as any).user;
-  if (!user) return new Set();
-
-  const ctx = await loadBranchContext(req as any);
-  const isManagement = isManagementRole(user.role);
-  const isLead = isOperationalLead(user.role);
-
-  const { branchStaffIdSet } = await import("../services/staffService");
-  const selectedIds = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
-
-  if (!ctx?.selectedBranchName && user.organizationId) {
-    const { filterStaffByOrganization } = await import("../services/staffService");
-    const allStaff = await storage.getAllStaff();
-    const scoped = await filterStaffByOrganization(storage, allStaff, user.organizationId);
-    return new Set(scoped.map((s) => s.id));
-  }
-
-  if (isLead) {
-    // Scoped to allowed branches
-    const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
-    const allStaff = await storage.getAllStaff();
-    const filteredStaff = allStaff.filter((s) => {
-      const staffBranch = normalizeBranchName(s.branch).toLowerCase();
-      if (staffBranch === "both") {
-        return allowedNames.has("dehiwala") || allowedNames.has("neuro rehabilitation");
-      }
-      return allowedNames.has(staffBranch);
-    });
-    const allowedIds = filteredStaff.map((s) => s.id);
-
-    if (selectedIds !== null) {
-      return new Set(allowedIds.filter((id) => selectedIds.has(id)));
-    } else {
-      return new Set(allowedIds);
-    }
-  }
-
-  // Full Admin/MD
-  return selectedIds;
 }
 
 const SALARY_REPORT_ROLES = [
@@ -117,19 +67,8 @@ async function checkSalaryReportAccess(
   if ((role === "Staff" || role === "Physiotherapist") && targetId !== user.staffId) {
     return { status: 403, message: "Access denied" };
   }
-  if (role === "Manager" || role === "Branch Manager" || role === "Nexus MD") {
-    const target = await storage.getStaff(targetId);
-    if (!target) return { status: 404, message: "Staff not found" };
-    const ctx = await loadBranchContext(req as any);
-    const allowedNames = new Set(
-      (ctx?.allowedBranches ?? []).map((b: any) =>
-        normalizeBranchName(b.branchName ?? b.name).toLowerCase()
-      )
-    );
-    const targetBranch = normalizeBranchName(target.branch ?? "").toLowerCase();
-    if (targetBranch && !allowedNames.has(targetBranch)) {
-      return { status: 403, message: "Access denied" };
-    }
+  if (!(await isStaffInBranchScope(storage, req, targetId))) {
+    return { status: 403, message: "Access denied" };
   }
   return null;
 }
@@ -152,6 +91,9 @@ async function createSalaryAdjustment(
   }
   const staff = await storage.getStaff(targetId);
   if (!staff) return errorResponse(res, "Staff not found", 404);
+  if (!(await isStaffInBranchScope(storage, req as Request, targetId))) {
+    return errorResponse(res, "Access denied", 403);
+  }
 
   const editor = await editorName(user.staffId);
   const { periodStart, periodEnd } = salaryPeriodForDate(date);
@@ -223,6 +165,9 @@ async function updateSalaryDecrement(req: Request, res: Response) {
   if (!existing || existing.staffId !== targetId || existing.type !== "decrement") {
     return errorResponse(res, "Decrement not found", 404);
   }
+  if (!(await isStaffInBranchScope(storage, req as Request, targetId))) {
+    return errorResponse(res, "Access denied", 403);
+  }
 
   const { date, reason, amount } = req.body ?? {};
   if (date == null && reason == null && amount == null) {
@@ -273,6 +218,9 @@ export function registerSalaryRoutes(app: Express) {
       if (!staffId || !periodStart || !periodEnd) {
         return errorResponse(res, "staffId, periodStart, periodEnd required", 400);
       }
+      if (!(await isStaffInBranchScope(storage, req as Request, staffId))) {
+        return errorResponse(res, "Access denied", 403);
+      }
       const preview = await previewSalary(storage, staffId, periodStart, periodEnd);
       if (!preview) return errorResponse(res, "Staff not found", 404);
       return successResponse(res, preview);
@@ -318,18 +266,8 @@ export function registerSalaryRoutes(app: Express) {
       const preview = await previewSalary(storage, targetId, startDate, endDate);
       if (!preview) return errorResponse(res, "Staff not found", 404);
 
-      // Branch leads are scoped to staff within their allowed branches.
-      if (role === "Manager" || role === "Branch Manager") {
-        const ctx = await loadBranchContext(req as any);
-        const allowedNames = new Set(
-          (ctx?.allowedBranches ?? []).map((b: any) =>
-            normalizeBranchName(b.branchName ?? b.name).toLowerCase()
-          )
-        );
-        const targetBranch = normalizeBranchName(preview.staff.branch ?? "").toLowerCase();
-        if (targetBranch && !allowedNames.has(targetBranch)) {
-          return errorResponse(res, "Access denied", 403);
-        }
+      if (!(await isStaffInBranchScope(storage, req as Request, targetId))) {
+        return errorResponse(res, "Access denied", 403);
       }
 
       const settings = await loadPayrollSettings(storage);
@@ -462,7 +400,7 @@ export function registerSalaryRoutes(app: Express) {
       const editor = await editorName(user.staffId);
       // Scope bulk generation to the selected branch so "all staff" never spills
       // across branches.
-      const allowedStaffIds = (await branchScopedStaffIds(req as any)) ?? undefined;
+      const allowedStaffIds = (await resolveBranchScopedStaffIds(storage, req as any)) ?? undefined;
 
       if (all) {
         const { enqueueJob } = await import("../jobs/jobQueue");
@@ -515,6 +453,9 @@ export function registerSalaryRoutes(app: Express) {
       }
 
       if (!staffId) return errorResponse(res, "staffId, staffIds, or all required", 400);
+      if (!(await isStaffInBranchScope(storage, req as Request, staffId))) {
+        return errorResponse(res, "Access denied", 403);
+      }
       const record = await generateSalaryRecord(
         storage,
         staffId,
@@ -566,7 +507,7 @@ export function registerSalaryRoutes(app: Express) {
       }
       // Branch-scope management/lead views to the selected branch's staff.
       const allowedStaffIds = (isManagement || isLead)
-        ? await branchScopedStaffIds(req as any)
+        ? await resolveBranchScopedStaffIds(storage, req as any)
         : null;
       const scopeRows = (rows: any[]) =>
         allowedStaffIds ? rows.filter((r) => allowedStaffIds.has(r.staffId)) : rows;
@@ -599,7 +540,7 @@ export function registerSalaryRoutes(app: Express) {
   // ── Dashboard & export (before :id) ──
   app.get("/api/salary/dashboard", requireAuth, requireSalaryManage, async (req, res) => {
     try {
-      const allowedStaffIds = (await branchScopedStaffIds(req as any)) ?? undefined;
+      const allowedStaffIds = (await resolveBranchScopedStaffIds(storage, req as any)) ?? undefined;
       const data = await getSalaryDashboardData(storage, allowedStaffIds);
       return successResponse(res, data);
     } catch (error: any) {
@@ -616,7 +557,7 @@ export function registerSalaryRoutes(app: Express) {
         staffId: req.query.staffId as string | undefined,
         status: req.query.status as string | undefined,
       });
-      const allowedStaffIds = await branchScopedStaffIds(req as any);
+      const allowedStaffIds = await resolveBranchScopedStaffIds(storage, req as any);
       const scoped = allowedStaffIds
         ? rows.filter((r: any) => allowedStaffIds.has(r.employeeId))
         : rows;
@@ -636,7 +577,7 @@ export function registerSalaryRoutes(app: Express) {
         const rows = await storage.getStaffDeductionsByStaffAndRange(staffId, startDate, endDate);
         return successResponse(res, rows);
       }
-      const allowedStaffIds = await branchScopedStaffIds(req as any);
+      const allowedStaffIds = await resolveBranchScopedStaffIds(storage, req as any);
       const rows = await storage.getAllStaffDeductions();
       return successResponse(res, allowedStaffIds ? rows.filter((r) => allowedStaffIds.has(r.staffId)) : rows);
     } catch (error: any) {
@@ -721,7 +662,7 @@ export function registerSalaryRoutes(app: Express) {
         const rows = await storage.getStaffOtEntriesByStaffAndRange(staffId, startDate, endDate);
         return successResponse(res, rows);
       }
-      const allowedStaffIds = await branchScopedStaffIds(req as any);
+      const allowedStaffIds = await resolveBranchScopedStaffIds(storage, req as any);
       const rows = await storage.getAllStaffOtEntries();
       return successResponse(res, allowedStaffIds ? rows.filter((r) => allowedStaffIds.has(r.staffId)) : rows);
     } catch (error: any) {
@@ -801,7 +742,7 @@ export function registerSalaryRoutes(app: Express) {
       const user = (req as any).user;
       const record = await storage.getSalary(param(req, "id"));
       if (!record) return errorResponse(res, "Not found", 404);
-      if (!isManagementRole(user.role) && record.staffId !== user.staffId) {
+      if (record.staffId !== user.staffId && !(await isStaffInBranchScope(storage, req as Request, record.staffId))) {
         return errorResponse(res, "Forbidden", 403);
       }
       return successResponse(res, record);
@@ -810,9 +751,20 @@ export function registerSalaryRoutes(app: Express) {
     }
   });
 
+  async function assertSalaryRecordBranchAccess(req: Request, salaryId: string) {
+    const record = await storage.getSalary(salaryId);
+    if (!record) return { status: 404 as const, message: "Not found" };
+    if (!(await isStaffInBranchScope(storage, req, record.staffId))) {
+      return { status: 403 as const, message: "Forbidden" };
+    }
+    return null;
+  }
+
   // ── Approval workflow ──
   app.post("/api/salary/:id/approve", requireAuth, requireSalaryApprove, async (req, res) => {
     try {
+      const denied = await assertSalaryRecordBranchAccess(req as Request, param(req, "id"));
+      if (denied) return errorResponse(res, denied.message, denied.status);
       const user = (req as any).user;
       const editor = await editorName(user.staffId);
       const before = await storage.getSalary(param(req, "id"));
@@ -834,6 +786,8 @@ export function registerSalaryRoutes(app: Express) {
 
   app.post("/api/salary/:id/reject", requireAuth, requireSalaryManage, async (req, res) => {
     try {
+      const denied = await assertSalaryRecordBranchAccess(req as Request, param(req, "id"));
+      if (denied) return errorResponse(res, denied.message, denied.status);
       const user = (req as any).user;
       const { reason } = req.body;
       if (!reason) return errorResponse(res, "reason required", 400);
@@ -856,6 +810,8 @@ export function registerSalaryRoutes(app: Express) {
 
   app.post("/api/salary/:id/return", requireAuth, requireSalaryManage, async (req, res) => {
     try {
+      const denied = await assertSalaryRecordBranchAccess(req as Request, param(req, "id"));
+      if (denied) return errorResponse(res, denied.message, denied.status);
       const user = (req as any).user;
       const { reason } = req.body;
       const before = await storage.getSalary(param(req, "id"));
@@ -877,6 +833,8 @@ export function registerSalaryRoutes(app: Express) {
 
   app.post("/api/salary/:id/pay", requireAuth, requireSalaryManage, async (req, res) => {
     try {
+      const denied = await assertSalaryRecordBranchAccess(req as Request, param(req, "id"));
+      if (denied) return errorResponse(res, denied.message, denied.status);
       const user = (req as any).user;
       const { paymentMethod, paymentReference, paymentRemarks } = req.body;
       if (!paymentMethod) return errorResponse(res, "paymentMethod required", 400);

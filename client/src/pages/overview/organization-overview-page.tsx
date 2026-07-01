@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { format, startOfMonth, endOfMonth } from "date-fns";
-import { Building2, Loader2, Sparkles, Receipt } from "lucide-react";
+import { Building2, Loader2, Sparkles, Receipt, CheckCircle2, Circle } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { branchesApi, reportsApiExtended } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -335,17 +335,24 @@ export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
                             {verified ? "Verified by Admin" : "Awaiting verification"}
                           </div>
                         </div>
-                        <Checkbox
-                          checked={verified}
-                          disabled={!isAdmin || isUpdating}
-                          onCheckedChange={(value) => {
-                            if (!isAdmin) return;
-                            const checked = value === true;
-                            setUpdatingBranchId(branch.id);
-                            updateBranch.mutate({ id: branch.id, verifiedByAdmin: checked });
-                          }}
-                          aria-label={`Mark ${displayName} as verified`}
-                        />
+                        <div className="flex items-center gap-2 shrink-0">
+                          {verified ? (
+                            <CheckCircle2 className="h-5 w-5 text-green-600" aria-label="Verified by Admin" />
+                          ) : (
+                            <Circle className="h-5 w-5 text-muted-foreground/50" aria-label="Awaiting verification" />
+                          )}
+                          <Checkbox
+                            checked={verified}
+                            disabled={!isAdmin || isUpdating}
+                            onCheckedChange={(value) => {
+                              if (!isAdmin) return;
+                              const checked = value === true;
+                              setUpdatingBranchId(branch.id);
+                              updateBranch.mutate({ id: branch.id, verifiedByAdmin: checked });
+                            }}
+                            aria-label={`Mark ${displayName} as verified`}
+                          />
+                        </div>
                       </div>
                     );
                   })}

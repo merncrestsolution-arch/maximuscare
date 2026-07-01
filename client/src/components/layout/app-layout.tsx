@@ -14,6 +14,7 @@ import Header from "./header";
 import BottomNav from "./bottom-nav";
 import { AppSidebarNav } from "./app-sidebar-nav";
 import { useNotificationSocket } from "@/hooks/use-notification-socket";
+import { NotificationPermissionPrompt } from "@/components/notifications/notification-permission-prompt";
 import { PageBackButton } from "./page-back-button";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -75,6 +76,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             className="mx-auto w-full max-w-[1600px] min-w-0"
           >
             {showBack && <PageBackButton />}
+            <NotificationPermissionPrompt />
             {children}
           </motion.div>
         </div>

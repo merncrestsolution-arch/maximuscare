@@ -168,7 +168,7 @@ export async function ensureSqliteSchemaCompatibility() {
 
   try {
     await db.run(sql.raw(
-      "CREATE UNIQUE INDEX IF NOT EXISTS attendance_staff_date_unique ON attendance(staff_id, date)"
+      "CREATE UNIQUE INDEX IF NOT EXISTS attendance_staff_date_active_unique ON attendance(staff_id, date) WHERE deleted_at IS NULL"
     ));
     await db.run(sql.raw("CREATE INDEX IF NOT EXISTS idx_visits_visit_date ON visits(visit_date)"));
     await db.run(sql.raw("CREATE INDEX IF NOT EXISTS idx_visits_patient_id ON visits(patient_id)"));
@@ -225,6 +225,10 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart26BranchVerification();
   const { runPart27PatientDataVersion } = await import("./migrations/part27PatientDataVersion");
   await runPart27PatientDataVersion();
+  const { runPart28InpatientStatusReconcile } = await import("./migrations/part28InpatientStatusReconcile");
+  await runPart28InpatientStatusReconcile();
+  const { runPart29AttendanceDedup } = await import("./migrations/part29AttendanceDedup");
+  await runPart29AttendanceDedup();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -285,5 +289,17 @@ export async function ensurePostgresSchemaCompatibility() {
     await runPart27PatientDataVersion();
   } catch (error) {
     console.error("[db] Part 27 patient data migration failed (non-fatal):", error);
+  }
+  try {
+    const { runPart28InpatientStatusReconcile } = await import("./migrations/part28InpatientStatusReconcile");
+    await runPart28InpatientStatusReconcile();
+  } catch (error) {
+    console.error("[db] Part 28 inpatient status reconcile failed (non-fatal):", error);
+  }
+  try {
+    const { runPart29AttendanceDedup } = await import("./migrations/part29AttendanceDedup");
+    await runPart29AttendanceDedup();
+  } catch (error) {
+    console.error("[db] Part 29 attendance dedup failed (non-fatal):", error);
   }
 }

@@ -1,10 +1,15 @@
-import crypto from "crypto";
 import type { Patient, InPatientAdmission } from "@shared/schema";
 import type { OrganizationId } from "@shared/branchAccess";
 import type { IStorage } from "../storage";
-import { generatePatientCardPdf, generateCardId } from "./patientIdCardService";
+import {
+  generatePatientCardPdf,
+  deterministicCardId,
+  computePatientCardContentHash,
+} from "./patientIdCardService";
 import { getDocumentReadStream, storeGeneratedFile, deleteStoredDocument } from "./fileStorageService";
 import { verifyPatientQrToken } from "./qrTokenService";
+
+const TIMING_ENABLED = process.env.ID_CARD_TIMING === "1";
 
 function isValidToken(token: string, patientId: string, organizationId: OrganizationId): boolean {
   const verified = verifyPatientQrToken(token);
@@ -15,12 +20,8 @@ function isValidToken(token: string, patientId: string, organizationId: Organiza
   );
 }
 
-function tokenHash(token: string): string {
-  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
-}
-
-function cardStorageKey(kind: "patient" | "inpatient", id: string, token: string): string {
-  return `id-cards/${kind}/${id}/${tokenHash(token)}.pdf`;
+function cardStorageKey(kind: "patient" | "inpatient", id: string, contentHash: string): string {
+  return `id-cards/${kind}/${id}/${contentHash}.pdf`;
 }
 
 async function readCachedPdf(storageKey: string): Promise<Buffer | null> {
@@ -30,6 +31,94 @@ async function readCachedPdf(storageKey: string): Promise<Buffer | null> {
   } catch {
     return null;
   }
+}
+
+export type PatientCardPdfInput = {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  patientCode: string;
+  qrToken: string;
+};
+
+export function buildPatientCardPdfInput(
+  patient: Patient,
+  qrToken: string,
+): PatientCardPdfInput {
+  const code = patient.patientCode ?? patient.id;
+  return {
+    id: code,
+    name: patient.name ?? "—",
+    phone: patient.phone ?? "",
+    address: patient.address ?? "",
+    patientCode: code,
+    qrToken,
+  };
+}
+
+export function patientCardContentHashFromInput(input: PatientCardPdfInput): string {
+  const cardId = deterministicCardId(input.patientCode);
+  return computePatientCardContentHash({
+    name: input.name,
+    phone: input.phone,
+    address: input.address,
+    id: input.id,
+    cardId,
+    qrToken: input.qrToken,
+  });
+}
+
+const ID_CARD_PATIENT_FIELDS = ["name", "phone", "address", "patientCode", "branch"] as const;
+
+/** True when a patient update should invalidate the cached ID card PDF. */
+export function patientIdCardFieldsChanged(before: Patient, after: Patient): boolean {
+  return ID_CARD_PATIENT_FIELDS.some((key) => {
+    const a = String((before as any)[key] ?? "").trim();
+    const b = String((after as any)[key] ?? "").trim();
+    return a !== b;
+  });
+}
+
+/** Remove cached PDF file and clear DB keys for a patient. */
+export async function invalidatePatientIdCard(storage: IStorage, patient: Patient): Promise<void> {
+  const cachedKey = String(patient.idCardPdfKey ?? "").trim();
+  if (cachedKey) {
+    try {
+      await deleteStoredDocument(cachedKey);
+    } catch {
+      // ignore missing file
+    }
+  }
+  await storage.updatePatient(patient.id, {
+    idCardPdfKey: null,
+    idCardQrToken: null,
+    idCardGeneratedAt: null,
+  } as any);
+}
+
+async function createAndStorePdf(
+  kind: "patient" | "inpatient",
+  recordId: string,
+  input: PatientCardPdfInput,
+  contentHash: string,
+): Promise<{ pdf: Buffer; storageKey: string }> {
+  const cardId = deterministicCardId(input.patientCode);
+  const t0 = Date.now();
+  const pdf = await generatePatientCardPdf({
+    id: input.id,
+    name: input.name,
+    phone: input.phone,
+    address: input.address,
+    cardId,
+    qrToken: input.qrToken,
+  });
+  if (TIMING_ENABLED) {
+    console.log(`[id-card] generate pdf (${kind}/${recordId}): ${Date.now() - t0}ms`);
+  }
+  const storageKey = cardStorageKey(kind, recordId, contentHash);
+  await storeGeneratedFile(storageKey, pdf, "application/pdf");
+  return { pdf, storageKey };
 }
 
 export async function getOrCreatePatientCardPdf(options: {
@@ -47,24 +136,23 @@ export async function getOrCreatePatientCardPdf(options: {
       ? provided
       : qrToken;
 
+  const input = buildPatientCardPdfInput(patient, desiredToken);
+  const contentHash = patientCardContentHashFromInput(input);
+  const expectedKey = cardStorageKey("patient", patient.id, contentHash);
   const cachedKey = String((patient as any).idCardPdfKey ?? "");
-  const cachedToken = String((patient as any).idCardQrToken ?? "");
-  if (cachedKey && cachedToken && cachedToken === desiredToken) {
-    const cached = await readCachedPdf(cachedKey);
-    if (cached) return cached;
+
+  if (cachedKey === expectedKey) {
+    const t0 = Date.now();
+    const cached = await readCachedPdf(expectedKey);
+    if (cached) {
+      if (TIMING_ENABLED) {
+        console.log(`[id-card] cache hit (patient/${patient.id}): ${Date.now() - t0}ms`);
+      }
+      return cached;
+    }
   }
 
-  const pdf = await generatePatientCardPdf({
-    id: patient.patientCode ?? patient.id,
-    name: patient.name ?? "—",
-    phone: patient.phone ?? "",
-    address: patient.address ?? "",
-    cardId: generateCardId(patient.patientCode ?? patient.id),
-    qrToken: desiredToken,
-  });
-
-  const storageKey = cardStorageKey("patient", patient.id, desiredToken);
-  await storeGeneratedFile(storageKey, pdf, "application/pdf");
+  const { pdf, storageKey } = await createAndStorePdf("patient", patient.id, input, contentHash);
 
   if (cachedKey && cachedKey !== storageKey) {
     await deleteStoredDocument(cachedKey);
@@ -94,25 +182,25 @@ export async function getOrCreateAdmissionCardPdf(options: {
       ? provided
       : qrToken;
 
-  const cachedKey = String((admission as any).idCardPdfKey ?? "");
-  const cachedToken = String((admission as any).idCardQrToken ?? "");
-  if (cachedKey && cachedToken && cachedToken === desiredToken) {
-    const cached = await readCachedPdf(cachedKey);
-    if (cached) return cached;
-  }
-
   const patientCode = admission.patientCode ?? admission.patientIdNo ?? admission.id;
-  const pdf = await generatePatientCardPdf({
+  const input: PatientCardPdfInput = {
     id: patientCode,
     name: admission.patientName ?? "—",
     phone: admission.phone ?? "",
     address: admission.address ?? "",
-    cardId: generateCardId(patientCode),
+    patientCode,
     qrToken: desiredToken,
-  });
+  };
+  const contentHash = patientCardContentHashFromInput(input);
+  const expectedKey = cardStorageKey("inpatient", admission.id, contentHash);
+  const cachedKey = String((admission as any).idCardPdfKey ?? "");
 
-  const storageKey = cardStorageKey("inpatient", admission.id, desiredToken);
-  await storeGeneratedFile(storageKey, pdf, "application/pdf");
+  if (cachedKey === expectedKey) {
+    const cached = await readCachedPdf(expectedKey);
+    if (cached) return cached;
+  }
+
+  const { pdf, storageKey } = await createAndStorePdf("inpatient", admission.id, input, contentHash);
 
   if (cachedKey && cachedKey !== storageKey) {
     await deleteStoredDocument(cachedKey);
@@ -125,4 +213,33 @@ export async function getOrCreateAdmissionCardPdf(options: {
   } as any);
 
   return pdf;
+}
+
+/** Generate PDFs for many patients with controlled concurrency (default 5). */
+export async function bulkPatientCardPdfs(
+  storage: IStorage,
+  patients: Patient[],
+  organizationIdFor: (p: Patient) => OrganizationId,
+  qrTokenFor: (p: Patient) => string,
+  concurrency = 5,
+): Promise<Array<{ patientId: string; filename: string; pdf: Buffer }>> {
+  const results: Array<{ patientId: string; filename: string; pdf: Buffer }> = [];
+  for (let i = 0; i < patients.length; i += concurrency) {
+    const batch = patients.slice(i, i + concurrency);
+    const batchResults = await Promise.all(
+      batch.map(async (patient) => {
+        const qrToken = qrTokenFor(patient);
+        const pdf = await getOrCreatePatientCardPdf({
+          storage,
+          patient,
+          organizationId: organizationIdFor(patient),
+          qrToken,
+        });
+        const code = (patient.patientCode ?? patient.id).replace(/[^a-z0-9._-]+/gi, "-");
+        return { patientId: patient.id, filename: `${code}-card.pdf`, pdf };
+      }),
+    );
+    results.push(...batchResults);
+  }
+  return results;
 }

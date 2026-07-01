@@ -10,6 +10,7 @@ import {
   computeExpenseBreakdown,
   computeRevenueBreakdown,
   summarizeAttendance,
+  dedupeAttendanceByDate,
   isPaidPaymentStatus,
   inDateRange,
   getVisitCollectedRevenue,
@@ -390,16 +391,16 @@ export async function computeAttendanceReport(
     };
   });
 
-  const totalDays = summary.present + summary.absent + summary.leave + summary.holiday;
-  const attendancePercent = totalDays > 0 ? Math.round((summary.present / totalDays) * 100) : 0;
+  const markedDays = summary.present + summary.absent;
+  const attendancePercent = markedDays > 0 ? Math.round((summary.present / markedDays) * 100) : 0;
 
   return {
     rangeFrom,
     rangeTo,
     summary: { ...summary, extraHolidays },
     attendancePercent,
-    byStaff: byStaff.filter((s) => s.present + s.absent + s.leave + s.holiday > 0),
-    records: attendance,
+    byStaff: byStaff.filter((s) => s.present + s.absent > 0),
+    records: dedupeAttendanceByDate(attendance),
   };
 }
 

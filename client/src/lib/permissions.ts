@@ -176,6 +176,18 @@ export function canManageFines(role: string | undefined): boolean {
   return isAdminRole(role);
 }
 
+/** Admin, MD, and Nexus MD can view fines for all staff. */
+export function canViewAllStaffFines(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return r === "Admin" || r === "MD" || r === "Nexus MD";
+}
+
+/** Staff and physiotherapists may view their own fines only. */
+export function canViewOwnFines(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return r === "Staff" || r === "Physiotherapist";
+}
+
 export function canViewSalary(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
   return isManagementRole(r) || r === "Physiotherapist" || r === "Staff" || r === "Manager";

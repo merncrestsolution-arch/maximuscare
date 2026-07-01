@@ -268,6 +268,31 @@ export function computeOtAmount(hours: number, ratePerHour: number): number {
   return h * ratePerHour;
 }
 
+const ATTENDANCE_STATUS_PRIORITY: Record<string, number> = {
+  Present: 4,
+  Absent: 3,
+  Leave: 2,
+  Holiday: 1,
+};
+
+/** Higher score = preferred row when multiple records exist for the same staff + day. */
+export function compareAttendanceRecords(a: Attendance, b: Attendance): number {
+  const sa = ATTENDANCE_STATUS_PRIORITY[a.status] ?? 0;
+  const sb = ATTENDANCE_STATUS_PRIORITY[b.status] ?? 0;
+  if (sa !== sb) return sa - sb;
+  const ca = a.checkInTime ? 1 : 0;
+  const cb = b.checkInTime ? 1 : 0;
+  if (ca !== cb) return ca - cb;
+  const ua = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+  const ub = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+  if (ua !== ub) return ua - ub;
+  return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+}
+
+export function normalizeAttendanceDate(date: string | null | undefined): string {
+  return String(date ?? "").split("T")[0];
+}
+
 export function dedupeAttendanceByDate(records: Attendance[]): Attendance[] {
   // Key by staff + date so multi-staff datasets (e.g. dashboard charts that group
   // every staff member's records for a day) keep one record *per staff per day*
@@ -275,10 +300,12 @@ export function dedupeAttendanceByDate(records: Attendance[]): Attendance[] {
   // the staffId is constant, so this is equivalent to deduping by date.
   const unique = new Map<string, Attendance>();
   for (const a of records) {
-    const key = `${a.staffId ?? ""}|${a.date}`;
+    const normalizedDate = normalizeAttendanceDate(a.date);
+    const key = `${a.staffId ?? ""}|${normalizedDate}`;
+    const normalized = normalizedDate === a.date ? a : ({ ...a, date: normalizedDate } as Attendance);
     const existing = unique.get(key);
-    if (!existing || (a.id && existing.id && a.id > existing.id)) {
-      unique.set(key, a);
+    if (!existing || compareAttendanceRecords(normalized, existing) > 0) {
+      unique.set(key, normalized);
     }
   }
   return Array.from(unique.values());

@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import QRCode from "qrcode";
 import sharp from "sharp";
@@ -30,6 +31,17 @@ export interface PatientCardFiles {
   pdf: Buffer;
 }
 
+/** Bump when id-card-layout.json or background asset changes — invalidates cached PDFs. */
+export const ID_CARD_LAYOUT_VERSION = 2;
+/** Raster width for PDF download path (print-ready, faster than full 4800px layout). */
+const PDF_COMPOSITE_WIDTH = 1600;
+
+const TIMING_ENABLED = process.env.ID_CARD_TIMING === "1";
+function logTiming(phase: string, startMs: number): void {
+  if (TIMING_ENABLED) {
+    console.log(`[id-card] ${phase}: ${Date.now() - startMs}ms`);
+  }
+}
 /** ISO/IEC 7810 ID-1 (credit card) landscape — matches the Canva template aspect ratio. */
 const CARD_WIDTH_MM = 85.6;
 const CARD_HEIGHT_MM = 53.98;
@@ -233,6 +245,19 @@ export function resolvePatientQrTokenForCard(
   return signPatientQrToken({ patientId: expectedPatientId, organizationId });
 }
 
+export function deterministicCardId(seed: string): string {
+  const cleanSeed = (seed || "").trim();
+  let base = "";
+  const match = /^MC\/([A-Z]+)\/\d+\/(\d+)$/i.exec(cleanSeed);
+  if (match) {
+    base = `MC${match[1].toUpperCase()}${parseInt(match[2], 10)}`;
+  } else {
+    base = cleanSeed.replace(/[^a-z0-9]+/gi, "").toUpperCase().slice(0, 8) || "PT";
+  }
+  const hash = crypto.createHash("sha256").update(cleanSeed).digest("hex").slice(0, 8).toUpperCase();
+  return `MX-${base}-${hash}`;
+}
+
 export function generateCardId(seed: string): string {
   const cleanSeed = (seed || "").trim();
   let base = "";
@@ -248,14 +273,41 @@ export function generateCardId(seed: string): string {
   return `MX-${base}-${hash}`;
 }
 
+/** Hash of printable card content — used to invalidate cached PDFs when data changes. */
+export function computePatientCardContentHash(fields: {
+  name: string;
+  phone: string;
+  address: string;
+  id: string;
+  cardId: string;
+  qrToken: string;
+}): string {
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        layout: ID_CARD_LAYOUT_VERSION,
+        name: fields.name,
+        phone: fields.phone,
+        address: fields.address,
+        id: fields.id,
+        cardId: fields.cardId,
+        qrToken: fields.qrToken,
+      }),
+    )
+    .digest("hex")
+    .slice(0, 16);
+}
+
 async function buildCardBasePng(
   patient: PatientCardInput,
-  layout: CardLayoutConfig
+  layout: CardLayoutConfig,
+  options?: { outputWidth?: number },
 ): Promise<{ basePng: Buffer; outputWidth: number; outputHeight: number }> {
   const bgPath = path.join(await resolveProjectRoot(), "assets", "id-card-background.png");
   const background = await fs.readFile(bgPath);
 
-  const outputWidth = layout.outputWidth;
+  const outputWidth = options?.outputWidth ?? layout.outputWidth;
   const bgMeta = await sharp(background).metadata();
   const outputHeight = Math.round(outputWidth * ((bgMeta.height ?? 1) / (bgMeta.width ?? 1)));
 
@@ -327,13 +379,20 @@ export async function pngToIdCardPdfBuffer(png: Buffer): Promise<Buffer> {
 
 /** Printable patient ID card as PDF only (used by the download API). */
 export async function generatePatientCardPdf(patient: PatientCardInput): Promise<Buffer> {
+  const t0 = Date.now();
   const layout = await loadLayout(await resolveProjectRoot());
-  const { basePng } = await buildCardBasePng(patient, layout);
+  logTiming("loadLayout", t0);
 
+  const t1 = Date.now();
+  const { basePng } = await buildCardBasePng(patient, layout, { outputWidth: PDF_COMPOSITE_WIDTH });
+  logTiming("composite+qr", t1);
+
+  const t2 = Date.now();
   const jpeg = await sharp(basePng)
     .resize(PDF_RASTER_WIDTH)
     .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer();
+  logTiming("jpeg", t2);
 
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({
@@ -369,6 +428,7 @@ export async function generatePatientCardPdf(patient: PatientCardInput): Promise
   drawField(layout.fields.address, patient.address);
   drawField(layout.fields.cardId, patient.cardId);
 
+  logTiming("pdf-total", t0);
   return Buffer.from(doc.output("arraybuffer"));
 }
 

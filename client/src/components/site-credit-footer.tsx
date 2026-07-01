@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { cn } from "@/lib/utils";
+import { getAppBuildInfo } from "@/lib/appBuildInfo";
 
 /** Custom mark: small sun over three soft bars — reads as “care + vitality + release” at icon size */
 function CrestSunriseMark({
@@ -62,18 +63,7 @@ export function SiteCreditFooter() {
   const uid = useId().replace(/:/g, "");
   const gradPill = `mc-crest-${uid}-pill`;
   const gradMicro = `mc-crest-${uid}-micro`;
-  const appVersion = typeof __APP_DISPLAY_VERSION__ !== "undefined" ? __APP_DISPLAY_VERSION__ : "unknown";
-  const buildDateRaw = typeof __APP_BUILD_DATE__ !== "undefined" ? __APP_BUILD_DATE__ : "";
-  let buildDateLabel = "Unknown";
-  if (buildDateRaw) {
-    try {
-      buildDateLabel = new Intl.DateTimeFormat("en-GB", {
-        dateStyle: "medium",
-      }).format(new Date(buildDateRaw));
-    } catch {
-      buildDateLabel = buildDateRaw;
-    }
-  }
+  const { displayVersion, buildDateLabel } = getAppBuildInfo();
 
   return (
     <div
@@ -95,7 +85,7 @@ export function SiteCreditFooter() {
           <span className="text-muted-foreground/45" aria-hidden>
             ·
           </span>
-          <span className="text-secondary">{appVersion}</span>
+          <span className="text-secondary">{displayVersion}</span>
         </span>
       </div>
       <p className="flex max-w-[min(100%,22rem)] flex-wrap items-center justify-center gap-1 text-center text-[9px] leading-snug tracking-tight text-muted-foreground/90">

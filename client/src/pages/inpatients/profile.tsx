@@ -275,8 +275,15 @@ export default function InPatientProfilePage() {
 
   const handleReadmit = async () => {
     try {
-      await readmitInPatient.mutateAsync({ admissionId: patientId, admitDate: readmitDate || undefined });
+      const newAdmission = await readmitInPatient.mutateAsync({
+        admissionId: patientId,
+        admitDate: readmitDate || undefined,
+      });
       toast({ title: "Success", description: "Patient re-admitted" });
+      setReadmitDate("");
+      if (newAdmission?.id && newAdmission.id !== patientId) {
+        setLocation(`/inpatients/${newAdmission.id}`);
+      }
     } catch (error) {
       toast({
         title: "Error",
