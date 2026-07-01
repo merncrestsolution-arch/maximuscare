@@ -3,7 +3,6 @@ import path from "path";
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const UPLOAD_ROOT = path.join(process.cwd(), "data", "uploads");
 const MAX_BYTES = Number(process.env.DOCUMENT_MAX_BYTES || 10 * 1024 * 1024);
 const ALLOWED_MIME = new Set([
   "application/pdf",
@@ -15,6 +14,22 @@ const ALLOWED_MIME = new Set([
 
 export function isS3Enabled(): boolean {
   return Boolean(process.env.S3_BUCKET);
+}
+
+/** Vercel/Lambda only allow writes under /tmp — not project data/ paths. */
+export function isServerlessRuntime(): boolean {
+  return Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+}
+
+function getUploadRoot(): string {
+  if (isServerlessRuntime()) {
+    return path.join("/tmp", "maximus-uploads");
+  }
+  return path.join(process.cwd(), "data", "uploads");
+}
+
+function localPathForKey(storageKey: string): string {
+  return path.join(getUploadRoot(), storageKey);
 }
 
 function s3Client(): S3Client {
@@ -70,7 +85,7 @@ export async function uploadPatientDocument(
     return { storageKey, fileSize: buffer.length };
   }
 
-  const localPath = path.join(UPLOAD_ROOT, storageKey);
+  const localPath = localPathForKey(storageKey);
   const dir = path.dirname(localPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(localPath, buffer);
@@ -94,7 +109,7 @@ export async function storeGeneratedFile(
     return;
   }
 
-  const localPath = path.join(UPLOAD_ROOT, storageKey);
+  const localPath = localPathForKey(storageKey);
   const dir = path.dirname(localPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(localPath, buffer);
@@ -118,7 +133,7 @@ export async function getDocumentReadStream(
     };
   }
 
-  const localPath = path.join(UPLOAD_ROOT, storageKey);
+  const localPath = localPathForKey(storageKey);
   if (!existsSync(localPath)) throw new Error("File not found");
   return {
     body: readFileSync(localPath),
@@ -148,7 +163,7 @@ export async function deleteStoredDocument(storageKey: string): Promise<void> {
     );
     return;
   }
-  const localPath = path.join(UPLOAD_ROOT, storageKey);
+  const localPath = localPathForKey(storageKey);
   if (existsSync(localPath)) unlinkSync(localPath);
 }
 
