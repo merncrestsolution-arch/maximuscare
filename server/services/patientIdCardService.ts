@@ -4,7 +4,6 @@ import { fileURLToPath } from "url";
 import QRCode from "qrcode";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
-import { jsPDF } from "jspdf";
 import type { OrganizationId } from "@shared/branchAccess";
 import { signPatientQrToken, verifyPatientQrToken } from "./qrTokenService";
 
@@ -280,6 +279,7 @@ export async function pngToIdCardPdfBuffer(png: Buffer): Promise<Buffer> {
     .jpeg({ quality: 90, mozjpeg: true })
     .toBuffer();
 
+  const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({
     orientation: "landscape",
     unit: "mm",
