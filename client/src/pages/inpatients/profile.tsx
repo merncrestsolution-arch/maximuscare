@@ -41,11 +41,52 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
+import { SegmentedToggle } from "@/components/ui/segmented-toggle";
 import { PatientCredentials } from "@/components/patients/patient-credentials";
 import { isManager, isBranchManager, canReAdmitInPatient } from "@/lib/permissions";
 import { useBranches } from "@/hooks/useData";
 
 const EXPENSE_CATEGORIES = ["Food", "Nurse Visit", "Doctor Visit", "Speech Therapy", "Others"];
+
+function BillingLine({
+  label,
+  value,
+  tone = "default",
+  emphasized = false,
+  sublabel,
+  testId,
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "success" | "danger";
+  emphasized?: boolean;
+  sublabel?: string;
+  testId?: string;
+}) {
+  const valueTone =
+    tone === "success" ? "text-green-700" : tone === "danger" ? "text-red-600" : "text-foreground";
+
+  return (
+    <div
+      className={`flex items-start justify-between gap-3 ${emphasized ? "border-t border-border/50 pt-3 mt-1" : "py-1.5"}`}
+    >
+      <div className="min-w-0 flex-1">
+        <span className={`text-sm ${emphasized ? "font-semibold text-foreground" : "text-muted-foreground"}`}>
+          {label}
+        </span>
+        {sublabel ? (
+          <span className="mt-0.5 block text-xs text-muted-foreground/80">{sublabel}</span>
+        ) : null}
+      </div>
+      <span
+        className={`shrink-0 text-right text-sm tabular-nums ${emphasized ? "text-base font-bold" : "font-medium"} ${valueTone}`}
+        data-testid={testId}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
 
 export default function InPatientProfilePage() {
   const [, params] = useRoute("/inpatients/:id");
@@ -973,77 +1014,78 @@ export default function InPatientProfilePage() {
         </div>
 
         {canViewBillingSummary && (
-          <>
-        <StructuredReportActions
-          reportTitle={
-            showingPreviousBilling
-              ? `Previous Billing Summary - ${patient.patientName}`
-              : `In-Patient Billing Report - ${patient.patientName}`
-          }
-          fileBaseName={`inpatient-billing-${patientId}${showingPreviousBilling ? "-previous" : ""}`}
-          columns={billingColumns}
-          rows={billingRows}
-          logoUri={logoUri}
-          themeColor="#105691"
-          meta={[
-            { label: "Patient", value: patient.patientName },
-            { label: "Patient ID", value: displayPatientCode },
-            { label: "Admit Date", value: format(new Date(patient.admitDate), "dd MMM yyyy") },
-            { label: "Generated", value: format(new Date(), "dd MMM yyyy hh:mm a") },
-            { label: "Prepared By", value: user?.name || "System" },
-          ]}
-        />
-        <div id="inpatient-billing-report" className="space-y-4 rounded-lg border border-border/60 bg-white p-4 mb-6">
-          <div className="flex items-center justify-between gap-3 border-b border-border/60 pb-3">
-            <div className="flex items-center gap-3">
-              <img src={logoUri} alt="Clinic logo" className="h-10 w-10 rounded-md object-contain" />
-              <div>
-                <div className="text-sm font-bold text-foreground">Maximus Care</div>
-                <div className="text-xs text-muted-foreground">In-Patient Billing Report</div>
+        <div id="inpatient-billing-report" className="mb-6 overflow-hidden rounded-xl border border-[#D6E8F5] bg-white shadow-sm">
+          <div className="border-b border-[#D6E8F5] bg-[#F8FBFE] px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <img src={logoUri} alt="Clinic logo" className="h-10 w-10 shrink-0 rounded-lg border border-[#D6E8F5] bg-white object-contain p-0.5" />
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-[#105691]">Maximus Care</div>
+                  <div className="text-xs text-muted-foreground">In-Patient Billing Report</div>
+                </div>
+              </div>
+              <div className="shrink-0 text-right text-xs text-muted-foreground">
+                <div className="max-w-[9rem] truncate font-medium text-foreground">{patient.patientName}</div>
+                <div className="font-mono">ID: {displayPatientCode}</div>
               </div>
             </div>
-            <div className="text-right text-xs text-muted-foreground">
-              <div>{patient.patientName}</div>
-              <div className="font-mono">ID: {displayPatientCode}</div>
+            <div className="mt-3">
+              <StructuredReportActions
+                layout="toolbar"
+                reportTitle={
+                  showingPreviousBilling
+                    ? `Previous Billing Summary - ${patient.patientName}`
+                    : `In-Patient Billing Report - ${patient.patientName}`
+                }
+                fileBaseName={`inpatient-billing-${patientId}${showingPreviousBilling ? "-previous" : ""}`}
+                columns={billingColumns}
+                rows={billingRows}
+                logoUri={logoUri}
+                themeColor="#105691"
+                meta={[
+                  { label: "Patient", value: patient.patientName },
+                  { label: "Patient ID", value: displayPatientCode },
+                  { label: "Admit Date", value: format(new Date(patient.admitDate), "dd MMM yyyy") },
+                  { label: "Generated", value: format(new Date(), "dd MMM yyyy hh:mm a") },
+                  { label: "Prepared By", value: user?.name || "System" },
+                ]}
+              />
             </div>
           </div>
 
-          <div className="bg-[#EEF5FB] rounded-lg p-4" data-testid="billing-summary">
-            <div className="flex flex-col gap-3 mb-3 sm:flex-row sm:items-center sm:justify-between">
-              <h3 className="font-semibold flex items-center gap-2">
-                <Receipt className="h-4 w-4" />
-                {showingPreviousBilling ? "Previous Billing Summary" : "Billing Summary"}
-              </h3>
-              <div className="flex flex-wrap items-center gap-2 print:hidden">
-                {showBillingHistoryToggle && (
-                  <div className="inline-flex rounded-md border border-border/60 bg-white p-0.5">
-                    <Button
-                      type="button"
-                      variant={billingSummaryView === "current" ? "default" : "ghost"}
-                      size="sm"
-                      className="h-8"
-                      onClick={() => setBillingSummaryView("current")}
-                      data-testid="button-current-billing-summary"
-                    >
-                      Current Billing
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={billingSummaryView === "previous" ? "default" : "ghost"}
-                      size="sm"
-                      className="h-8"
-                      onClick={() => setBillingSummaryView("previous")}
-                      data-testid="button-previous-billing-summary"
-                    >
-                      Previous Billing Summary
-                    </Button>
-                  </div>
-                )}
+          <div className="space-y-3 p-3 sm:p-4" data-testid="billing-summary">
+            {showBillingHistoryToggle && (
+              <SegmentedToggle
+                value={billingSummaryView}
+                onChange={setBillingSummaryView}
+                options={[
+                  {
+                    value: "current",
+                    label: "Current Billing",
+                    mobileLabel: "Current",
+                    testId: "button-current-billing-summary",
+                  },
+                  {
+                    value: "previous",
+                    label: "Previous Billing",
+                    mobileLabel: "Previous",
+                    testId: "button-previous-billing-summary",
+                  },
+                ]}
+              />
+            )}
+
+            <div className="rounded-xl bg-[#EEF5FB] p-3 sm:p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-[#105691] sm:text-base">
+                  <Receipt className="h-4 w-4 shrink-0" />
+                  {showingPreviousBilling ? "Previous Billing Summary" : "Billing Summary"}
+                </h3>
                 {canApplyDeduction && !showingPreviousBilling && (
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8"
+                    className="h-8 shrink-0 border-[#D6E8F5] bg-white text-xs print:hidden"
                     onClick={openDeductionModal}
                     data-testid="button-apply-deduction"
                   >
@@ -1051,238 +1093,191 @@ export default function InPatientProfilePage() {
                   </Button>
                 )}
               </div>
-            </div>
-            {showingPreviousBilling ? (
-              priorEpisodes.length > 0 ? (
-                <div className="space-y-4">
-                  {priorEpisodes.map((episode, index) => {
-                    const billing = getPriorEpisodeBilling(episode, index);
-                    return (
-                      <div
-                        key={episode.admissionId}
-                        className="rounded-lg border border-amber-200/80 bg-white/60 p-3"
-                        data-testid={`prior-billing-${episode.admissionId}`}
-                      >
-                        <div className="mb-2 text-sm font-semibold text-foreground">
-                          Admission: {format(new Date(episode.admitDate), "dd MMM yyyy")}
-                          <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                            {episode.status}
-                          </span>
-                        </div>
-                        <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
-                          <colgroup>
-                            <col style={{ width: "65%" }} />
-                            <col style={{ width: "35%" }} />
-                          </colgroup>
-                          <tbody>
+
+              <div className="rounded-lg bg-white p-3 shadow-sm sm:p-4">
+                {showingPreviousBilling ? (
+                  priorEpisodes.length > 0 ? (
+                    <div className="space-y-3">
+                      {priorEpisodes.map((episode, index) => {
+                        const billing = getPriorEpisodeBilling(episode, index);
+                        return (
+                          <div
+                            key={episode.admissionId}
+                            className="rounded-lg border border-amber-200/80 bg-amber-50/40 p-3"
+                            data-testid={`prior-billing-${episode.admissionId}`}
+                          >
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                              <span className="text-sm font-semibold text-foreground">
+                                {format(new Date(episode.admitDate), "dd MMM yyyy")}
+                              </span>
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                                {episode.status}
+                              </span>
+                            </div>
                             {episode.dischargeDate && (
-                              <tr>
-                                <td className="py-1 text-left text-muted-foreground align-top">Discharge Date</td>
-                                <td className="py-1 text-right font-medium whitespace-nowrap">
-                                  {format(new Date(episode.dischargeDate), "dd MMM yyyy")}
-                                </td>
-                              </tr>
+                              <BillingLine
+                                label="Discharge Date"
+                                value={format(new Date(episode.dischargeDate), "dd MMM yyyy")}
+                              />
                             )}
-                            <tr>
-                              <td className="py-1 text-left text-muted-foreground align-top">Grand Total</td>
-                              <td className="py-1 text-right font-medium whitespace-nowrap">
-                                LKR {formatMoney(billing.grandTotal)}
-                              </td>
-                            </tr>
-                            <tr>
-                              <td className="py-1 text-left text-muted-foreground align-top">Amount Paid</td>
-                              <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap">
-                                LKR {formatMoney(billing.paid)}
-                              </td>
-                            </tr>
-                            <tr className="border-t border-border/60">
-                              <td className="pt-2 text-left font-semibold align-top">Pending Balance</td>
-                              <td
-                                className={`pt-2 text-right font-bold whitespace-nowrap ${billing.pending > 0 ? "text-red-600" : "text-green-700"}`}
-                              >
-                                LKR {formatMoney(billing.pending)}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    );
-                  })}
-                  {priorEpisodes.length > 1 && (
-                    <div className="flex items-center justify-between border-t border-border/60 pt-2 text-sm font-semibold">
-                      <span>Total pending from previous admissions</span>
-                      <span className={totalPriorPendingBalance > 0 ? "text-red-600" : "text-green-700"}>
-                        LKR {formatMoney(totalPriorPendingBalance)}
-                      </span>
+                            <BillingLine label="Grand Total" value={`LKR ${formatMoney(billing.grandTotal)}`} />
+                            <BillingLine label="Amount Paid" value={`LKR ${formatMoney(billing.paid)}`} tone="success" />
+                            <BillingLine
+                              label="Pending Balance"
+                              value={`LKR ${formatMoney(billing.pending)}`}
+                              tone={billing.pending > 0 ? "danger" : "success"}
+                              emphasized
+                            />
+                          </div>
+                        );
+                      })}
+                      {priorEpisodes.length > 1 && (
+                        <BillingLine
+                          label="Total pending from previous admissions"
+                          value={`LKR ${formatMoney(totalPriorPendingBalance)}`}
+                          tone={totalPriorPendingBalance > 0 ? "danger" : "success"}
+                          emphasized
+                        />
+                      )}
                     </div>
-                  )}
-                </div>
-              ) : (
-              <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
-                <colgroup>
-                  <col style={{ width: "65%" }} />
-                  <col style={{ width: "35%" }} />
-                </colgroup>
-                <tbody>
-                  {priorDischargeNote && (
-                    <tr>
-                      <td className="py-1 text-left text-muted-foreground align-top">Previous Discharge Date</td>
-                      <td className="py-1 text-right font-medium whitespace-nowrap">{priorDischargeNote}</td>
-                    </tr>
-                  )}
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Previous Admission Balance</td>
-                    <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-prior-balance">
-                      LKR {formatMoney(carriedForwardTotal)}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Amount Paid</td>
-                    <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap" data-testid="text-prior-paid">
-                      LKR {formatMoney(priorBalancePaid)}
-                    </td>
-                  </tr>
-                  <tr className="border-t border-border/60">
-                    <td className="pt-2 text-left font-semibold align-top">Pending Balance</td>
-                    <td
-                      className={`pt-2 text-right font-bold whitespace-nowrap ${priorBalanceDue > 0 ? "text-red-600" : "text-green-700"}`}
-                      data-testid="text-prior-balance-due"
-                    >
-                      LKR {formatMoney(priorBalanceDue)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              )
-            ) : (
-            <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
-              <colgroup>
-                <col style={{ width: "65%" }} />
-                <col style={{ width: "35%" }} />
-              </colgroup>
-              <tbody>
-                <tr>
-                  <td className="py-1 text-left text-muted-foreground align-top">Stay Days</td>
-                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-stay-days">{stayDays} day{stayDays > 1 ? "s" : ""}</td>
-                </tr>
-                <tr>
-                  <td className="py-1 text-left text-muted-foreground align-top">Room Charges ({formatMoney(amountPerDay)} × {stayDays})</td>
-                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-room-charges">LKR {formatMoney(roomCharges)}</td>
-                </tr>
-                <tr>
-                  <td className="py-1 text-left text-muted-foreground align-top">Caretaker Charges ({formatMoney(careTakerRate)} × {careTakerDays})</td>
-                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-caretaker-charges">LKR {formatMoney(caretakerCharges)}</td>
-                </tr>
-                <tr>
-                  <td className="py-1 text-left text-muted-foreground align-top">Extra Expenses</td>
-                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-extra-expenses-total">LKR {formatMoney(currentExtraExpenseTotal)}</td>
-                </tr>
-                <tr className="border-t border-border/60">
-                  <td className="pt-2 text-left font-medium align-top">Subtotal</td>
-                  <td className="pt-2 text-right font-medium whitespace-nowrap" data-testid="text-subtotal">LKR {formatMoney(currentSubtotal)}</td>
-                </tr>
-                {hasCurrentDeduction && (
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">
-                      {deductionLabel}
-                      {(patient as any).deductionReason ? (
-                        <span className="block text-xs text-muted-foreground/80">{(patient as any).deductionReason}</span>
-                      ) : null}
-                    </td>
-                    <td className="py-1 text-right font-medium text-red-600 whitespace-nowrap" data-testid="text-deduction">- LKR {formatMoney(currentDeductionAmount)}</td>
-                  </tr>
+                  ) : (
+                    <>
+                      {priorDischargeNote && (
+                        <BillingLine label="Previous Discharge Date" value={priorDischargeNote} />
+                      )}
+                      <BillingLine
+                        label="Previous Admission Balance"
+                        value={`LKR ${formatMoney(carriedForwardTotal)}`}
+                        testId="text-prior-balance"
+                      />
+                      <BillingLine
+                        label="Amount Paid"
+                        value={`LKR ${formatMoney(priorBalancePaid)}`}
+                        tone="success"
+                        testId="text-prior-paid"
+                      />
+                      <BillingLine
+                        label="Pending Balance"
+                        value={`LKR ${formatMoney(priorBalanceDue)}`}
+                        tone={priorBalanceDue > 0 ? "danger" : "success"}
+                        emphasized
+                        testId="text-prior-balance-due"
+                      />
+                    </>
+                  )
+                ) : (
+                  <>
+                    <BillingLine
+                      label="Stay Days"
+                      value={`${stayDays} day${stayDays > 1 ? "s" : ""}`}
+                      testId="text-stay-days"
+                    />
+                    <BillingLine
+                      label={`Room Charges (${formatMoney(amountPerDay)} × ${stayDays})`}
+                      value={`LKR ${formatMoney(roomCharges)}`}
+                      testId="text-room-charges"
+                    />
+                    <BillingLine
+                      label={`Caretaker Charges (${formatMoney(careTakerRate)} × ${careTakerDays})`}
+                      value={`LKR ${formatMoney(caretakerCharges)}`}
+                      testId="text-caretaker-charges"
+                    />
+                    <BillingLine
+                      label="Extra Expenses"
+                      value={`LKR ${formatMoney(currentExtraExpenseTotal)}`}
+                      testId="text-extra-expenses-total"
+                    />
+                    <BillingLine
+                      label="Subtotal"
+                      value={`LKR ${formatMoney(currentSubtotal)}`}
+                      emphasized
+                      testId="text-subtotal"
+                    />
+                    {hasCurrentDeduction && (
+                      <BillingLine
+                        label={deductionLabel}
+                        value={`- LKR ${formatMoney(currentDeductionAmount)}`}
+                        tone="danger"
+                        sublabel={(patient as any).deductionReason || undefined}
+                        testId="text-deduction"
+                      />
+                    )}
+                    <BillingLine
+                      label="Grand Total"
+                      value={`LKR ${formatMoney(currentGrandTotal)}`}
+                      emphasized
+                      testId="text-grand-total"
+                    />
+                    <BillingLine
+                      label="Total Paid"
+                      value={`LKR ${formatMoney(currentEpisodePaid)}`}
+                      tone="success"
+                      testId="text-total-paid"
+                    />
+                    <BillingLine
+                      label="Balance Due"
+                      value={`LKR ${formatMoney(currentBalanceDue)}`}
+                      tone={currentBalanceDue > 0 ? "danger" : "success"}
+                      emphasized
+                      testId="text-balance-due"
+                    />
+                  </>
                 )}
-                <tr className="border-t border-border/60">
-                  <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
-                  <td className="pt-2 text-right font-bold whitespace-nowrap" data-testid="text-grand-total">LKR {formatMoney(currentGrandTotal)}</td>
-                </tr>
-                <tr>
-                  <td className="py-1 text-left text-muted-foreground align-top">Total Paid</td>
-                  <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap" data-testid="text-total-paid">LKR {formatMoney(currentEpisodePaid)}</td>
-                </tr>
-                <tr className="border-t border-border/60">
-                  <td className="pt-2 text-left font-semibold align-top">Balance Due</td>
-                  <td className={`pt-2 text-right font-bold whitespace-nowrap ${currentBalanceDue > 0 ? "text-red-600" : "text-green-700"}`} data-testid="text-balance-due">LKR {formatMoney(currentBalanceDue)}</td>
-                </tr>
-              </tbody>
-            </table>
-            )}
-            {showBillingHistoryToggle && !showingPreviousBilling && totalPriorPendingBalance > 0 && (
-              <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prior-balance-note">
-                Previous admission pending balance: LKR {formatMoney(totalPriorPendingBalance)}.
-                Use &quot;Previous Billing Summary&quot; to view details.
-              </p>
+
+                {showBillingHistoryToggle && !showingPreviousBilling && totalPriorPendingBalance > 0 && (
+                  <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="text-prior-balance-note">
+                    Previous admission pending balance: LKR {formatMoney(totalPriorPendingBalance)}.
+                    Switch to <span className="font-semibold">Previous</span> to view details.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {discharge && !showingPreviousBilling && (
+              <div className="rounded-xl bg-blue-50 p-3 sm:p-4" data-testid="discharge-summary">
+                <h3 className="mb-3 text-sm font-semibold text-[#105691] sm:text-base">Discharge Summary</h3>
+                <div className="rounded-lg bg-white p-3 shadow-sm sm:p-4">
+                  <BillingLine
+                    label="Discharge Date"
+                    value={format(new Date(discharge.dischargeDate), "dd MMM yyyy")}
+                  />
+                  <BillingLine label="Days Stayed" value={`${discharge.daysCount} days`} />
+                  <BillingLine label="Stay Amount" value={`LKR ${formatMoney(Number(discharge.stayAmount))}`} />
+                  <BillingLine label="Other Charges" value={`LKR ${formatMoney(Number(discharge.otherTotal))}`} />
+                  {Number((discharge as any).deductionAmount) > 0 && (
+                    <BillingLine
+                      label={`Deduction${(discharge as any).deductionType === "percentage" ? ` (${Number((discharge as any).deductionValue)}%)` : ""}`}
+                      value={`- LKR ${formatMoney(Number((discharge as any).deductionAmount))}`}
+                      tone="danger"
+                      sublabel={(discharge as any).deductionReason || undefined}
+                    />
+                  )}
+                  <BillingLine
+                    label="Grand Total"
+                    value={`LKR ${formatMoney(Number(discharge.grandTotal))}`}
+                    emphasized
+                  />
+                  <BillingLine label="Amount Paid" value={`LKR ${formatMoney(paymentTotal)}`} tone="success" />
+                  <BillingLine
+                    label="Balance"
+                    value={`LKR ${formatMoney(dischargeBalance)}`}
+                    tone={dischargeBalance > 0 ? "danger" : "success"}
+                  />
+                  <div className="flex items-center justify-between gap-3 py-1.5">
+                    <span className="text-sm text-muted-foreground">Payment Status</span>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        dischargeBalance <= 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                      }`}
+                    >
+                      {dischargeBalance <= 0 ? "Paid" : "Unpaid"}
+                    </span>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
-
-          {discharge && !showingPreviousBilling && (
-            <div className="bg-blue-50 rounded-lg p-4" data-testid="discharge-summary">
-              <h3 className="font-semibold mb-3">Discharge Summary</h3>
-              <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
-                <colgroup>
-                  <col style={{ width: "65%" }} />
-                  <col style={{ width: "35%" }} />
-                </colgroup>
-                <tbody>
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Discharge Date</td>
-                    <td className="py-1 text-right font-medium whitespace-nowrap">{format(new Date(discharge.dischargeDate), "dd MMM yyyy")}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Days Stayed</td>
-                    <td className="py-1 text-right font-medium whitespace-nowrap">{discharge.daysCount} days</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Stay Amount</td>
-                    <td className="py-1 text-right font-medium whitespace-nowrap">LKR {formatMoney(Number(discharge.stayAmount))}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Other Charges</td>
-                    <td className="py-1 text-right font-medium whitespace-nowrap">LKR {formatMoney(Number(discharge.otherTotal))}</td>
-                  </tr>
-                  {Number((discharge as any).deductionAmount) > 0 && (
-                    <tr>
-                      <td className="py-1 text-left text-muted-foreground align-top">
-                        Deduction
-                        {(discharge as any).deductionType === "percentage" ? ` (${Number((discharge as any).deductionValue)}%)` : ""}
-                        {(discharge as any).deductionReason ? (
-                          <span className="block text-xs text-muted-foreground/80">{(discharge as any).deductionReason}</span>
-                        ) : null}
-                      </td>
-                      <td className="py-1 text-right font-medium text-red-600 whitespace-nowrap">- LKR {formatMoney(Number((discharge as any).deductionAmount))}</td>
-                    </tr>
-                  )}
-                  <tr className="border-t border-border/60">
-                    <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
-                    <td className="pt-2 text-right font-bold whitespace-nowrap">LKR {formatMoney(Number(discharge.grandTotal))}</td>
-                  </tr>
-                  {/* Amount Paid / Balance reflect ALL recorded payments (live), not just the
-                      amount entered at discharge — so this stays in sync with the Billing
-                      Summary above when payments are added after discharge. */}
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Amount Paid</td>
-                    <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap">LKR {formatMoney(paymentTotal)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Balance</td>
-                    <td className={`py-1 text-right font-medium whitespace-nowrap ${dischargeBalance > 0 ? "text-red-600" : "text-green-700"}`}>LKR {formatMoney(dischargeBalance)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-1 text-left text-muted-foreground align-top">Payment Status</td>
-                    <td className="py-1 text-right">
-                      <span className={`px-2 py-0.5 rounded text-xs ${
-                        dischargeBalance <= 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                      }`}>
-                        {dischargeBalance <= 0 ? "Paid" : "Unpaid"}
-                      </span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
-          </>
         )}
 
         <div className="mb-6" data-testid="extra-expenses-section">
@@ -1358,36 +1353,33 @@ export default function InPatientProfilePage() {
         </div>
 
         <div className="mb-6" data-testid="treatment-sessions-section">
-          <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mb-4 space-y-3">
             <h2 className="text-lg font-semibold">
               {showingPreviousSessions ? "Previous Sessions" : "Treatment Sessions"}
             </h2>
+            {showSessionsHistoryToggle && (
+              <SegmentedToggle
+                value={sessionsView}
+                onChange={setSessionsView}
+                options={[
+                  {
+                    value: "current",
+                    label: "Current Sessions",
+                    mobileLabel: "Current",
+                    testId: "button-current-sessions",
+                  },
+                  {
+                    value: "previous",
+                    label: "Previous Sessions",
+                    mobileLabel: "Previous",
+                    testId: "button-previous-sessions",
+                  },
+                ]}
+              />
+            )}
             <div className="flex flex-wrap items-center gap-2">
-              {showSessionsHistoryToggle && (
-                <div className="inline-flex rounded-md border border-border/60 bg-muted/20 p-0.5">
-                  <Button
-                    type="button"
-                    variant={sessionsView === "current" ? "default" : "ghost"}
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setSessionsView("current")}
-                    data-testid="button-current-sessions"
-                  >
-                    Current Sessions
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={sessionsView === "previous" ? "default" : "ghost"}
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setSessionsView("previous")}
-                    data-testid="button-previous-sessions"
-                  >
-                    Previous Sessions
-                  </Button>
-                </div>
-              )}
               <StructuredReportActions
+                layout="toolbar"
                 reportTitle={
                   showingPreviousSessions
                     ? `Previous In-Patient Sessions - ${patient?.patientName || "Patient"}`

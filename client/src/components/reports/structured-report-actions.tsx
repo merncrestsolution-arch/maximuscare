@@ -17,6 +17,9 @@ type StructuredReportActionsProps = {
   meta?: Array<{ label: string; value: string }>;
   logoUri?: string;
   themeColor?: string;
+  /** toolbar = equal-width row on mobile; inline = compact wrap (default) */
+  layout?: "inline" | "toolbar";
+  className?: string;
 };
 
 function sanitizeName(input: string) {
@@ -49,6 +52,8 @@ export function StructuredReportActions({
   meta = [],
   logoUri,
   themeColor = "#105691",
+  layout = "inline",
+  className,
 }: StructuredReportActionsProps) {
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -173,33 +178,44 @@ export function StructuredReportActions({
     }
   };
 
+  const buttonClass =
+    layout === "toolbar"
+      ? "h-9 flex-1 min-w-0 px-2 text-xs sm:flex-none sm:px-3 sm:text-sm"
+      : "";
+
   return (
-    <div className="flex flex-wrap gap-2 print:hidden">
+    <div
+      className={
+        layout === "toolbar"
+          ? `flex w-full gap-1.5 print:hidden sm:w-auto ${className ?? ""}`
+          : `flex flex-wrap gap-2 print:hidden ${className ?? ""}`
+      }
+    >
       <Button
         size="sm"
-        className="bg-emerald-600 text-white hover:bg-emerald-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200"
+        className={`bg-emerald-600 text-white hover:bg-emerald-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ${buttonClass}`}
         disabled={busy !== null}
         onClick={() => runExport("xlsx")}
       >
-        {busy === "xlsx" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-1 h-4 w-4" />}
+        {busy === "xlsx" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-1 h-4 w-4 shrink-0" />}
         Excel
       </Button>
       <Button
         size="sm"
-        className="bg-sky-600 text-white hover:bg-sky-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200"
+        className={`bg-sky-600 text-white hover:bg-sky-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ${buttonClass}`}
         disabled={busy !== null}
         onClick={() => runExport("csv")}
       >
-        {busy === "csv" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileText className="mr-1 h-4 w-4" />}
+        {busy === "csv" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileText className="mr-1 h-4 w-4 shrink-0" />}
         CSV
       </Button>
       <Button
         size="sm"
-        className="bg-rose-600 text-white hover:bg-rose-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200"
+        className={`bg-rose-600 text-white hover:bg-rose-700 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200 ${buttonClass}`}
         disabled={busy !== null}
         onClick={() => runExport("pdf")}
       >
-        {busy === "pdf" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileText className="mr-1 h-4 w-4" />}
+        {busy === "pdf" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <FileText className="mr-1 h-4 w-4 shrink-0" />}
         PDF
       </Button>
     </div>
