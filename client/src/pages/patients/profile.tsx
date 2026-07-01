@@ -21,7 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ArrowLeft, Edit2, Pencil, FileText, Phone, MapPin, Calendar, User as UserIcon, Loader2, Trash2, History, ArrowRightLeft } from "lucide-react";
+import { ArrowLeft, Edit2, Pencil, FileText, Phone, MapPin, Calendar, User as UserIcon, Loader2, Trash2, History, ArrowRightLeft, AlertTriangle } from "lucide-react";
 import { PatientCredentials } from "@/components/patients/patient-credentials";
 import { Link } from "wouter";
 import { format } from "date-fns";
@@ -138,6 +138,25 @@ export default function PatientProfile() {
   };
   const totalBalanceDue = patientVisits.reduce((sum: number, v: any) => sum + visitOutstanding(v), 0);
   const unpaidVisitCount = patientVisits.filter((v: any) => visitOutstanding(v) > 0).length;
+
+  const handleReadmitPatient = async () => {
+    try {
+      await updatePatientMutation.mutateAsync({
+        id: patientId,
+        data: { status: "Active", registeredDate: new Date().toISOString().slice(0, 10) },
+      });
+      toast({
+        title: "Patient re-admitted",
+        description:
+          totalBalanceDue > 0
+            ? `Status set to Active. Past due: ${formatLkr(totalBalanceDue)}`
+            : "Status set to Active with a new admission date.",
+      });
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "Failed to re-admit patient", variant: "destructive" });
+    }
+  };
+
   const visitRows = patientVisits.map((v: any) => ({
     date: formatVisitDateTime(v.visitDate, v.startTime),
     session: String(v.sessionNumber),
@@ -311,25 +330,56 @@ export default function PatientProfile() {
                {patient.status}
              </Badge>
              {patient.status === "Discharged" && ["Admin", "MD", "Receptionist"].includes(user?.role ?? "") && (
-               <Button
-                 size="sm"
-                 variant="outline"
-                 className="h-7"
-                 data-testid="button-readmit-patient"
-                 onClick={async () => {
-                   try {
-                     await updatePatientMutation.mutateAsync({
-                       id: patientId,
-                       data: { status: "Active", registeredDate: new Date().toISOString().slice(0, 10) },
-                     });
-                     toast({ title: "Patient re-admitted", description: "Status set to Active with a new admission date." });
-                   } catch (e: any) {
-                     toast({ title: "Error", description: e?.message || "Failed to re-admit patient", variant: "destructive" });
-                   }
-                 }}
-               >
-                 Re-Admit Patient
-               </Button>
+               <AlertDialog>
+                 <AlertDialogTrigger asChild>
+                   <Button
+                     size="sm"
+                     variant="outline"
+                     className="h-7"
+                     data-testid="button-readmit-patient"
+                   >
+                     Re-Admit Patient
+                   </Button>
+                 </AlertDialogTrigger>
+                 <AlertDialogContent>
+                   <AlertDialogHeader>
+                     <AlertDialogTitle>Re-admit this patient?</AlertDialogTitle>
+                     <AlertDialogDescription>
+                       This will set the patient status back to Active with today&apos;s registration date.
+                     </AlertDialogDescription>
+                   </AlertDialogHeader>
+                   {totalBalanceDue > 0 ? (
+                     <div
+                       className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm space-y-1"
+                       data-testid="readmit-past-due-warning"
+                     >
+                       <div className="flex items-center gap-2 font-semibold text-amber-900">
+                         <AlertTriangle className="h-4 w-4 shrink-0" />
+                         Past due amount
+                       </div>
+                       <p className="text-amber-900">
+                         Outstanding visit balance:{" "}
+                         <span className="font-bold">{formatLkr(totalBalanceDue)}</span>
+                       </p>
+                       <p className="text-xs text-amber-800/90">
+                         {unpaidVisitCount} unpaid visit{unpaidVisitCount === 1 ? "" : "s"} on record.
+                         Collect payment before or after re-admission.
+                       </p>
+                     </div>
+                   ) : (
+                     <div
+                       className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+                       data-testid="readmit-no-past-due"
+                     >
+                       No outstanding visit balance on this patient.
+                     </div>
+                   )}
+                   <AlertDialogFooter>
+                     <AlertDialogCancel>Cancel</AlertDialogCancel>
+                     <AlertDialogAction onClick={handleReadmitPatient}>Re-admit</AlertDialogAction>
+                   </AlertDialogFooter>
+                 </AlertDialogContent>
+               </AlertDialog>
              )}
           </div>
           

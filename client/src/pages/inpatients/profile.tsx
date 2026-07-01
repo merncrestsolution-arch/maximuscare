@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Phone, MapPin, Calendar, User, Clock, Trash2, Edit, Pencil, Plus, CreditCard, Receipt } from "lucide-react";
+import { ArrowLeft, Loader2, Phone, MapPin, Calendar, User, Clock, Trash2, Edit, Pencil, Plus, CreditCard, Receipt, AlertTriangle } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { formatMoney } from "@/lib/reportDatePresets";
 import { useToast } from "@/hooks/use-toast";
@@ -50,6 +50,7 @@ export default function InPatientProfilePage() {
   const patientId = params?.id || "";
 
   const { data: patient, isLoading, error } = useInPatient(patientId);
+  const { data: linkedPatientStats } = usePatientStats(patient?.patientId ?? "");
   const { data: sessions } = useInPatientSessions(patientId);
   const { data: discharge } = useInPatientDischarge(patientId);
   const { data: payments } = useInPatientPayments(patientId);
@@ -269,26 +270,6 @@ export default function InPatientProfilePage() {
         title: "Error", 
         description: error instanceof Error ? error.message : "Failed to delete session", 
         variant: "destructive" 
-      });
-    }
-  };
-
-  const handleReadmit = async () => {
-    try {
-      const newAdmission = await readmitInPatient.mutateAsync({
-        admissionId: patientId,
-        admitDate: readmitDate || undefined,
-      });
-      toast({ title: "Success", description: "Patient re-admitted" });
-      setReadmitDate("");
-      if (newAdmission?.id && newAdmission.id !== patientId) {
-        setLocation(`/inpatients/${newAdmission.id}`);
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to re-admit",
-        variant: "destructive",
       });
     }
   };
@@ -616,6 +597,36 @@ export default function InPatientProfilePage() {
   // payments so the Discharge Summary reconciles with the live Billing Summary even
   // when payments are added after the discharge was created.
   const dischargeBalance = discharge ? Number(discharge.grandTotal) - paymentTotal : 0;
+  const pastDueAdmission = Math.max(0, dischargeBalance);
+  const pastDueOutpatient = Math.max(0, Number(linkedPatientStats?.outstandingAmount ?? 0));
+  const totalPastDue = pastDueAdmission + pastDueOutpatient;
+
+  const handleReadmit = async () => {
+    try {
+      const newAdmission = await readmitInPatient.mutateAsync({
+        admissionId: patientId,
+        admitDate: readmitDate || undefined,
+      });
+      toast({
+        title: "Success",
+        description:
+          totalPastDue > 0
+            ? `Patient re-admitted. Past due balance: LKR ${formatMoney(totalPastDue)}`
+            : "Patient re-admitted",
+      });
+      setReadmitDate("");
+      if (newAdmission?.id && newAdmission.id !== patientId) {
+        setLocation(`/inpatients/${newAdmission.id}`);
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to re-admit",
+        variant: "destructive",
+      });
+    }
+  };
+
   const billingColumns = [
     { key: "item", label: "Item" },
     { key: "quantity", label: "Qty/Days" },
@@ -1368,10 +1379,44 @@ export default function InPatientProfilePage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Re-admit this patient?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will set the patient back to Admitted so new sessions can be added.
+                  This will open a new admission so sessions can be added again.
                   Choose the admit date (today or a past date).
                 </AlertDialogDescription>
               </AlertDialogHeader>
+              {totalPastDue > 0 ? (
+                <div
+                  className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm space-y-1"
+                  data-testid="readmit-past-due-warning"
+                >
+                  <div className="flex items-center gap-2 font-semibold text-amber-900">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    Past due amount
+                  </div>
+                  {pastDueAdmission > 0 && (
+                    <p className="text-amber-900">
+                      Previous admission balance: <span className="font-bold">LKR {formatMoney(pastDueAdmission)}</span>
+                    </p>
+                  )}
+                  {pastDueOutpatient > 0 && (
+                    <p className="text-amber-900">
+                      Outpatient visit balance: <span className="font-bold">LKR {formatMoney(pastDueOutpatient)}</span>
+                    </p>
+                  )}
+                  <p className="text-red-700 font-bold pt-1">
+                    Total due: LKR {formatMoney(totalPastDue)}
+                  </p>
+                  <p className="text-xs text-amber-800/90 pt-1">
+                    Collect or record payment for the previous stay before or after re-admission.
+                  </p>
+                </div>
+              ) : (
+                <div
+                  className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+                  data-testid="readmit-no-past-due"
+                >
+                  No past due balance on the previous admission.
+                </div>
+              )}
               {/* Bug 9: re-admit allows selecting a past/present admit date (no future). */}
               <div className="space-y-2">
                 <Label htmlFor="readmit-date">Admit Date</Label>
