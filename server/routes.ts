@@ -66,6 +66,7 @@ import {
   defaultCapabilitiesForRole,
 } from "@shared/mdCapabilities";
 import { loadStaffRoleCapabilities, loadRoleCapabilitiesForUser } from "./services/mdCapabilityService";
+import { logAudit } from "./services/auditService";
 
 async function auditActor(req: Request) {
   const user = (req as any).user;
