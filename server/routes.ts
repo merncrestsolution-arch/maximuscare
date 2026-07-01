@@ -52,6 +52,7 @@ import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
 import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
 import { signPatientQrToken, verifyPatientQrToken } from "./services/qrTokenService";
+import { generateCardId, generatePatientCardBuffers } from "./services/patientIdCardService";
 import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
 import { logAudit } from "./services/auditService";
@@ -1212,6 +1213,51 @@ export async function registerRoutes(
           organizationId,
         });
         return res.json({ token, patientCode: patient.patientCode ?? null, organizationId });
+      } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+      }
+    }
+  );
+
+  // Printable patient ID card (template.svg → PNG/SVG download).
+  app.get(
+    "/api/patients/:id/id-card",
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const currentUser = (req as any).user;
+        const id = param(req, "id");
+        const patient = await storage.getPatient(id);
+        if (!patient || patient.deletedAt) {
+          return res.status(404).json({ message: "Patient not found" });
+        }
+        if (!canViewAllPatients(currentUser.role)) {
+          const ids = await storage.getPatientIdsForStaff(currentUser.staffId);
+          if (!ids.includes(id)) {
+            return res.status(403).json({ message: "Forbidden" });
+          }
+        }
+        const organizationId = organizationForBranch(patient.branch);
+        const patientCode = patient.patientCode ?? id;
+        const token = signPatientQrToken({ patientId: patient.id, organizationId });
+        const format = String(req.query.format ?? "png").toLowerCase();
+        const { svg, png } = await generatePatientCardBuffers({
+          id: patientCode,
+          name: patient.name ?? "—",
+          phone: patient.phone ?? "",
+          address: patient.address ?? "",
+          cardId: generateCardId(patientCode),
+          qrToken: token,
+        });
+        const safeName = patientCode.replace(/[^a-z0-9._-]+/gi, "-");
+        if (format === "svg") {
+          res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.svg"`);
+          return res.send(svg);
+        }
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.png"`);
+        return res.send(png);
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }
@@ -2490,6 +2536,47 @@ export async function registerRoutes(
           patientCode: admission.patientCode ?? admission.patientIdNo ?? null,
           organizationId,
         });
+      } catch (error: any) {
+        return res.status(500).json({ message: error.message });
+      }
+    }
+  );
+
+  // Printable in-patient ID card (same template.svg flow as out-patients).
+  app.get(
+    "/api/inpatients/:id/id-card",
+    requireAuth,
+    attachBranchContext(),
+    async (req: Request, res: Response) => {
+      try {
+        const admission = await storage.getInPatientAdmission(param(req, "id"));
+        if (!admission) {
+          return res.status(404).json({ message: "Admission not found" });
+        }
+        const organizationId = resolveSessionOrganization(req) ?? "maximus";
+        const patientCode = admission.patientCode ?? admission.patientIdNo ?? admission.id;
+        const token = signPatientQrToken({
+          patientId: admission.patientId ?? admission.id,
+          organizationId,
+        });
+        const format = String(req.query.format ?? "png").toLowerCase();
+        const { svg, png } = await generatePatientCardBuffers({
+          id: patientCode,
+          name: admission.patientName ?? "—",
+          phone: admission.phone ?? "",
+          address: admission.address ?? "",
+          cardId: generateCardId(patientCode),
+          qrToken: token,
+        });
+        const safeName = patientCode.replace(/[^a-z0-9._-]+/gi, "-");
+        if (format === "svg") {
+          res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+          res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.svg"`);
+          return res.send(svg);
+        }
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.png"`);
+        return res.send(png);
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }

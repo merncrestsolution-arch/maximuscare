@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import { usePatientQrToken, useInPatientQrToken, useBranches } from "@/hooks/useData";
-import { organizationForBranch } from "@shared/branchAccess";
-import { BRANCH_OPTIONS } from "@/lib/branches";
+import { usePatientQrToken, useInPatientQrToken } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,7 +10,6 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { QrCode as QrIcon, Download, Loader2, IdCard } from "lucide-react";
-import { useBranding } from "@/context/branding-context";
 import { useToast } from "@/hooks/use-toast";
 import { downloadPatientIdCard } from "@/lib/idCard";
 
@@ -35,36 +32,10 @@ interface Props {
  * Shared "Show QR Code" + "Download ID Card" actions for any patient profile
  * (out-patient or in-patient). The QR encodes a server-signed token (never the raw
  * id) so a scanned/printed card can't be forged across organizations. The ID card is
- * a print-ready CR80 PDF with the org logo, QR, name, ID, phone, hotline and footer.
+ * a print-ready PNG generated from template.svg on the server.
  */
-export function PatientCredentials({ kind, id, patientName, patientCode, phone, address, condition, branchName, branchId, registeredDate }: Props) {
-  const { logoUri } = useBranding();
+export function PatientCredentials({ kind, id, patientName, patientCode }: Props) {
   const { toast } = useToast();
-  const { data: allBranches = [] } = useBranches();
-
-  /** Friendly label for a branch (falls back to its raw name). */
-  const branchLabel = (value: string, fallback: string) =>
-    BRANCH_OPTIONS.find((b) => b.value === value)?.label ?? fallback;
-
-  const resolvedBranchName =
-    branchName ||
-    (branchId
-      ? (allBranches as Array<{ id: string; name: string; branchName?: string | null }>).find((b) => b.id === branchId)
-          ?.branchName ??
-        (allBranches as Array<{ id: string; name: string; branchName?: string | null }>).find((b) => b.id === branchId)
-          ?.name ??
-        null
-      : null);
-
-  /** Active branch display names for an organization — pulled dynamically. */
-  const branchesForOrg = (org: "maximus" | "nexus"): string[] => {
-    const list = (allBranches as Array<{ name: string; branchName?: string | null; isActive?: boolean | number }>)
-      .filter((b) => b.isActive !== false && b.isActive !== 0)
-      .map((b) => b.branchName ?? b.name)
-      .filter((name) => org === "maximus" ? true : organizationForBranch(name) === org)
-      .map((name) => branchLabel(name, name));
-    return Array.from(new Set(list));
-  };
   const [qrOpen, setQrOpen] = useState(false);
   const [active, setActive] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -96,25 +67,12 @@ export function PatientCredentials({ kind, id, patientName, patientCode, phone, 
   };
 
   const handleDownloadIdCard = async () => {
-    setActive(true);
     setDownloading(true);
     try {
-      const result = tokenQuery.data ?? (await tokenQuery.refetch()).data;
-      if (!result?.token) {
-        throw new Error("Could not generate the patient QR for the card.");
-      }
       await downloadPatientIdCard({
-        organizationId: result.organizationId,
-        logoUri,
-        qrToken: result.token,
-        patientName,
-        patientIdNumber: patientCode ?? result.patientCode ?? id,
-        phone: phone ?? "",
-        address: address ?? "",
-        condition: condition ?? "",
-        branches: branchesForOrg(result.organizationId),
-        branchName: resolvedBranchName ?? undefined,
-        registeredDate: registeredDate ?? undefined,
+        kind,
+        recordId: id,
+        patientCode: patientCode ?? tokenQuery.data?.patientCode ?? null,
       });
     } catch (e) {
       toast({
