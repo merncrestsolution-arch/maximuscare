@@ -125,19 +125,27 @@ function matchesBranchScope(
   branchName: string | null
 ): boolean {
   if (!branchId && !branchName) return true;
-  if (branchId && record.branchId) return record.branchId === branchId;
+  if (branchId && record.branchId && record.branchId === branchId) return true;
   if (branchName && record.branch) {
-    return normalizeBranchName(record.branch).toLowerCase() === normalizeBranchName(branchName).toLowerCase();
+    return (
+      normalizeBranchName(record.branch).toLowerCase() ===
+      normalizeBranchName(branchName).toLowerCase()
+    );
   }
-  return false;
+  // Legacy rows without branch metadata — keep them; list queries are already
+  // branch-scoped at the DB layer or via staff-id sets (attendance).
+  return !record.branchId && !record.branch;
 }
 
 function matchesOrganizationScope(
   record: { branch?: string | null },
-  organizationId: OrganizationId | null
+  organizationId: OrganizationId | null,
+  branchName?: string | null
 ): boolean {
   if (!organizationId) return true;
-  if (!record.branch) return false;
+  // A selected branch already implies the organization tenancy boundary.
+  if (branchName) return true;
+  if (!record.branch) return true;
   return organizationForBranch(record.branch) === organizationId;
 }
 
@@ -1028,7 +1036,7 @@ export async function registerRoutes(
           limit: l,
         });
         const scoped = result.data.filter(
-          (p) => matchesBranchScope(p, branchId, branchName) && matchesOrganizationScope(p, organizationId)
+          (p) => matchesBranchScope(p, branchId, branchName) && matchesOrganizationScope(p, organizationId, branchName)
         );
         return res.json({
           data: scoped,
@@ -1055,7 +1063,7 @@ export async function registerRoutes(
         }
       }
       const scoped = patientList.filter(
-        (p) => matchesBranchScope(p, branchId, branchName) && matchesOrganizationScope(p, organizationId)
+        (p) => matchesBranchScope(p, branchId, branchName) && matchesOrganizationScope(p, organizationId, branchName)
       );
       return res.json(scoped);
     } catch (error: any) {
@@ -1403,7 +1411,7 @@ export async function registerRoutes(
       let unpaid = await storage.getUnpaidVisits(staffId);
       if (branchName) unpaid = filterByBranchName(unpaid, branchName);
       const scoped = unpaid.filter(
-        (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId)
+        (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId, branchName)
       );
       return res.json(scoped);
     } catch (error: any) {
@@ -1436,7 +1444,7 @@ export async function registerRoutes(
           limit: l,
         });
         const scoped = result.data.filter(
-          (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId)
+          (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId, branchName)
         );
         return res.json({
           data: scoped,
@@ -1478,7 +1486,7 @@ export async function registerRoutes(
         );
       }
       const scoped = visitList.filter(
-        (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId)
+        (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId, branchName)
       );
       return res.json(scoped);
     } catch (error: any) {
@@ -1862,7 +1870,7 @@ export async function registerRoutes(
       }
       if (branch || organizationId) {
         attendance = attendance.filter(
-          (a: any) => matchesBranchScope(a, branchId, branchName) && matchesOrganizationScope(a, organizationId)
+          (a: any) => matchesBranchScope(a, branchId, branchName) && matchesOrganizationScope(a, organizationId, branchName)
         );
       }
 
@@ -3376,7 +3384,7 @@ export async function registerRoutes(
         expensesList = filterByBranchName(expensesList, branchName);
       }
       const scoped = expensesList.filter(
-        (e: any) => matchesBranchScope(e, branchId, branchName) && matchesOrganizationScope(e, organizationId)
+        (e: any) => matchesBranchScope(e, branchId, branchName) && matchesOrganizationScope(e, organizationId, branchName)
       );
       return res.json(scoped);
     } catch (error: any) {

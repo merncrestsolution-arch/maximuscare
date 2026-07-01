@@ -11,8 +11,9 @@ export function usePatients(params?: {
   page?: number;
   limit?: number;
 }) {
+  const { selectedBranchId, selectedBranchName } = useBranch();
   return useQuery({
-    queryKey: ['patients', params],
+    queryKey: ['patients', params, selectedBranchId, selectedBranchName],
     queryFn: () => patientApi.getAll(params).then(unwrapPaginatedList),
   });
 }
@@ -88,8 +89,9 @@ export function usePatientHistory(id: string) {
 
 // Visit hooks
 export function useVisits(params?: { patientId?: string; startDate?: string; endDate?: string }) {
+  const { selectedBranchId, selectedBranchName } = useBranch();
   return useQuery({
-    queryKey: ['visits', params],
+    queryKey: ['visits', params, selectedBranchId, selectedBranchName],
     queryFn: () => visitApi.getAll(params),
     enabled: params?.patientId === undefined || !!params.patientId,
   });
@@ -149,8 +151,9 @@ export function useDeleteVisit() {
 
 // Attendance hooks
 export function useAttendance(params?: { staffId?: string; startDate?: string; endDate?: string; month?: string }) {
+  const { selectedBranchId, selectedBranchName } = useBranch();
   return useQuery({
-    queryKey: ['attendance', params],
+    queryKey: ['attendance', params, selectedBranchId, selectedBranchName],
     queryFn: () => attendanceApi.getAll(params),
     enabled: params?.staffId === undefined || !!params.staffId,
   });

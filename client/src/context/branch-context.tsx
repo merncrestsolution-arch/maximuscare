@@ -87,6 +87,12 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
         void queryClient.invalidateQueries({ queryKey: ["expenses"] });
         void queryClient.invalidateQueries({ queryKey: ["appointments"] });
         void queryClient.invalidateQueries({ queryKey: ["inpatients"] });
+        void queryClient.refetchQueries({ queryKey: ["patients"], type: "active" });
+        void queryClient.refetchQueries({ queryKey: ["visits"], type: "active" });
+        void queryClient.refetchQueries({ queryKey: ["attendance"], type: "active" });
+        void queryClient.refetchQueries({ queryKey: ["staff"], type: "active" });
+        void queryClient.refetchQueries({ queryKey: ["staff-directory"], type: "active" });
+        void queryClient.refetchQueries({ queryKey: ["dashboard-kpis"], type: "active" });
       } finally {
         setOptimisticBranchId(null);
       }
