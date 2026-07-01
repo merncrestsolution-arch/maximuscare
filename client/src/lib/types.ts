@@ -164,6 +164,20 @@ export interface InPatientPriorEpisode {
   amountPaid: number;
   pendingBalance: number;
   sessionCount: number;
+  breakdown: {
+    stayDays: number;
+    roomCharges: number;
+    careTakerDays: number;
+    caretakerCharges: number;
+    extraExpenseTotal: number;
+    subtotal: number;
+    deductionAmount: number;
+    deductionType: string | null;
+    deductionValue: number | null;
+    deductionReason: string | null;
+    amountPerDay: number;
+    careTakerRatePerDay: number;
+  } | null;
 }
 
 export interface OtherCharge {

@@ -27,24 +27,30 @@ describe("inpatientBilling", () => {
     expect(total).toBe(6500);
   });
 
-  it("allocates payments to the current episode before prior balance", () => {
+  it("allocates payments to previous due before the current episode", () => {
     expect(splitReAdmissionPayments(3000, 5000, 10000)).toEqual({
-      currentEpisodePaid: 3000,
-      priorBalancePaid: 0,
-      currentBalanceDue: 2000,
-      priorBalanceDue: 10000,
+      priorBalancePaid: 3000,
+      currentEpisodePaid: 0,
+      priorBalanceDue: 7000,
+      currentBalanceDue: 5000,
     });
     expect(splitReAdmissionPayments(8000, 5000, 10000)).toEqual({
-      currentEpisodePaid: 5000,
-      priorBalancePaid: 3000,
-      currentBalanceDue: 0,
-      priorBalanceDue: 7000,
+      priorBalancePaid: 8000,
+      currentEpisodePaid: 0,
+      priorBalanceDue: 2000,
+      currentBalanceDue: 5000,
+    });
+    expect(splitReAdmissionPayments(12000, 5000, 10000)).toEqual({
+      priorBalancePaid: 10000,
+      currentEpisodePaid: 2000,
+      priorBalanceDue: 0,
+      currentBalanceDue: 3000,
     });
     expect(splitReAdmissionPayments(16000, 5000, 10000)).toEqual({
-      currentEpisodePaid: 5000,
       priorBalancePaid: 10000,
-      currentBalanceDue: 0,
+      currentEpisodePaid: 5000,
       priorBalanceDue: 0,
+      currentBalanceDue: 0,
     });
   });
 

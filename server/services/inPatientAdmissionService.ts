@@ -3,6 +3,7 @@ import type { IStorage } from "../storage";
 import {
   collectReadmitChainPriorAdmissionIds,
   computeAdmissionBalanceDue,
+  computeAdmissionBillingBreakdown,
   computeAdmissionGrandTotal,
   formatReadmitAdmissionSource,
   parseReadmitAdmissionSource,
@@ -192,6 +193,20 @@ export interface PriorInPatientEpisode {
   amountPaid: number;
   pendingBalance: number;
   sessionCount: number;
+  breakdown: {
+    stayDays: number;
+    roomCharges: number;
+    careTakerDays: number;
+    caretakerCharges: number;
+    extraExpenseTotal: number;
+    subtotal: number;
+    deductionAmount: number;
+    deductionType: string | null;
+    deductionValue: number | null;
+    deductionReason: string | null;
+    amountPerDay: number;
+    careTakerRatePerDay: number;
+  } | null;
 }
 
 /** Prior admission episodes with billing + session counts (read-only; readmit chain only). */
@@ -217,8 +232,8 @@ export async function getPriorInPatientEpisodes(
       storage.getInPatientExtraExpensesByAdmission(prior.id),
     ]);
     const sessions = await storage.getInPatientSessionsByAdmission(prior.id);
-    const grandTotal = discharge
-      ? computeAdmissionGrandTotal({
+    const billingInput = discharge
+      ? {
           admitDate: prior.admitDate,
           endDate: discharge.dischargeDate,
           amountPerDay: prior.amountPerDay,
@@ -227,8 +242,10 @@ export async function getPriorInPatientEpisodes(
           deductionType: (prior as { deductionType?: "fixed" | "percentage" | null }).deductionType,
           deductionValue: (prior as { deductionValue?: string | null }).deductionValue,
           extraExpenses,
-        })
+        }
       : null;
+    const breakdown = billingInput ? computeAdmissionBillingBreakdown(billingInput) : null;
+    const grandTotal = breakdown?.grandTotal ?? null;
     episodes.push({
       admissionId: prior.id,
       admitDate: prior.admitDate,
@@ -238,6 +255,22 @@ export async function getPriorInPatientEpisodes(
       amountPaid,
       pendingBalance: grandTotal !== null ? computeAdmissionBalanceDue(grandTotal, amountPaid) : 0,
       sessionCount: sessions.length,
+      breakdown: breakdown
+        ? {
+            stayDays: breakdown.stayDays,
+            roomCharges: breakdown.roomCharges,
+            careTakerDays: breakdown.careTakerDays,
+            caretakerCharges: breakdown.caretakerCharges,
+            extraExpenseTotal: breakdown.extraExpenseTotal,
+            subtotal: breakdown.subtotal,
+            deductionAmount: breakdown.deductionAmount,
+            deductionType: (prior as { deductionType?: string | null }).deductionType ?? null,
+            deductionValue: parseFloat(String((prior as { deductionValue?: string | null }).deductionValue ?? 0)) || null,
+            deductionReason: (prior as { deductionReason?: string | null }).deductionReason ?? null,
+            amountPerDay: parseFloat(String(prior.amountPerDay)) || 0,
+            careTakerRatePerDay: parseFloat(String(prior.careTakerRatePerDay ?? 0)) || 0,
+          }
+        : null,
     });
   }
 

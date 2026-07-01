@@ -25,17 +25,15 @@ export function sumCarriedForwardAmounts(
     .reduce((sum, expense) => sum + (parseFloat(String(expense.amount)) || 0), 0);
 }
 
-/** Allocate payments to the current episode first, then to carried-forward prior balance. */
+/** Allocate payments to carried-forward prior balance first, then the current episode. */
 export function splitReAdmissionPayments(
   paymentTotal: number,
   currentEpisodeGrandTotal: number,
   carriedForwardTotal: number,
 ) {
-  const currentEpisodePaid = Math.min(paymentTotal, Math.max(0, currentEpisodeGrandTotal));
-  const priorBalancePaid = Math.min(
-    carriedForwardTotal,
-    Math.max(0, paymentTotal - currentEpisodeGrandTotal),
-  );
+  const priorBalancePaid = Math.min(paymentTotal, Math.max(0, carriedForwardTotal));
+  const remainder = Math.max(0, paymentTotal - priorBalancePaid);
+  const currentEpisodePaid = Math.min(remainder, Math.max(0, currentEpisodeGrandTotal));
   const currentBalanceDue = Math.max(0, currentEpisodeGrandTotal - currentEpisodePaid);
   const priorBalanceDue = Math.max(0, carriedForwardTotal - priorBalancePaid);
 
@@ -44,6 +42,45 @@ export function splitReAdmissionPayments(
     priorBalancePaid,
     currentBalanceDue,
     priorBalanceDue,
+  };
+}
+
+export type AdmissionBillingBreakdown = {
+  stayDays: number;
+  roomCharges: number;
+  careTakerDays: number;
+  caretakerCharges: number;
+  extraExpenseTotal: number;
+  subtotal: number;
+  deductionAmount: number;
+  grandTotal: number;
+};
+
+export function computeAdmissionBillingBreakdown(input: AdmissionBillingInput): AdmissionBillingBreakdown {
+  const stayDays = computeStayDays(input.admitDate, input.endDate);
+  const amountPerDay = parseFloat(String(input.amountPerDay)) || 0;
+  const roomCharges = amountPerDay * stayDays;
+  const careTakerRate = parseFloat(String(input.careTakerRatePerDay ?? 0)) || 0;
+  const careTakerDays = input.careTakerDaysOverride ?? stayDays;
+  const caretakerCharges = careTakerRate * careTakerDays;
+  const extraExpenseTotal = (input.extraExpenses || []).reduce(
+    (sum, expense) => sum + (parseFloat(String(expense.amount)) || 0),
+    0,
+  );
+  const subtotal = roomCharges + caretakerCharges + extraExpenseTotal;
+  const deductionValue = parseFloat(String(input.deductionValue ?? 0)) || 0;
+  const deductionAmount = computeDeductionAmount(subtotal, input.deductionType, deductionValue);
+  const grandTotal = Math.max(0, subtotal - deductionAmount);
+
+  return {
+    stayDays,
+    roomCharges,
+    careTakerDays,
+    caretakerCharges,
+    extraExpenseTotal,
+    subtotal,
+    deductionAmount,
+    grandTotal,
   };
 }
 
@@ -90,20 +127,7 @@ export type AdmissionBillingInput = {
 
 /** Live grand total for an admission episode (matches the in-patient billing summary). */
 export function computeAdmissionGrandTotal(input: AdmissionBillingInput): number {
-  const stayDays = computeStayDays(input.admitDate, input.endDate);
-  const amountPerDay = parseFloat(String(input.amountPerDay)) || 0;
-  const roomCharges = amountPerDay * stayDays;
-  const careTakerRate = parseFloat(String(input.careTakerRatePerDay ?? 0)) || 0;
-  const careTakerDays = input.careTakerDaysOverride ?? stayDays;
-  const caretakerCharges = careTakerRate * careTakerDays;
-  const extraExpenseTotal = (input.extraExpenses || []).reduce(
-    (sum, expense) => sum + (parseFloat(String(expense.amount)) || 0),
-    0,
-  );
-  const subtotal = roomCharges + caretakerCharges + extraExpenseTotal;
-  const deductionValue = parseFloat(String(input.deductionValue ?? 0)) || 0;
-  const deductionAmount = computeDeductionAmount(subtotal, input.deductionType, deductionValue);
-  return Math.max(0, subtotal - deductionAmount);
+  return computeAdmissionBillingBreakdown(input).grandTotal;
 }
 
 export function computeAdmissionBalanceDue(grandTotal: number, paymentTotal: number): number {

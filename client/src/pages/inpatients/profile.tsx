@@ -701,19 +701,19 @@ export default function InPatientProfilePage() {
   const showingPreviousBilling = showBillingHistoryToggle && billingSummaryView === "previous";
   const getPriorEpisodeBilling = (episode: InPatientPriorEpisode, index: number) => {
     const isMostRecentPrior = index === 0;
-    if (isMostRecentPrior && hasCarriedForwardBalance) {
-      const pending = priorBalanceDue;
-      const paid = Math.max(0, carriedForwardTotal - pending);
-      return {
-        grandTotal: episode.grandTotal ?? carriedForwardTotal,
-        paid,
-        pending,
-      };
-    }
+    const paidDuringAdmission = episode.amountPaid;
+    const paidAfterReadmit =
+      isMostRecentPrior && hasCarriedForwardBalance ? priorBalancePaid : 0;
+    const totalPaid = paidDuringAdmission + paidAfterReadmit;
+    const pending =
+      isMostRecentPrior && hasCarriedForwardBalance ? priorBalanceDue : episode.pendingBalance;
+
     return {
       grandTotal: episode.grandTotal ?? 0,
-      paid: episode.amountPaid,
-      pending: episode.pendingBalance,
+      paidDuringAdmission,
+      paidAfterReadmit,
+      paid: totalPaid,
+      pending,
     };
   };
   const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode, index) => {
@@ -780,9 +780,13 @@ export default function InPatientProfilePage() {
                 ? `Discharged ${format(new Date(episode.dischargeDate), "dd MMM yyyy")}`
                 : "-",
             },
-            { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(billing.grandTotal) },
-            { item: "Amount Paid", quantity: "-", rate: "-", amount: formatMoney(billing.paid) },
-            { item: "Pending Balance", quantity: "-", rate: "-", amount: formatMoney(billing.pending) },
+        { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(billing.grandTotal) },
+        { item: "Paid during that admission", quantity: "-", rate: "-", amount: formatMoney(billing.paidDuringAdmission) },
+        ...(billing.paidAfterReadmit > 0
+          ? [{ item: "Paid after re-admit", quantity: "-", rate: "-", amount: formatMoney(billing.paidAfterReadmit) }]
+          : []),
+        { item: "Total Paid", quantity: "-", rate: "-", amount: formatMoney(billing.paid) },
+        { item: "Pending Balance", quantity: "-", rate: "-", amount: formatMoney(billing.pending) },
           ];
         })
       : [
@@ -804,7 +808,13 @@ export default function InPatientProfilePage() {
           ? [{ item: deductionLabel, quantity: "-", rate: "-", amount: `-${formatMoney(currentDeductionAmount)}` }]
           : []),
         { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(currentGrandTotal) },
-        { item: "Total Paid", quantity: "-", rate: "-", amount: formatMoney(currentEpisodePaid) },
+        ...(hasCarriedForwardBalance
+          ? [
+              { item: "Paid toward previous due", quantity: "-", rate: "-", amount: formatMoney(priorBalancePaid) },
+              { item: "Paid toward current stay", quantity: "-", rate: "-", amount: formatMoney(currentEpisodePaid) },
+            ]
+          : []),
+        { item: "Total Payments Recorded", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
         ...(hasPriorPendingInSummary
           ? [
               { item: "Current Episode Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) },
@@ -1116,6 +1126,11 @@ export default function InPatientProfilePage() {
                     <div className="space-y-3">
                       {priorEpisodes.map((episode, index) => {
                         const billing = getPriorEpisodeBilling(episode, index);
+                        const b = episode.breakdown;
+                        const priorDeductionLabel =
+                          b?.deductionType === "percentage" && b.deductionValue
+                            ? `Deduction (${b.deductionValue}%)`
+                            : "Deduction";
                         return (
                           <div
                             key={episode.admissionId}
@@ -1124,7 +1139,7 @@ export default function InPatientProfilePage() {
                           >
                             <div className="mb-2 flex flex-wrap items-center gap-2">
                               <span className="text-sm font-semibold text-foreground">
-                                {format(new Date(episode.admitDate), "dd MMM yyyy")}
+                                Admission {format(new Date(episode.admitDate), "dd MMM yyyy")}
                               </span>
                               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
                                 {episode.status}
@@ -1132,12 +1147,63 @@ export default function InPatientProfilePage() {
                             </div>
                             {episode.dischargeDate && (
                               <BillingLine
-                                label="Discharge Date"
+                                label="Discharged"
                                 value={format(new Date(episode.dischargeDate), "dd MMM yyyy")}
                               />
                             )}
-                            <BillingLine label="Grand Total" value={`LKR ${formatMoney(billing.grandTotal)}`} />
-                            <BillingLine label="Amount Paid" value={`LKR ${formatMoney(billing.paid)}`} tone="success" />
+                            {b ? (
+                              <>
+                                <p className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
+                                  Discharge bill details
+                                </p>
+                                <BillingLine
+                                  label="Stay Days"
+                                  value={`${b.stayDays} day${b.stayDays > 1 ? "s" : ""}`}
+                                />
+                                <BillingLine
+                                  label={`Room (${formatMoney(b.amountPerDay)} × ${b.stayDays})`}
+                                  value={`LKR ${formatMoney(b.roomCharges)}`}
+                                />
+                                <BillingLine
+                                  label={`Caretaker (${formatMoney(b.careTakerRatePerDay)} × ${b.careTakerDays})`}
+                                  value={`LKR ${formatMoney(b.caretakerCharges)}`}
+                                />
+                                <BillingLine
+                                  label="Extra Expenses"
+                                  value={`LKR ${formatMoney(b.extraExpenseTotal)}`}
+                                />
+                                <BillingLine label="Subtotal" value={`LKR ${formatMoney(b.subtotal)}`} emphasized />
+                                {b.deductionAmount > 0 && (
+                                  <BillingLine
+                                    label={priorDeductionLabel}
+                                    value={`- LKR ${formatMoney(b.deductionAmount)}`}
+                                    tone="danger"
+                                    sublabel={b.deductionReason || undefined}
+                                  />
+                                )}
+                              </>
+                            ) : null}
+                            <BillingLine label="Grand Total" value={`LKR ${formatMoney(billing.grandTotal)}`} emphasized />
+                            <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
+                              Payments
+                            </p>
+                            <BillingLine
+                              label="Paid during that admission"
+                              value={`LKR ${formatMoney(billing.paidDuringAdmission)}`}
+                              tone="success"
+                            />
+                            {billing.paidAfterReadmit > 0 && (
+                              <BillingLine
+                                label="Paid after re-admit (this admission)"
+                                value={`LKR ${formatMoney(billing.paidAfterReadmit)}`}
+                                tone="success"
+                              />
+                            )}
+                            <BillingLine
+                              label="Total Paid"
+                              value={`LKR ${formatMoney(billing.paid)}`}
+                              tone="success"
+                            />
                             <BillingLine
                               label="Pending Balance"
                               value={`LKR ${formatMoney(billing.pending)}`}
@@ -1167,10 +1233,15 @@ export default function InPatientProfilePage() {
                         testId="text-prior-balance"
                       />
                       <BillingLine
-                        label="Amount Paid"
+                        label="Paid after re-admit (this admission)"
                         value={`LKR ${formatMoney(priorBalancePaid)}`}
                         tone="success"
                         testId="text-prior-paid"
+                      />
+                      <BillingLine
+                        label="Total paid toward previous due"
+                        value={`LKR ${formatMoney(carriedForwardTotal - priorBalanceDue)}`}
+                        tone="success"
                       />
                       <BillingLine
                         label="Pending Balance"
@@ -1183,6 +1254,11 @@ export default function InPatientProfilePage() {
                   )
                 ) : (
                   <>
+                    {hasCarriedForwardBalance && (
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#105691]/80">
+                        Current stay charges
+                      </p>
+                    )}
                     <BillingLine
                       label="Stay Days"
                       value={`${stayDays} day${stayDays > 1 ? "s" : ""}`}
@@ -1224,22 +1300,44 @@ export default function InPatientProfilePage() {
                       emphasized
                       testId="text-grand-total"
                     />
+
+                    {hasCarriedForwardBalance && (
+                      <>
+                        <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-[#105691]/80">
+                          Payments (previous due cleared first)
+                        </p>
+                        <BillingLine
+                          label="Paid toward previous admission"
+                          value={`LKR ${formatMoney(priorBalancePaid)}`}
+                          tone="success"
+                        />
+                        <BillingLine
+                          label="Paid toward current stay"
+                          value={`LKR ${formatMoney(currentEpisodePaid)}`}
+                          tone="success"
+                        />
+                      </>
+                    )}
                     <BillingLine
-                      label="Total Paid"
-                      value={`LKR ${formatMoney(currentEpisodePaid)}`}
+                      label="Total Payments Recorded"
+                      value={`LKR ${formatMoney(paymentTotal)}`}
                       tone="success"
                       testId="text-total-paid"
                     />
+
+                    <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-[#105691]/80">
+                      Balance
+                    </p>
                     {hasPriorPendingInSummary && (
                       <BillingLine
-                        label="Previous Admission Due"
+                        label="Previous admission due"
                         value={`LKR ${formatMoney(priorPendingForCurrentAdmission)}`}
                         tone="danger"
                         testId="text-prior-balance-due-inline"
                       />
                     )}
                     <BillingLine
-                      label={hasPriorPendingInSummary ? "Current Episode Balance Due" : "Balance Due"}
+                      label={hasPriorPendingInSummary ? "Current stay due" : "Balance Due"}
                       value={`LKR ${formatMoney(currentBalanceDue)}`}
                       tone={currentBalanceDue > 0 ? "danger" : "success"}
                       emphasized={!hasPriorPendingInSummary}
@@ -1259,8 +1357,8 @@ export default function InPatientProfilePage() {
 
                 {showBillingHistoryToggle && !showingPreviousBilling && hasPriorPendingInSummary && (
                   <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="text-prior-balance-note">
-                    Includes LKR {formatMoney(priorPendingForCurrentAdmission)} carried forward from a previous admission.
-                    Switch to <span className="font-semibold">Previous</span> for a full breakdown.
+                    Payments are applied to the previous admission balance first, then to the current stay.
+                    Switch to <span className="font-semibold">Previous</span> for the full discharge bill breakdown.
                   </p>
                 )}
               </div>
