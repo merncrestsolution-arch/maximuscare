@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useAuth } from "@/context/auth-context";
 import { useStaffMember, useCreateStaff, useUpdateStaff, useDeleteStaff } from "@/hooks/useData";
@@ -79,39 +79,62 @@ export default function StaffEditPage() {
   const [formData, setFormData] = useState<FormDataWithPassword>(
     { ...DEFAULT_STAFF, password: "", confirmPassword: "" }
   );
+  const hydratedStaffIdRef = useRef<string | null>(null);
+  const newStaffInitializedRef = useRef(false);
+
+  const branchOptionsKey = useMemo(
+    () => branchOptions.map((b) => `${b.id}:${b.value}`).join("|"),
+    [branchOptions],
+  );
+
+  // Load staff record once per staff id — avoid wiping in-progress edits on refetch.
+  useEffect(() => {
+    if (!isEdit || !existing?.id) return;
+    if (hydratedStaffIdRef.current === existing.id) return;
+    hydratedStaffIdRef.current = existing.id;
+    newStaffInitializedRef.current = false;
+
+    setFormData({
+      ...existing,
+      joinDate: toDateInputValue((existing as any).joiningDate || (existing as any).joinDate || existing.createdAt),
+    });
+    if (existing.roleCapabilities) {
+      setRoleCapabilities(existing.roleCapabilities);
+    } else if (roleHasConfigurableCapabilities(existing.role)) {
+      setRoleCapabilities(defaultCapabilitiesForRole(existing.role));
+    }
+  }, [isEdit, existing?.id, existing]);
 
   useEffect(() => {
-    if (isEdit) {
-      if (!existing) return;
-      setFormData({
-        ...existing,
-        joinDate: toDateInputValue((existing as any).joiningDate || (existing as any).joinDate || existing.createdAt),
-      });
-      if (existing?.roleCapabilities) {
-        setRoleCapabilities(existing.roleCapabilities);
-      } else if (roleHasConfigurableCapabilities(existing.role)) {
-        setRoleCapabilities(defaultCapabilitiesForRole(existing.role));
-      }
-      const existingIds = (existing as any).branchIds as string[] | undefined;
-      if (existingIds?.length) {
-        setBranchIds(existingIds);
-      } else if (existing.branch) {
-        const match = branchOptions.find((b) => b.value === existing.branch);
-        setBranchIds(match ? [match.id] : []);
-      } else {
-        setBranchIds([]);
-      }
-    } else {
-      setFormData({
-        ...DEFAULT_STAFF,
-        branch: defaultBranch || DEFAULT_STAFF.branch,
-        password: "",
-        confirmPassword: "",
-      });
-      const defaultOption = branchOptions.find((b) => b.value === defaultBranch);
-      setBranchIds(defaultOption ? [defaultOption.id] : branchOptions[0] ? [branchOptions[0].id] : []);
+    if (!isEdit || !existing) return;
+
+    const existingIds = (existing as any).branchIds as string[] | undefined;
+    if (existingIds?.length) {
+      setBranchIds(existingIds);
+      return;
     }
-  }, [isEdit, existing, defaultBranch, isNew, branchOptions]);
+    if (existing.branch && branchOptions.length > 0) {
+      const match = branchOptions.find((b) => b.value === existing.branch);
+      setBranchIds(match ? [match.id] : []);
+    }
+  }, [isEdit, existing?.id, existing?.branch, branchOptionsKey]);
+
+  useEffect(() => {
+    if (isEdit) return;
+    hydratedStaffIdRef.current = null;
+    if (newStaffInitializedRef.current) return;
+    if (!defaultBranch && branchOptions.length === 0) return;
+    newStaffInitializedRef.current = true;
+
+    setFormData({
+      ...DEFAULT_STAFF,
+      branch: defaultBranch || DEFAULT_STAFF.branch,
+      password: "",
+      confirmPassword: "",
+    });
+    const defaultOption = branchOptions.find((b) => b.value === defaultBranch);
+    setBranchIds(defaultOption ? [defaultOption.id] : branchOptions[0] ? [branchOptions[0].id] : []);
+  }, [isEdit, defaultBranch, branchOptionsKey]);
 
   if (!currentUser) return null;
 

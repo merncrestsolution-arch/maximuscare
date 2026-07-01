@@ -29,6 +29,9 @@ interface BranchContextType {
 
 const BranchContext = createContext<BranchContextType | undefined>(undefined);
 
+const EMPTY_BRANCHES: BranchOption[] = [];
+const EMPTY_BRANCH_IDS: string[] = [];
+
 export function BranchProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -141,8 +144,8 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
         selectedContext: optimisticBranchId
           ? null
           : ((data?.selectedContext as OverviewContext | null) ?? null),
-        allowedBranches: data?.allowedBranches ?? [],
-        allowedBranchIds: data?.allowedBranchIds ?? [],
+        allowedBranches: data?.allowedBranches ?? EMPTY_BRANCHES,
+        allowedBranchIds: data?.allowedBranchIds ?? EMPTY_BRANCH_IDS,
         canAccessMaximusOverview: !!data?.canAccessMaximusOverview,
         canAccessNexusOverview: !!data?.canAccessNexusOverview,
         requiresBranchSelection: optimisticBranchId ? false : !!data?.requiresBranchSelection,
