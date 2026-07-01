@@ -46,6 +46,7 @@ import {
   canViewStaff,
   canViewStaffFinancials,
   isManagementRole,
+  isAdminRole,
 } from "./permissions";
 import { hasPermission } from "./rbac/permissions";
 import { registerExtendedRoutes } from "./routes/extended";
@@ -53,7 +54,7 @@ import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
 import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
 import { verifyPatientQrToken } from "./services/qrTokenService";
-import { ensureAdmissionQrToken, ensurePatientDataVersion, getPatientDataHealthSummary, runPatientDataBackfill } from "./services/patientDataVersionService";
+import { ensureAdmissionQrToken, ensurePatientDataVersion, getPatientDataHealthSummary, runPatientDataBackfill, regenerateAllPatientCodes } from "./services/patientDataVersionService";
 import { getOrCreateAdmissionCardPdf, getOrCreatePatientCardPdf, invalidatePatientIdCard, patientIdCardFieldsChanged, bulkPatientCardPdfs } from "./services/patientIdCardCacheService";
 import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
@@ -1308,6 +1309,37 @@ export async function registerRoutes(
       }
       const { batchSize, limit } = (req.body ?? {}) as { batchSize?: number; limit?: number };
       const result = await runPatientDataBackfill(storage, { batchSize, limit });
+      return res.json(result);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/admin/data-health/regenerate-ids", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (!isAdminRole((req as any).user?.role)) {
+        return res.status(403).json({ message: "Admin only" });
+      }
+      const confirm = String((req.body as { confirm?: string })?.confirm ?? "").trim();
+      if (confirm !== "REGENERATE-ALL-IDS") {
+        return res.status(400).json({
+          message: 'Confirmation required. Send { "confirm": "REGENERATE-ALL-IDS" }.',
+        });
+      }
+      const result = await regenerateAllPatientCodes(storage);
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "patient",
+        action: "regenerate_all_ids",
+        recordId: "bulk",
+        newValue: {
+          processed: result.processed,
+          regenerated: result.regenerated,
+          admissionsUpdated: result.admissionsUpdated,
+          errorCount: result.errors.length,
+        },
+      });
       return res.json(result);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -3021,8 +3053,13 @@ export async function registerRoutes(
   // Re-admit a discharged patient (Admin, MD only). Sets the admission back to
   // "Admitted" and removes the prior discharge record so sessions can resume and
   // a fresh discharge can be recorded later.
-  app.post("/api/inpatients/:admissionId/readmit", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
+  app.post("/api/inpatients/:admissionId/readmit", requireAuth, async (req: Request, res: Response) => {
     try {
+      const user = (req as any).user;
+      const { canReAdmitInPatient } = await import("./permissions");
+      if (!canReAdmitInPatient(user.role)) {
+        return res.status(403).json({ message: "You do not have permission to re-admit patients" });
+      }
       const admissionId = param(req, "admissionId");
       const admission = await storage.getInPatientAdmission(admissionId);
       if (!admission) {

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useLocation, useRoute } from "wouter";
+import { useState, useEffect } from "react";
+import { useLocation, useRoute, useSearch } from "wouter";
 import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
 import { PatientCredentials } from "@/components/patients/patient-credentials";
-import { isManager, isBranchManager } from "@/lib/permissions";
+import { isManager, isBranchManager, canReAdmitInPatient } from "@/lib/permissions";
 import { useBranches } from "@/hooks/useData";
 
 const EXPENSE_CATEGORIES = ["Food", "Nurse Visit", "Doctor Visit", "Speech Therapy", "Others"];
@@ -44,6 +44,7 @@ const EXPENSE_CATEGORIES = ["Food", "Nurse Visit", "Doctor Visit", "Speech Thera
 export default function InPatientProfilePage() {
   const [, params] = useRoute("/inpatients/:id");
   const [, setLocation] = useLocation();
+  const search = useSearch();
   const { user } = useAuth();
   const { logoUri } = useBranding();
   const { toast } = useToast();
@@ -137,6 +138,7 @@ export default function InPatientProfilePage() {
   const [editingAdmitDate, setEditingAdmitDate] = useState(false);
   const [admitDateDraft, setAdmitDateDraft] = useState("");
   const [readmitDate, setReadmitDate] = useState("");
+  const [readmitOpen, setReadmitOpen] = useState(false);
   const todayStr = format(new Date(), "yyyy-MM-dd");
   // Bug 4: branch transfer dialog state.
   const [transferOpen, setTransferOpen] = useState(false);
@@ -162,7 +164,14 @@ export default function InPatientProfilePage() {
   const canAddPayment = canViewPayments;
   const canAddSession = patient?.status === "Admitted";
   const canDischarge = isAdminMD && patient?.status === "Admitted";
-  const canReadmit = isAdminMD && patient?.status === "Discharged";
+  const canReadmit = canReAdmitInPatient(user?.role) && patient?.status === "Discharged";
+
+  useEffect(() => {
+    const action = new URLSearchParams(search).get("action");
+    if (action === "readmit" && canReadmit) {
+      setReadmitOpen(true);
+    }
+  }, [search, canReadmit]);
 
   const paymentTotal = paymentTotalData?.total || 0;
   const extraExpenseTotal = extraExpenseTotalData?.total || 0;
@@ -615,6 +624,7 @@ export default function InPatientProfilePage() {
             : "Patient re-admitted",
       });
       setReadmitDate("");
+      setReadmitOpen(false);
       if (newAdmission?.id && newAdmission.id !== patientId) {
         setLocation(`/inpatients/${newAdmission.id}`);
       }
@@ -723,8 +733,25 @@ export default function InPatientProfilePage() {
 
         {/* Bug 13: discharge/transfer never remove the record — surface the status prominently. */}
         {patient.status === "Discharged" && discharge && (
-          <div className="rounded-lg mb-4 px-4 py-2.5 text-sm" style={{ background: "#FEF2F2", color: "#DC2626" }} data-testid="banner-discharged">
-            ⚠️ Patient discharged on {format(new Date((discharge as any).dischargeDate), "dd MMM yyyy")}. The full admission history, sessions and bills below are retained.
+          <div className="rounded-lg mb-4 px-4 py-3 text-sm" style={{ background: "#FEF2F2", color: "#DC2626" }} data-testid="banner-discharged">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <p>
+                Patient discharged on {format(new Date((discharge as any).dischargeDate), "dd MMM yyyy")}.
+                Full admission history, sessions and bills below are retained.
+              </p>
+              {canReadmit && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 border-red-300 bg-white hover:bg-red-50"
+                  onClick={() => setReadmitOpen(true)}
+                  data-testid="button-readmit-banner"
+                >
+                  Re-admit Patient
+                </Button>
+              )}
+            </div>
           </div>
         )}
         {(transferLogs as any[]).length > 0 && (
@@ -1228,22 +1255,17 @@ export default function InPatientProfilePage() {
                       <div className="flex items-center gap-2">
                         <span className="font-medium">LKR {parseFloat(payment.amount).toLocaleString()}</span>
                         {isAdminMD && (
-                          <button
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
                             onClick={() => openEditPayment(payment)}
-                            style={{
-                              background: "#EEF5FB",
-                              color: "#105691",
-                              border: "none",
-                              borderRadius: "6px",
-                              width: "32px",
-                              height: "32px",
-                              cursor: "pointer",
-                              fontSize: "14px",
-                            }}
                             title="Edit payment"
+                            data-testid={`button-edit-payment-${payment.id}`}
                           >
-                            ✏️
-                          </button>
+                            <Edit className="h-3 w-3" />
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -1360,21 +1382,22 @@ export default function InPatientProfilePage() {
         )}
 
         {canReadmit && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                className="w-full h-12"
-                variant="outline"
-                disabled={readmitInPatient.isPending}
-                data-testid="button-readmit"
-              >
-                {readmitInPatient.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Re-admit Patient"
-                )}
-              </Button>
-            </AlertDialogTrigger>
+          <>
+            <Button
+              className="w-full h-12"
+              variant="outline"
+              disabled={readmitInPatient.isPending}
+              onClick={() => setReadmitOpen(true)}
+              data-testid="button-readmit"
+            >
+              {readmitInPatient.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Re-admit Patient"
+              )}
+            </Button>
+
+            <AlertDialog open={readmitOpen} onOpenChange={setReadmitOpen}>
             <AlertDialogContent>
               <AlertDialogHeader>
                 <AlertDialogTitle>Re-admit this patient?</AlertDialogTitle>
@@ -1435,7 +1458,8 @@ export default function InPatientProfilePage() {
                 <AlertDialogAction onClick={handleReadmit}>Re-admit</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
-          </AlertDialog>
+            </AlertDialog>
+          </>
         )}
 
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

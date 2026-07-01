@@ -31,7 +31,7 @@ import { useToast } from "@/hooks/use-toast";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
 import { isPaidStatus, paymentStatusBadgeClass, computeOutstanding, isUnpaidLikeStatus } from "@/lib/paymentStatus";
 import { formatLkr } from "@/lib/reportDatePresets";
-import { isManagementRole, isManager, isBranchManager, isNexusManagingDirector, canViewAllVisits } from "@/lib/permissions";
+import { isManagementRole, isManager, isBranchManager, isNexusManagingDirector, canViewAllVisits, canReAdmitOutpatient } from "@/lib/permissions";
 import { Banknote, Plus } from "lucide-react";
 import { openAuthenticatedFile, patientsApiExtended } from "@/lib/api";
 
@@ -329,7 +329,7 @@ export default function PatientProfile() {
              <Badge className={patient.status === 'Active' ? 'bg-success' : 'bg-muted'} data-testid="badge-patient-status">
                {patient.status}
              </Badge>
-             {patient.status === "Discharged" && ["Admin", "MD", "Receptionist"].includes(user?.role ?? "") && (
+             {patient.status === "Discharged" && canReAdmitOutpatient(user?.role) && (
                <AlertDialog>
                  <AlertDialogTrigger asChild>
                    <Button

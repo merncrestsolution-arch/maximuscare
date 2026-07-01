@@ -1210,6 +1210,19 @@ export function useRunPatientDataBackfill() {
     mutationFn: (data?: { batchSize?: number; limit?: number }) => adminApi.runDataHealthBackfill(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-data-health'] });
+      void queryClient.invalidateQueries({ queryKey: ['patients'] });
+    },
+  });
+}
+
+export function useRegenerateAllPatientIds() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => adminApi.regenerateAllPatientIds(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-data-health'] });
+      void queryClient.invalidateQueries({ queryKey: ['patients'] });
+      void queryClient.invalidateQueries({ queryKey: ['inpatients'] });
     },
   });
 }

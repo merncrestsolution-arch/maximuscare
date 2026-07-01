@@ -79,6 +79,13 @@ export function isSessionRole(role: string | undefined): boolean {
  */
 export { isOperationalLead } from "@shared/roles";
 
+/** Re-admit a discharged in-patient (new admission episode). */
+export function canReAdmitInPatient(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  if (r === "Admin" || r === "MD" || r === "Receptionist") return true;
+  return hasPermission(r, "inpatients.manage");
+}
+
 /** Roles that can view the staff directory and other staff profiles (read access). */
 export function canViewStaff(role: string | undefined): boolean {
   return hasPermission(role, "staff.view");

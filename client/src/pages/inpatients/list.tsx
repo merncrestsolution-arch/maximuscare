@@ -10,7 +10,7 @@ import { PageShell } from "@/components/layout/page-shell";
 import { Loader2, Search, Plus, ChevronRight, User, Phone, Calendar, Home, Pencil, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import type { InPatientAdmission } from "@/lib/types";
-import { isManagementRole } from "@/lib/permissions";
+import { isManagementRole, canReAdmitInPatient } from "@/lib/permissions";
 import { useToast } from "@/hooks/use-toast";
 import {
   AlertDialog,
@@ -37,6 +37,7 @@ export default function InPatientsListPage() {
 
   const canAdd = user?.role === "Admin" || user?.role === "MD" || user?.role === "Receptionist";
   const canManage = isManagementRole(user?.role);
+  const canReadmit = canReAdmitInPatient(user?.role);
 
   const branchNameById = useMemo(
     () => new Map((branchesData as any[]).map((b) => [String(b.id), b.branchName ?? b.name])),
@@ -207,6 +208,21 @@ export default function InPatientsListPage() {
                       </div>
                     </div>
                   </div>
+                  {patient.status === "Discharged" && canReadmit && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="w-full h-9"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLocation(`/inpatients/${patient.id}?action=readmit`);
+                      }}
+                      data-testid={`button-readmit-inpatient-mobile-${patient.id}`}
+                    >
+                      Re-admit Patient
+                    </Button>
+                  )}
                 </div>
               );
             })}
@@ -261,6 +277,21 @@ export default function InPatientsListPage() {
                     {patient.status}
                   </Badge>
                   <div className="flex items-center gap-1">
+                    {patient.status === "Discharged" && canReadmit && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-9 text-xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLocation(`/inpatients/${patient.id}?action=readmit`);
+                        }}
+                        data-testid={`button-readmit-inpatient-${patient.id}`}
+                      >
+                        Re-admit
+                      </Button>
+                    )}
                     {canManage && (
                       <>
                         <Button

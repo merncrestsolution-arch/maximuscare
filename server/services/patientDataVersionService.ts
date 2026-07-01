@@ -2,7 +2,12 @@ import type { Patient, UpdatePatient, InPatientAdmission, UpdateInPatientAdmissi
 import type { OrganizationId } from "@shared/branchAccess";
 import type { IStorage } from "../storage";
 import { organizationForBranch } from "@shared/branchAccess";
-import { generateUniquePatientCode } from "./patientService";
+import {
+  formatPatientCode,
+  isCurrentPatientCode,
+  patientBranchCode,
+  patientIdDayMonth,
+} from "@shared/patientId";
 import { signPatientQrToken, verifyPatientQrToken } from "./qrTokenService";
 
 export const CURRENT_PATIENT_DATA_VERSION = 2;
@@ -94,6 +99,8 @@ export interface PatientDataHealthSummary {
   missingPatientCode: number;
   missingQrToken: number;
   missingIdCardCache: number;
+  /** Patient IDs not in the current MC/&lt;BRANCH&gt;/&lt;DDMM&gt;/&lt;SEQ&gt; format (legacy/custom). */
+  nonStandardPatientCodes: number;
 }
 
 export async function getPatientDataHealthSummary(storage: IStorage): Promise<PatientDataHealthSummary> {
@@ -108,6 +115,9 @@ export async function getPatientDataHealthSummary(storage: IStorage): Promise<Pa
     missingPatientCode: active.filter((p) => !String(p.patientCode ?? "").trim()).length,
     missingQrToken: active.filter((p) => !String(p.qrToken ?? "").trim()).length,
     missingIdCardCache: active.filter((p) => !String(p.idCardPdfKey ?? "").trim()).length,
+    nonStandardPatientCodes: active.filter(
+      (p) => !isCurrentPatientCode(String(p.patientCode ?? "").trim()),
+    ).length,
   };
 }
 
@@ -157,6 +167,111 @@ export async function runPatientDataBackfill(
       } catch (err) {
         result.errors.push(`${patient.id}: ${err instanceof Error ? err.message : String(err)}`);
       }
+    }
+  }
+
+  return result;
+}
+
+export interface RegenerateAllPatientCodesResult {
+  processed: number;
+  regenerated: number;
+  admissionsUpdated: number;
+  errors: string[];
+  samples: Array<{ patientId: string; name: string; oldCode: string; newCode: string }>;
+}
+
+/**
+ * Replaces every active patient's display ID (patientCode) with a fresh
+ * MC/&lt;BRANCH&gt;/&lt;DDMM&gt;/&lt;SEQ&gt; code based on branch + registration date.
+ * Legacy/custom IDs are discarded. QR tokens and ID card cache are refreshed.
+ */
+export async function regenerateAllPatientCodes(
+  storage: IStorage,
+): Promise<RegenerateAllPatientCodesResult> {
+  const active = (await storage.getAllPatients())
+    .filter((p) => !p.deletedAt)
+    .sort((a, b) => {
+      const dateCmp = String(a.registeredDate).localeCompare(String(b.registeredDate));
+      if (dateCmp !== 0) return dateCmp;
+      const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return aCreated - bCreated;
+    });
+
+  const maxSeq = new Map<string, number>();
+  const codeByPatientId = new Map<string, string>();
+  const result: RegenerateAllPatientCodesResult = {
+    processed: 0,
+    regenerated: 0,
+    admissionsUpdated: 0,
+    errors: [],
+    samples: [],
+  };
+
+  for (const patient of active) {
+    result.processed += 1;
+    const oldCode = String(patient.patientCode ?? "").trim();
+    try {
+      const branchCode = patientBranchCode(patient.branch);
+      const ddmm = patientIdDayMonth(patient.registeredDate);
+      const key = `${branchCode}/${ddmm}`;
+      let nextSeq = (maxSeq.get(key) ?? 0) + 1;
+      let newCode = formatPatientCode(branchCode, ddmm, nextSeq);
+      while ([...codeByPatientId.values()].includes(newCode)) {
+        nextSeq += 1;
+        newCode = formatPatientCode(branchCode, ddmm, nextSeq);
+      }
+      maxSeq.set(key, nextSeq);
+
+      const organizationId = organizationForBranch(patient.branch);
+      const qrToken = signPatientQrToken({ patientId: patient.id, organizationId });
+
+      await storage.updatePatient(patient.id, {
+        patientCode: newCode,
+        qrToken,
+        qrTokenExpiresAt: tokenExpiryDate(qrToken),
+        dataVersion: CURRENT_PATIENT_DATA_VERSION,
+        dataMigratedAt: new Date(),
+        idCardPdfKey: null,
+        idCardQrToken: null,
+        idCardGeneratedAt: null,
+      } as UpdatePatient);
+
+      codeByPatientId.set(patient.id, newCode);
+      if (oldCode !== newCode) {
+        result.regenerated += 1;
+        if (result.samples.length < 15) {
+          result.samples.push({
+            patientId: patient.id,
+            name: patient.name,
+            oldCode: oldCode || "(none)",
+            newCode,
+          });
+        }
+      }
+    } catch (err) {
+      result.errors.push(`${patient.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const admissions = await storage.getAllInPatientAdmissions();
+  for (const admission of admissions) {
+    const linkedId = admission.patientId ?? null;
+    if (!linkedId) continue;
+    const newCode = codeByPatientId.get(linkedId);
+    if (!newCode) continue;
+    const current = String((admission as { patientCode?: string | null }).patientCode ?? "").trim();
+    if (current === newCode) continue;
+    try {
+      await storage.updateInPatientAdmission(admission.id, {
+        patientCode: newCode,
+      } as UpdateInPatientAdmission);
+      result.admissionsUpdated += 1;
+    } catch (err) {
+      result.errors.push(
+        `admission ${admission.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

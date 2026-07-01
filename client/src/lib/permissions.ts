@@ -47,6 +47,23 @@ export function canManagePatients(role: string | undefined): boolean {
   );
 }
 
+/** Re-admit a discharged in-patient — mirrors server `canReAdmitInPatient`. */
+export function canReAdmitInPatient(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  if (r === "Admin" || r === "MD" || r === "Receptionist") return true;
+  return (
+    r === "Manager" ||
+    r === "Branch Manager" ||
+    r === "Staff" ||
+    isNexusManagingDirector(r)
+  );
+}
+
+/** Re-admit a discharged out-patient (status back to Active). */
+export function canReAdmitOutpatient(role: string | undefined): boolean {
+  return canReAdmitInPatient(role);
+}
+
 /**
  * Roles that see every visit (not just their own) — mirrors the server RBAC
  * `visits.view_all` permission (Admin, MD, Receptionist, Manager, Branch Manager,

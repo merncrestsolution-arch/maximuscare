@@ -318,6 +318,11 @@ export const adminApi = {
   dataHealth: () => apiRequest<any>("/admin/data-health"),
   runDataHealthBackfill: (data?: { batchSize?: number; limit?: number }) =>
     apiRequest<any>("/admin/data-health/backfill", { method: "POST", body: JSON.stringify(data ?? {}) }),
+  regenerateAllPatientIds: () =>
+    apiRequest<any>("/admin/data-health/regenerate-ids", {
+      method: "POST",
+      body: JSON.stringify({ confirm: "REGENERATE-ALL-IDS" }),
+    }),
 };
 
 // Auth API
