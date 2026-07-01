@@ -8,7 +8,9 @@ import {
   type OverviewContext,
   canAccessMaximusOverview,
   canAccessNexusOverview,
+  isManagingDirector,
 } from "@shared/branchAccess";
+import { loadMdCapabilities } from "./mdCapabilityService";
 
 export interface BranchAccessContext {
   selectedBranchId: string | null;
@@ -90,14 +92,22 @@ export async function resolveBranchAccessContext(
     selected = allowedBranches.find((b) => b.id === session.selectedBranchId);
   }
 
+  let canMaximusOverview = canAccessMaximusOverview(role);
+  let canNexusOverview = canAccessNexusOverview(role);
+  if (isManagingDirector(role)) {
+    const mdCaps = await loadMdCapabilities(storage);
+    if (mdCaps.maximusOverview) canMaximusOverview = true;
+    if (mdCaps.nexusOverview) canNexusOverview = true;
+  }
+
   return {
     selectedBranchId: selected?.id ?? null,
     selectedBranchName: selected ? (selected.branchName ?? selected.name) : null,
     selectedContext,
     allowedBranchIds,
     allowedBranches,
-    canAccessMaximusOverview: canAccessMaximusOverview(role),
-    canAccessNexusOverview: canAccessNexusOverview(role),
+    canAccessMaximusOverview: canMaximusOverview,
+    canAccessNexusOverview: canNexusOverview,
   };
 }
 
@@ -113,14 +123,17 @@ export function assertBranchAccess(
   }
 }
 
-export function assertOverviewAccess(
+export async function assertOverviewAccess(
+  storage: IStorage,
+  staffId: string,
+  role: string,
   context: OverviewContext,
-  role: string
-): void {
-  if (context === "maximus-overview" && !canAccessMaximusOverview(role)) {
+): Promise<void> {
+  const ctx = await resolveBranchAccessContext(storage, staffId, role, { selectedContext: context });
+  if (context === "maximus-overview" && !ctx.canAccessMaximusOverview) {
     throw new Error("Unauthorized access to Maximus Overview");
   }
-  if (context === "nexus-overview" && !canAccessNexusOverview(role)) {
+  if (context === "nexus-overview" && !ctx.canAccessNexusOverview) {
     throw new Error("Unauthorized access to Nexus Overview");
   }
 }

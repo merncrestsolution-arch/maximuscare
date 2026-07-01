@@ -483,6 +483,7 @@ export async function registerRoutes(
       }
       const { password: _, ...userWithoutPassword } = staff;
       const { resolveBranchAccessContext, hasCompletedBranchSelection } = await import("./services/branchService");
+      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
       const session = sessionId ? await storage.getAuthSession(sessionId) : undefined;
       const branchContext = await resolveBranchAccessContext(
         storage,
@@ -490,6 +491,8 @@ export async function registerRoutes(
         user.role,
         session
       );
+      const mdCapabilities =
+        user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
       return res.json({
         ...userWithoutPassword,
         selectedBranchId: branchContext.selectedBranchId,
@@ -504,6 +507,7 @@ export async function registerRoutes(
         })),
         canAccessMaximusOverview: branchContext.canAccessMaximusOverview,
         canAccessNexusOverview: branchContext.canAccessNexusOverview,
+        mdCapabilities,
         requiresBranchSelection: !hasCompletedBranchSelection(branchContext),
       });
     } catch (error: any) {
@@ -581,8 +585,8 @@ export async function registerRoutes(
       if (context !== "maximus-overview" && context !== "nexus-overview") {
         return res.status(400).json({ message: "Invalid overview context" });
       }
-      const { assertOverviewAccess, getAllowedBranchesForStaff } = await import("./services/branchService");
-      assertOverviewAccess(context, user.role);
+      const { assertOverviewAccess, getAllowedBranchesForStaff, resolveBranchAccessContext } = await import("./services/branchService");
+      await assertOverviewAccess(storage, user.staffId, user.role, context);
       if (sessionId) {
         await storage.updateAuthSessionContext(sessionId, context);
       }
@@ -1913,11 +1917,12 @@ export async function registerRoutes(
       const page = req.query.page ? Number(req.query.page) : undefined;
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
       const currentUser = (req as any).user;
+      const { canViewAttendanceLocation } = await import("./permissions");
+      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
+      const mdCaps = currentUser.role === "MD" ? await loadMdCapabilities(storage) : undefined;
       // Management and operational leads (Manager/Branch Manager/Nexus MD) may view team attendance.
       const isAdmin = canViewStaff(currentUser.role);
-      // Only Admin/MD may ever see captured GPS coordinates; everyone else gets
-      // location fields stripped from the response.
-      const canViewLocation = isManagementRole(currentUser.role);
+      const canViewLocation = canViewAttendanceLocation(currentUser.role, mdCaps);
 
       // Attendance records historically were created without a branch, so we scope
       // by the *staff member's* branch (the reliable source) rather than the
@@ -2087,7 +2092,10 @@ export async function registerRoutes(
       // — only a staff member's own "Present" check-in requires location. This is
       // enforced server-side so the requirement cannot be bypassed via the API.
       const isSelfCheckIn = targetStaffId === currentUser.staffId;
-      const isLocationExempt = isManagementRole(currentUser.role);
+      const { isAttendanceLocationExempt } = await import("./permissions");
+      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
+      const mdCaps = currentUser.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      const isLocationExempt = isAttendanceLocationExempt(currentUser.role, mdCaps);
       if (status === "Present" && isSelfCheckIn && !isLocationExempt && !hasGeo) {
         return res.status(422).json({
           message: "Location access is required to mark attendance. Please enable location and try again.",
@@ -2272,7 +2280,10 @@ export async function registerRoutes(
   app.get("/api/attendance/:id/location-token", requireAuth, async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
-      if (!isManagementRole(currentUser.role)) {
+      const { canViewAttendanceLocation } = await import("./permissions");
+      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
+      const mdCaps = currentUser.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      if (!canViewAttendanceLocation(currentUser.role, mdCaps)) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const id = param(req, "id");
@@ -3906,14 +3917,16 @@ export async function registerRoutes(
     try {
       const user = (req as any).user;
       const { canViewAllStaffFines } = await import("./permissions");
-      const { resolveBranchScopedStaffIds } = await import("./services/staffService");
+      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
+      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       const queryStaffId = req.query.staffId as string | undefined;
       if (!startDate || !endDate) {
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
-      if (canViewAllStaffFines(user.role)) {
+      if (canViewAllStaffFines(user.role, mdCaps)) {
+        const { resolveBranchScopedStaffIds } = await import("./services/staffService");
         const scoped = await resolveBranchScopedStaffIds(storage, req);
         if (queryStaffId) {
           if (scoped && !scoped.has(queryStaffId)) {
@@ -3939,14 +3952,21 @@ export async function registerRoutes(
   app.post("/api/staff-fines", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { isAdminRole } = await import("./permissions");
-      if (!isAdminRole(user.role)) {
+      const { canManageStaffFines } = await import("./permissions");
+      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
+      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      if (!canManageStaffFines(user.role, mdCaps)) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const editor = await storage.getStaff(user.staffId);
       const body = { ...req.body, source: "manual" };
       if (!body.staffId || !String(body.staffId).trim()) {
         return res.status(400).json({ message: "Staff is required" });
+      }
+      const { isStaffInBranchScope } = await import("./services/staffService");
+      const { isAdminRole } = await import("./permissions");
+      if (!isAdminRole(user.role) && !(await isStaffInBranchScope(storage, req, String(body.staffId)))) {
+        return res.status(403).json({ message: "Staff is outside your branch access" });
       }
       
       // Auto-inject branchId
@@ -3993,12 +4013,19 @@ export async function registerRoutes(
   app.patch("/api/staff-fines/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { isAdminRole } = await import("./permissions");
-      if (!isAdminRole(user.role)) {
+      const { canManageStaffFines } = await import("./permissions");
+      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
+      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      if (!canManageStaffFines(user.role, mdCaps)) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const existingFine = await storage.getStaffFine(param(req, "id"));
       if (!existingFine) return res.status(404).json({ message: "Fine not found" });
+      const { isStaffInBranchScope } = await import("./services/staffService");
+      const { isAdminRole } = await import("./permissions");
+      if (!isAdminRole(user.role) && !(await isStaffInBranchScope(storage, req, existingFine.staffId))) {
+        return res.status(403).json({ message: "Access denied" });
+      }
       const body = { ...req.body } as Record<string, unknown>;
       if (existingFine.source === "auto_no_session") {
         delete body.source;
@@ -4009,6 +4036,9 @@ export async function registerRoutes(
       }
       const nextStaffId = (parsed.data as any).staffId ?? existingFine.staffId;
       const nextDate = (parsed.data as any).fineDate ?? existingFine.fineDate;
+      if (!isAdminRole(user.role) && !(await isStaffInBranchScope(storage, req, nextStaffId))) {
+        return res.status(403).json({ message: "Staff is outside your branch access" });
+      }
       const { salaryPeriodForDate, ensureSalaryPeriodRecord } = await import("./services/salaryService");
       const targetStaff = await storage.getStaff(nextStaffId);
       if (!targetStaff) return res.status(404).json({ message: "Staff not found" });
@@ -4040,12 +4070,20 @@ export async function registerRoutes(
   app.delete("/api/staff-fines/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { isAdminRole } = await import("./permissions");
-      if (!isAdminRole(user.role)) {
+      const { canManageStaffFines } = await import("./permissions");
+      const { loadMdCapabilities } = await import("./services/mdCapabilityService");
+      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      if (!canManageStaffFines(user.role, mdCaps)) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const fineId = param(req, "id");
       const existingFine = await storage.getStaffFine(fineId);
+      if (!existingFine) return res.status(404).json({ message: "Fine not found" });
+      const { isStaffInBranchScope } = await import("./services/staffService");
+      const { isAdminRole } = await import("./permissions");
+      if (!isAdminRole(user.role) && !(await isStaffInBranchScope(storage, req, existingFine.staffId))) {
+        return res.status(403).json({ message: "Access denied" });
+      }
       const deleted = await storage.deleteStaffFine(fineId, (req as any).user?.staffId);
       if (!deleted) return res.status(404).json({ message: "Fine not found" });
       if (existingFine) {

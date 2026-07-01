@@ -11,6 +11,7 @@ interface AuthContextType {
   logout: () => void;
   updateStaff: (updated: User) => void;
   refreshStaff: () => Promise<void>;
+  refreshUser: () => Promise<void>;
   isLoading: boolean;
 }
 
@@ -60,9 +61,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string) => {
     const startedAt = Date.now();
     try {
-      const loggedInUser = await authApi.login(email, password);
+      await authApi.login(email, password);
+      const fullUser = await authApi.me();
       await waitMinElapsed(startedAt);
-      setUser(loggedInUser);
+      setUser(fullUser);
       setLocation('/auth/branch-select');
     } catch (error: any) {
       throw new Error(error.message || 'Login failed');
@@ -85,6 +87,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const refreshUser = async () => {
+    try {
+      const currentUser = await authApi.me();
+      setUser(currentUser);
+    } catch (error) {
+      console.error("Failed to refresh user:", error);
+    }
+  };
+
   const logout = async () => {
     try {
       await authApi.logout();
@@ -98,7 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, staff, login, logout, updateStaff, refreshStaff, isLoading }}>
+    <AuthContext.Provider value={{ user, staff, login, logout, updateStaff, refreshStaff, refreshUser, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

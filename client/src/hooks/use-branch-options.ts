@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useBranch } from "@/context/branch-context";
 import { useBranches } from "@/hooks/useData";
 import { BRANCH_OPTIONS } from "@/lib/branches";
-import { isManagementRole } from "@/lib/permissions";
+import { isAdminRole } from "@/lib/permissions";
 import { useAuth } from "@/context/auth-context";
 
 export interface BranchOption {
@@ -42,7 +42,7 @@ export function useBranchOptions(opts?: { forRegistration?: boolean }) {
         .sort((a: BranchOption, b: BranchOption) => a.label.localeCompare(b.label));
     }
 
-    if (opts?.forRegistration && user && isManagementRole(user.role)) {
+    if (opts?.forRegistration && user && isAdminRole(user.role)) {
       return BRANCH_OPTIONS.map((b, index) => ({
         id: allowedBranches.find((ab) => (ab.branchName ?? ab.name) === b.value)?.id ?? `static-${index}`,
         value: b.value,

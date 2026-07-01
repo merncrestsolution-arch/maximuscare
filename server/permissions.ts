@@ -7,6 +7,8 @@
  */
 import { hasPermission } from "./rbac/permissions";
 
+import type { MdRoleCapabilities } from "@shared/mdCapabilities";
+
 export type AppRole = "Admin" | "MD" | "Receptionist" | "Physiotherapist" | "Staff";
 
 export function isManagementRole(role: string | undefined): boolean {
@@ -17,15 +19,53 @@ export function isAdminRole(role: string | undefined): boolean {
   return String(role ?? "").trim() === "Admin";
 }
 
-/** Admin, MD, and Nexus MD may view fines for all staff (branch-scoped on the API). */
-export function canViewAllStaffFines(role: string | undefined): boolean {
-  const r = String(role ?? "").trim();
-  return r === "Admin" || r === "MD" || r === "Nexus MD";
+/** Admin always; MD only when enabled in clinic settings. */
+export function canViewAttendanceLocation(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  if (isAdminRole(role)) return true;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.viewAttendanceLocation ?? false;
+  return false;
 }
 
-/** Only Admin may create, edit, or delete fines. */
-export function canManageStaffFines(role: string | undefined): boolean {
-  return isAdminRole(role);
+/** Admin always; MD when admin enables location-exempt present marking. */
+export function isAttendanceLocationExempt(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  if (isAdminRole(role)) return true;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.locationExempt ?? true;
+  return false;
+}
+
+/** Admin, Nexus MD, MD (if enabled), and branch leads may view fines (API branch-scoped). */
+export function canViewAllStaffFines(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  const r = String(role ?? "").trim();
+  if (r === "Admin" || r === "Nexus MD") return true;
+  if (r === "MD") return mdCaps?.viewAllStaffFines ?? true;
+  if (canManageBranchFines(role)) return true;
+  return false;
+}
+
+/** Branch leads who may record fines for staff in their assigned branches. */
+export function canManageBranchFines(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return r === "Manager" || r === "Branch Manager";
+}
+
+/** Admin always; MD only when admin enables fine management; branch leads for their branch. */
+export function canManageStaffFines(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  if (isAdminRole(role)) return true;
+  if (canManageBranchFines(role)) return true;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.manageStaffFines ?? false;
+  return false;
 }
 
 export function isSessionRole(role: string | undefined): boolean {

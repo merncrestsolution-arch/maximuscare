@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { SaveStatus } from "@/components/ui/save-status";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
-import { canManageAttendance, canViewAttendanceLocation } from "@/lib/permissions";
+import { canManageAttendance, canViewAttendanceLocation, isAttendanceLocationExempt } from "@/lib/permissions";
 import { ViewLocationButton } from "@/components/attendance/view-location-button";
 import { clinicTodayString } from "@/lib/utils";
 
@@ -316,7 +316,8 @@ export default function AttendancePage() {
   const isManagement = canManageAttendance(user?.role);
   // Captured GPS is Admin/MD-only (server strips it for everyone else). Operational
   // leads count as "management" for editing but must never see location data.
-  const canViewLocation = canViewAttendanceLocation(user?.role);
+  const mdCaps = user?.mdCapabilities;
+  const canViewLocation = canViewAttendanceLocation(user?.role, mdCaps);
 
   const [otInput, setOtInput] = useState("");
   const [markingStatus, setMarkingStatus] = useState<string | null>(null);
@@ -415,7 +416,7 @@ export default function AttendancePage() {
 
     // Location-gated attendance: every role except Admin/MD must grant a one-time
     // location capture to mark themselves Present. Admin/MD are exempt.
-    const locationExempt = canViewAttendanceLocation(user.role);
+    const locationExempt = isAttendanceLocationExempt(user.role, mdCaps);
 
     setMarkingStatus(status);
     try {

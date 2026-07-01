@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
 import { canManageFines } from "@/lib/permissions";
@@ -41,6 +41,15 @@ function SalaryFinesContent() {
 
   const { data: rows = [], isLoading, error } = useStaffFines({ startDate, endDate });
   const { data: staffList } = useStaff();
+  const staffOptions = useMemo(
+    () =>
+      [...(staffList ?? [])]
+        .filter((s: { isActive?: boolean | number }) => s.isActive !== false && s.isActive !== 0)
+        .sort((a: { name?: string }, b: { name?: string }) =>
+          String(a.name ?? "").localeCompare(String(b.name ?? "")),
+        ),
+    [staffList],
+  );
   const createFine = useCreateStaffFine();
   const updateFine = useUpdateStaffFine();
   const deleteFine = useDeleteStaffFine();
@@ -71,7 +80,7 @@ function SalaryFinesContent() {
       toast({ title: "Missing fields", description: "Staff, date, and reason are required.", variant: "destructive" });
       return;
     }
-    const staff = (staffList ?? []).find((s: any) => s.id === form.staffId);
+    const staff = staffOptions.find((s: any) => s.id === form.staffId);
     const payload = {
       ...form,
       staffName: staff?.name ?? "",
@@ -170,9 +179,15 @@ function SalaryFinesContent() {
             <div>
               <Label>Staff</Label>
               <Select value={form.staffId} onValueChange={(v) => setForm({ ...form, staffId: v })}>
-                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Select staff member" /></SelectTrigger>
                 <SelectContent>
-                  {(staffList ?? []).map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  {staffOptions.map((s: any) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                      {s.role ? ` (${s.role})` : ""}
+                      {s.branch ? ` — ${s.branch}` : ""}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -202,7 +217,7 @@ function SalaryFinesContent() {
 
 export default function SalaryFinesPage() {
   return (
-    <RoleProtectedRoute allowed={canManageFines}>
+    <RoleProtectedRoute allowed={(role, user) => canManageFines(role, user?.mdCapabilities)}>
       <SalaryFinesContent />
     </RoleProtectedRoute>
   );

@@ -589,6 +589,12 @@ export const clinicSettings = pgTable("clinic_settings", {
   otRatePerHour: decimal("ot_rate_per_hour", { precision: 10, scale: 2 }).notNull().default("250"),
   extraHolidayDeduction: decimal("extra_holiday_deduction", { precision: 10, scale: 2 }).notNull().default("1500"),
   freeAbsentDays: integer("free_absent_days").notNull().default(4),
+  mdLocationExempt: boolean("md_location_exempt").notNull().default(true),
+  mdViewAttendanceLocation: boolean("md_view_attendance_location").notNull().default(false),
+  mdViewAllStaffFines: boolean("md_view_all_staff_fines").notNull().default(true),
+  mdManageStaffFines: boolean("md_manage_staff_fines").notNull().default(false),
+  mdMaximusOverview: boolean("md_maximus_overview").notNull().default(false),
+  mdNexusOverview: boolean("md_nexus_overview").notNull().default(false),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

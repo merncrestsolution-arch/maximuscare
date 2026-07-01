@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { normalizeBranchName, getHomeVisitRateTier, isIncentiveEligibleBranch } from "@shared/branches";
 import {
   assertBranchAccess,
-  assertOverviewAccess,
 } from "./branchService";
 import {
   canAccessMaximusOverview,
@@ -41,26 +40,18 @@ describe("branchService access", () => {
   it("allows branch in allowed list", () => {
     expect(() => assertBranchAccess("b1", ["b1", "b2"])).not.toThrow();
   });
-
-  it("blocks maximus overview for Nexus MD", () => {
-    expect(() => assertOverviewAccess("maximus-overview", "Nexus MD")).toThrow(/Unauthorized/i);
-  });
-
-  it("allows nexus overview for Nexus MD", () => {
-    expect(() => assertOverviewAccess("nexus-overview", "Nexus MD")).not.toThrow();
-  });
 });
 
 describe("branchAccess roles", () => {
-  it("grants full branch access to Admin and MD", () => {
+  it("grants full branch access to Admin only", () => {
     expect(hasFullBranchAccess("Admin")).toBe(true);
-    expect(hasFullBranchAccess("MD")).toBe(true);
+    expect(hasFullBranchAccess("MD")).toBe(false);
     expect(hasFullBranchAccess("Branch Manager")).toBe(false);
   });
 
   it("scopes overview access by role", () => {
     expect(canAccessMaximusOverview("Admin")).toBe(true);
-    expect(canAccessMaximusOverview("Nexus MD")).toBe(false);
+    expect(canAccessMaximusOverview("MD")).toBe(false);
     expect(canAccessNexusOverview("Nexus MD")).toBe(true);
     expect(canAccessNexusOverview("Branch Manager")).toBe(false);
   });

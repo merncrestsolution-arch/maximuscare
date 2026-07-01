@@ -70,8 +70,9 @@ function PhysioSummaryContent() {
   const role = (user?.role || "").toLowerCase();
   const isManagement =
     role === "admin" || role === "md" || role === "nexus md" || role === "manager" || role === "branch manager";
-  const canManageFinesRole = canManageFines(user?.role);
-  const canViewAllFines = canViewAllStaffFines(user?.role);
+  const mdCaps = user?.mdCapabilities;
+  const canManageFinesRole = canManageFines(user?.role, mdCaps);
+  const canViewAllFines = canViewAllStaffFines(user?.role, mdCaps);
   const canViewOwnFinesOnly = canViewOwnFines(user?.role);
   const showFinesCard = canViewAllFines || canViewOwnFinesOnly;
 

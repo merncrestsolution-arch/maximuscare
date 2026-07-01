@@ -1,3 +1,5 @@
+import type { MdRoleCapabilities } from "@shared/mdCapabilities";
+
 export type Role = 'Admin' | 'MD' | 'Manager' | 'Receptionist' | 'Physiotherapist' | 'Staff';
 
 export interface User {
@@ -9,6 +11,7 @@ export interface User {
   avatar?: string;
   branch?: string;
   branchIds?: string[];
+  mdCapabilities?: MdRoleCapabilities;
   address?: string;
   nic?: string;
   passportNo?: string;

@@ -81,15 +81,15 @@ export function isManager(role: string): boolean {
 export { isOperationalLead } from "./roles";
 
 export function hasFullBranchAccess(role: string): boolean {
-  return isSuperAdmin(role) || isManagingDirector(role);
+  return isSuperAdmin(role);
 }
 
 export function canAccessMaximusOverview(role: string): boolean {
-  return hasFullBranchAccess(role);
+  return isSuperAdmin(role);
 }
 
 export function canAccessNexusOverview(role: string): boolean {
-  return hasFullBranchAccess(role) || isNexusManagingDirector(role);
+  return isSuperAdmin(role) || isNexusManagingDirector(role);
 }
 
 export function getMaximusBranchNames(): string[] {

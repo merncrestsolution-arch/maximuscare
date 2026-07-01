@@ -373,7 +373,7 @@ function SalaryReportContent() {
   const isSelfOnly = ["Staff", "Physiotherapist"].includes(user?.role ?? "");
   const canPickStaff = !isSelfOnly;
   const canManageAdjustments = ["Admin", "MD", "Nexus MD"].includes(user?.role ?? "");
-  const canManageFinesRole = canManageFines(user?.role);
+  const canManageFinesRole = canManageFines(user?.role, user?.mdCapabilities);
 
   // Bug L: the staff profile links here pre-filtered with ?staffId=…
   const presetStaffId = useMemo(() => {

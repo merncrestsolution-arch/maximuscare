@@ -864,11 +864,20 @@ export function registerSalaryRoutes(app: Express) {
   });
 
   // ── Fine waive ──
-  app.post("/api/salary/fines/:id/waive", requireAuth, requireRole("Admin"), async (req, res) => {
+  app.post("/api/salary/fines/:id/waive", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;
+      const { canManageStaffFines, isAdminRole } = await import("../permissions");
+      const { loadMdCapabilities } = await import("../services/mdCapabilityService");
+      const mdCaps = user.role === "MD" ? await loadMdCapabilities(storage) : undefined;
+      if (!canManageStaffFines(user.role, mdCaps)) {
+        return errorResponse(res, "Forbidden", 403);
+      }
       const before = await storage.getStaffFine(param(req, "id"));
       if (!before) return errorResponse(res, "Not found", 404);
+      if (!isAdminRole(user.role) && !(await isStaffInBranchScope(storage, req as any, before.staffId))) {
+        return errorResponse(res, "Access denied", 403);
+      }
       const updated = await storage.updateStaffFine(param(req, "id"), {
         status: "waived",
         updatedByStaffId: user.staffId,

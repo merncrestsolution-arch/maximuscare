@@ -224,9 +224,14 @@ export function registerExtendedRoutes(app: Express) {
   });
 
   // ========== Branches ==========
-  app.get("/api/branches", requireAuth, async (_req, res) => {
+  app.get("/api/branches", requireAuth, async (req, res) => {
     try {
-      const list = await storage.getAllBranches();
+      const user = (req as any).user;
+      const { getAllowedBranchesForStaff } = await import("./services/branchService");
+      const { hasFullBranchAccess } = await import("@shared/branchAccess");
+      const list = hasFullBranchAccess(user.role)
+        ? await storage.getAllBranches()
+        : await getAllowedBranchesForStaff(storage, user.staffId, user.role);
       return successResponse(res, list);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);
@@ -573,7 +578,7 @@ export function registerExtendedRoutes(app: Express) {
       const startDate = req.query.startDate as string;
       const endDate = req.query.endDate as string;
       if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
-      assertOverviewAccess("maximus-overview", user.role);
+      await assertOverviewAccess(storage, user.staffId, user.role, "maximus-overview");
       const session = sessionId ? await storage.getAuthSession(sessionId) : undefined;
       if (session?.selectedContext !== "maximus-overview") {
         return errorResponse(res, "Maximus Overview context required", 403);
@@ -594,7 +599,7 @@ export function registerExtendedRoutes(app: Express) {
       const startDate = req.query.startDate as string;
       const endDate = req.query.endDate as string;
       if (!startDate || !endDate) return errorResponse(res, "startDate and endDate required", 400);
-      assertOverviewAccess("nexus-overview", user.role);
+      await assertOverviewAccess(storage, user.staffId, user.role, "nexus-overview");
       const session = sessionId ? await storage.getAuthSession(sessionId) : undefined;
       if (session?.selectedContext !== "nexus-overview") {
         return errorResponse(res, "Nexus Overview context required", 403);

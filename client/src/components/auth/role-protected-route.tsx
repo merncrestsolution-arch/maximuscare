@@ -1,6 +1,7 @@
 import { Redirect } from "wouter";
 import { useAuth } from "@/context/auth-context";
 import { Card, CardContent } from "@/components/ui/card";
+import type { User } from "@/lib/types";
 
 export function RoleProtectedRoute({
   children,
@@ -8,12 +9,12 @@ export function RoleProtectedRoute({
   fallback = "/dashboard",
 }: {
   children: React.ReactNode;
-  allowed: (role: string | undefined) => boolean;
+  allowed: (role: string | undefined, user?: User) => boolean;
   fallback?: string;
 }) {
   const { user } = useAuth();
   if (!user) return <Redirect to="/auth/login" />;
-  if (!allowed(user.role)) {
+  if (!allowed(user.role, user)) {
     return (
       <div className="p-6">
         <Card>

@@ -29,6 +29,7 @@ export function canViewFinancialSummary(role: string | undefined): boolean {
 
 /** Branch-level operational leads (Manager / Branch Manager) without full financial access. */
 import { isOperationalLead } from "@shared/roles";
+import type { MdRoleCapabilities } from "@shared/mdCapabilities";
 export { isOperationalLead };
 /**
  * Roles allowed to create/edit patients — mirrors the server RBAC `patients.manage`
@@ -61,12 +62,23 @@ export function canViewAllVisits(role: string | undefined): boolean {
   );
 }
 
-export function canAccessMaximusOverview(role: string | undefined): boolean {
-  return isManagementRole(role);
+export function canAccessMaximusOverview(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  if (isAdminRole(role)) return true;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.maximusOverview ?? false;
+  return false;
 }
 
-export function canAccessNexusOverview(role: string | undefined): boolean {
-  return isManagementRole(role) || isNexusManagingDirector(role);
+export function canAccessNexusOverview(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  if (isAdminRole(role)) return true;
+  if (isNexusManagingDirector(role)) return true;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.nexusOverview ?? false;
+  return false;
 }
 
 export function canViewReports(role: string | undefined): boolean {
@@ -120,7 +132,7 @@ export function canViewExpenseReports(role: string | undefined): boolean {
 }
 
 export function canManageSettings(role: string | undefined): boolean {
-  return isManagementRole(role);
+  return isAdminRole(role);
 }
 
 export function canManageTasks(role: string | undefined): boolean {
@@ -153,13 +165,25 @@ export function canManageAttendance(role: string | undefined): boolean {
 }
 
 /**
- * View captured check-in GPS locations / location short-links. Admin & MD only —
- * mirrors the server, which strips location fields and 403s the location endpoints
- * for every other role. Also the set of roles EXEMPT from the location requirement
- * when marking their own attendance present.
+ * View captured check-in GPS locations. Admin always; MD when enabled by Admin.
  */
-export function canViewAttendanceLocation(role: string | undefined): boolean {
-  return isManagementRole(role);
+export function canViewAttendanceLocation(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  if (isAdminRole(role)) return true;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.viewAttendanceLocation ?? false;
+  return false;
+}
+
+/** Whether marking Present requires GPS (false = exempt). */
+export function isAttendanceLocationExempt(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  if (isAdminRole(role)) return true;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.locationExempt ?? true;
+  return false;
 }
 
 /** View the system-wide activity / audit log dashboard (Admin & MD only). */
@@ -171,15 +195,27 @@ export function canManageSalary(role: string | undefined): boolean {
   return isManagementRole(role);
 }
 
-/** Only Admin can add/edit fines. */
-export function canManageFines(role: string | undefined): boolean {
-  return isAdminRole(role);
+/** Branch leads who may record fines for staff in their assigned branches. */
+export function canManageBranchFines(role: string | undefined): boolean {
+  const r = String(role ?? "").trim();
+  return r === "Manager" || r === "Branch Manager";
 }
 
-/** Admin, MD, and Nexus MD can view fines for all staff. */
-export function canViewAllStaffFines(role: string | undefined): boolean {
+/** Only Admin by default; MD when admin enables; branch leads for their branch staff. */
+export function canManageFines(role: string | undefined, mdCaps?: MdRoleCapabilities): boolean {
+  if (isAdminRole(role)) return true;
+  if (canManageBranchFines(role)) return true;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.manageStaffFines ?? false;
+  return false;
+}
+
+/** Admin, Nexus MD, MD (if enabled), and branch leads can view branch-scoped fines. */
+export function canViewAllStaffFines(role: string | undefined, mdCaps?: MdRoleCapabilities): boolean {
   const r = String(role ?? "").trim();
-  return r === "Admin" || r === "MD" || r === "Nexus MD";
+  if (r === "Admin" || r === "Nexus MD") return true;
+  if (r === "MD") return mdCaps?.viewAllStaffFines ?? true;
+  if (canManageBranchFines(role)) return true;
+  return false;
 }
 
 /** Staff and physiotherapists may view their own fines only. */
@@ -190,7 +226,13 @@ export function canViewOwnFines(role: string | undefined): boolean {
 
 export function canViewSalary(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
-  return isManagementRole(r) || r === "Physiotherapist" || r === "Staff" || r === "Manager";
+  return (
+    isManagementRole(r) ||
+    r === "Physiotherapist" ||
+    r === "Staff" ||
+    r === "Manager" ||
+    r === "Branch Manager"
+  );
 }
 
 /**
@@ -203,6 +245,11 @@ export function canViewSalaryReports(role: string | undefined): boolean {
 }
 
 /** Branch managers and Nexus MD should not see cross-branch overview nav items. */
-export function canSeeOverviewNav(role: string | undefined): boolean {
-  return canAccessMaximusOverview(role) || canAccessNexusOverview(role);
+export function canSeeOverviewNav(
+  role: string | undefined,
+  mdCaps?: MdRoleCapabilities,
+): boolean {
+  return (
+    canAccessMaximusOverview(role, mdCaps) || canAccessNexusOverview(role, mdCaps)
+  );
 }

@@ -39,6 +39,12 @@ const newColumns: Array<[string, string, string]> = [
   ["patients", "id_card_pdf_key", "TEXT"],
   ["patients", "id_card_qr_token", "TEXT"],
   ["patients", "id_card_generated_at", "TIMESTAMP"],
+  ["clinic_settings", "md_location_exempt", "BOOLEAN NOT NULL DEFAULT TRUE"],
+  ["clinic_settings", "md_view_attendance_location", "BOOLEAN NOT NULL DEFAULT FALSE"],
+  ["clinic_settings", "md_view_all_staff_fines", "BOOLEAN NOT NULL DEFAULT TRUE"],
+  ["clinic_settings", "md_manage_staff_fines", "BOOLEAN NOT NULL DEFAULT FALSE"],
+  ["clinic_settings", "md_maximus_overview", "BOOLEAN NOT NULL DEFAULT FALSE"],
+  ["clinic_settings", "md_nexus_overview", "BOOLEAN NOT NULL DEFAULT FALSE"],
 ];
 
 async function run() {

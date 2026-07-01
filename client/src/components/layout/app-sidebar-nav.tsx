@@ -24,8 +24,6 @@ import { useAuth } from "@/context/auth-context";
 import { useBranding } from "@/context/branding-context";
 import { useBranch } from "@/context/branch-context";
 import {
-  canAccessMaximusOverview,
-  canAccessNexusOverview,
   canViewReportsHub,
   canViewAuditLogs,
   canViewStaffList,
@@ -52,7 +50,7 @@ export function AppSidebarNav() {
   const [location, setLocation] = useLocation();
   const { user, logout } = useAuth();
   const { logoUri } = useBranding();
-  const { selectedBranchId, selectedContext, selectContext, selectedBranchName } = useBranch();
+  const { selectedBranchId, selectedContext, selectContext, selectedBranchName, canAccessMaximusOverview, canAccessNexusOverview } = useBranch();
   const { isMobile, setOpenMobile } = useSidebar();
   const [openQuickAdd, setOpenQuickAdd] = useState(false);
 
@@ -143,7 +141,7 @@ export function AppSidebarNav() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
-              {canAccessMaximusOverview(user.role) && (
+              {canAccessMaximusOverview && (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={isActive("/auth/branch-select")}
@@ -161,7 +159,7 @@ export function AppSidebarNav() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
-              {canAccessNexusOverview(user.role) && (
+              {canAccessNexusOverview && (
                 <SidebarMenuItem>
                   <SidebarMenuButton
                     isActive={isActive("/nexus-overview")}
@@ -258,7 +256,11 @@ export function AppSidebarNav() {
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                  {(user.role === "Physiotherapist" || user.role === "Staff" || user.role === "Manager" || ["Admin", "MD"].includes(user.role)) && (
+                  {(user.role === "Physiotherapist" ||
+                    user.role === "Staff" ||
+                    user.role === "Manager" ||
+                    user.role === "Branch Manager" ||
+                    ["Admin", "MD"].includes(user.role)) && (
                     <SidebarMenuItem>
                       <SidebarMenuButton asChild isActive={location.startsWith("/salary")} className="min-h-11">
                         <Link href="/salary" onClick={closeMobile}>

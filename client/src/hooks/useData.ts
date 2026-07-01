@@ -728,7 +728,10 @@ export function useUpdateClinicSettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: clinicSettingsApi.update,
-    onSuccess: () => invalidateClinicSettingsQueries(queryClient),
+    onSuccess: () => {
+      invalidateClinicSettingsQueries(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["auth-me-branch"] });
+    },
   });
 }
 

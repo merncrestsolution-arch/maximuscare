@@ -229,6 +229,8 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart28InpatientStatusReconcile();
   const { runPart29AttendanceDedup } = await import("./migrations/part29AttendanceDedup");
   await runPart29AttendanceDedup();
+  const { runPart30MdRoleCapabilities } = await import("./migrations/part30MdRoleCapabilities");
+  await runPart30MdRoleCapabilities();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -301,5 +303,11 @@ export async function ensurePostgresSchemaCompatibility() {
     await runPart29AttendanceDedup();
   } catch (error) {
     console.error("[db] Part 29 attendance dedup failed (non-fatal):", error);
+  }
+  try {
+    const { runPart30MdRoleCapabilities } = await import("./migrations/part30MdRoleCapabilities");
+    await runPart30MdRoleCapabilities();
+  } catch (error) {
+    console.error("[db] Part 30 MD role capabilities failed (non-fatal):", error);
   }
 }

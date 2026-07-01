@@ -583,6 +583,12 @@ export const clinicSettings = sqliteTable("clinic_settings", {
   otRatePerHour: text("ot_rate_per_hour").notNull().default("250"),
   extraHolidayDeduction: text("extra_holiday_deduction").notNull().default("1500"),
   freeAbsentDays: integer("free_absent_days").notNull().default(4),
+  mdLocationExempt: integer("md_location_exempt", { mode: "boolean" }).notNull().default(true),
+  mdViewAttendanceLocation: integer("md_view_attendance_location", { mode: "boolean" }).notNull().default(false),
+  mdViewAllStaffFines: integer("md_view_all_staff_fines", { mode: "boolean" }).notNull().default(true),
+  mdManageStaffFines: integer("md_manage_staff_fines", { mode: "boolean" }).notNull().default(false),
+  mdMaximusOverview: integer("md_maximus_overview", { mode: "boolean" }).notNull().default(false),
+  mdNexusOverview: integer("md_nexus_overview", { mode: "boolean" }).notNull().default(false),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 

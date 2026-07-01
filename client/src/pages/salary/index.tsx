@@ -20,22 +20,35 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, L
 function SalaryHubContent() {
   const { user } = useAuth();
   const isMgmt = canManageSalary(user?.role);
-  const canManageFinesRole = canManageFines(user?.role);
+  const canManageFinesRole = canManageFines(user?.role, user?.mdCapabilities);
   const { data: dashboard } = useSalaryDashboard(isMgmt);
 
   const links = [
     // Bug 14/15/17: non-management staff get a direct link to their detailed,
     // date-ranged salary breakdown (rendered on their own profile page).
     ...(!isMgmt && user?.id
-      ? [{ href: `/staff/${user.id}`, title: "My Salary Detail", desc: "Detailed breakdown with date range", icon: Banknote, mgmt: false }]
+      ? [{ href: `/staff/${user.id}`, title: "My Salary Detail", desc: "Detailed breakdown with date range", icon: Banknote, mgmt: false, finesOnly: false }]
       : []),
-    { href: "/salary/history", title: "Salary History", desc: "All salary records with filters", icon: History, mgmt: false },
-    { href: "/salary/generate", title: "Generate Salary", desc: "Preview and generate monthly payroll", icon: Calculator, mgmt: true },
-    { href: "/salary/approval", title: "Salary Approval", desc: "Approve, reject, or mark paid", icon: FileCheck, mgmt: true },
-    { href: "/salary/fines", title: "Fine Management", desc: "Create, edit, waive fines", icon: AlertTriangle, mgmt: true, adminOnly: true },
-    { href: "/salary/deductions", title: "Deductions", desc: "Food, transport, advance deductions", icon: MinusCircle, mgmt: true },
-    { href: "/salary/ot", title: "OT Management", desc: "Overtime entries (Rs.250/hr)", icon: Clock, mgmt: true },
-  ].filter((l) => (!l.mgmt || isMgmt) && (!l.adminOnly || canManageFinesRole));
+    { href: "/salary/history", title: "Salary History", desc: "All salary records with filters", icon: History, mgmt: false, finesOnly: false },
+    { href: "/salary/generate", title: "Generate Salary", desc: "Preview and generate monthly payroll", icon: Calculator, mgmt: true, finesOnly: false },
+    { href: "/salary/approval", title: "Salary Approval", desc: "Approve, reject, or mark paid", icon: FileCheck, mgmt: true, finesOnly: false },
+    {
+      href: "/salary/fines",
+      title: "Fine Management",
+      desc: canManageFinesRole && !isMgmt
+        ? "Record fines for staff in your branch"
+        : "Create, edit, waive fines",
+      icon: AlertTriangle,
+      mgmt: false,
+      finesOnly: true,
+    },
+    { href: "/salary/deductions", title: "Deductions", desc: "Food, transport, advance deductions", icon: MinusCircle, mgmt: true, finesOnly: false },
+    { href: "/salary/ot", title: "OT Management", desc: "Overtime entries (Rs.250/hr)", icon: Clock, mgmt: true, finesOnly: false },
+  ].filter((l) => {
+    if (l.finesOnly) return canManageFinesRole;
+    if (l.mgmt && !isMgmt) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-6 p-4 md:p-0">
