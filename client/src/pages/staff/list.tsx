@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/context/auth-context";
 import { useBranch } from "@/context/branch-context";
-import { useStaffDirectory, useDeleteStaff, useUpdateStaff } from "@/hooks/useData";
+import { useStaffDirectory, useDeleteStaff, useUpdateStaff, useBranches } from "@/hooks/useData";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
@@ -46,6 +46,11 @@ export default function StaffListPage() {
     ...(roleFilter ? { role: roleFilter } : {}),
     ...(statusFilter ? { status: statusFilter } : {}),
   });
+  const { data: branchesData = [] } = useBranches();
+  const branchNameById = useMemo(
+    () => new Map(branchesData.map((branch: any) => [String(branch.id), branch.name])),
+    [branchesData]
+  );
   const deleteStaff = useDeleteStaff();
   const updateStaff = useUpdateStaff();
   const [, setLocation] = useLocation();
@@ -95,6 +100,20 @@ export default function StaffListPage() {
       });
     }
     setDeleteId(null);
+  };
+
+  const getBranchLabel = (member: any) => {
+    const branchIds = Array.isArray(member.branchIds) ? member.branchIds : [];
+    const resolved = branchIds
+      .map((branchId: any) => branchNameById.get(String(branchId)) ?? String(branchId))
+      .filter((name: string) => name && name !== "undefined");
+    if (resolved.length > 0) return resolved.join(", ");
+    const raw = String(member.branch ?? "").trim();
+    if (!raw) return "";
+    const lowered = raw.toLowerCase();
+    if (lowered === "both") return "Dehiwala, Neuro Unit";
+    if (["all", "all branches"].includes(lowered)) return "All Branches";
+    return raw;
   };
 
   const toggleActive = async (member: any, nextActive: boolean) => {
@@ -180,11 +199,11 @@ export default function StaffListPage() {
                     <span className={`text-xs font-semibold ${(member.isActive ?? 1) ? "text-emerald-700" : "text-red-600"}`}>
                       {(member.isActive ?? 1) ? "Active" : "Deactivated"}
                     </span>
-                    {member.branch && (
+                    {getBranchLabel(member) && (
                       <>
                         <span className="text-white/20">•</span>
                         <span className="flex items-center gap-1 text-xs" data-testid={`text-staff-branch-${member.id}`}>
-                          <MapPin className="h-3 w-3" /> {String(member.branch).toLowerCase() === "both" ? "Dehiwala & Neuro Rehabilitation" : ["all", "all branches"].includes(String(member.branch).toLowerCase()) ? "All Branches" : member.branch}
+                          <MapPin className="h-3 w-3" /> {getBranchLabel(member)}
                         </span>
                       </>
                     )}

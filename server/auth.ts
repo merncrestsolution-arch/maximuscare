@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import type { OrganizationId } from "@shared/branchAccess";
 import { storage } from "./storage";
 import { hasPermission, type Permission } from "./rbac/permissions";
 import { getAccessTokenFromRequest } from "./helpers/authCookies";
@@ -21,6 +22,9 @@ export interface SessionUser {
   email: string;
   role: string;
   selectedBranchId?: string | null;
+  branchId?: string | null;
+  branchName?: string | null;
+  organizationId?: OrganizationId | null;
 }
 
 export interface AuthTokens {
@@ -95,6 +99,7 @@ async function resolveUserFromSessionId(sessionId: string): Promise<SessionUser 
     email: staff.email,
     role: staff.role,
     selectedBranchId: (row as { selectedBranchId?: string | null }).selectedBranchId ?? null,
+    branchId: (row as { selectedBranchId?: string | null }).selectedBranchId ?? null,
   };
 }
 

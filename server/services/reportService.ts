@@ -4,7 +4,7 @@
 import type { IStorage } from "../storage";
 import type { Staff, Visit, Attendance, InPatientSession, StaffFine, Expense } from "@shared/schema";
 // StaffFine, Expense used in interfaces
-import { clinicDateString } from "../clinicTime";
+import { clinicDateOffset, clinicDateString } from "../clinicTime";
 import { loadPayrollSettings, computePayrollForStaff, computePayrollReport, type PayrollSummary } from "./payrollService";
 import {
   computeExpenseBreakdown,
@@ -14,6 +14,7 @@ import {
   inDateRange,
   getVisitCollectedRevenue,
   getVisitOutstandingBalance,
+  normalizeVisitType,
 } from "./calculationEngine";
 import { ENTERPRISE_BRANCHES, normalizeBranchName, getHomeVisitRateTier } from "@shared/branches";
 
@@ -85,6 +86,7 @@ export interface DashboardCharts {
   revenueTrend: { date: string; revenue: number }[];
   attendanceTrend: { date: string; present: number; absent: number; leave: number; holiday: number }[];
   visitAnalytics: { date: string; clinic: number; home: number; sessions: number }[];
+  homeVisitRevenueTrend: { date: string; revenue: number }[];
   branchRevenue: { branch: string; revenue: number }[];
   topIncentiveStaff: { staffName: string; incentiveCount: number; incentiveAmount: number }[];
 }
@@ -131,7 +133,9 @@ function computeHomeVisitFeeLines(
   visits: Visit[],
   rates: { homeColombo: number; homeBandaragama: number }
 ): { branch: string; count: number; rate: number; total: number }[] {
-  const homeVisits = visits.filter((v) => v.visitType === "Home");
+  const homeVisits = visits.filter(
+    (v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+  );
   const byBranch = new Map<string, number>();
   for (const v of homeVisits) {
     const branch = normalizeBranchName(v.branch) || "Unknown";
@@ -487,7 +491,9 @@ export async function computeStaffReport(
     payroll,
     visits,
     sessions,
-    homeVisits: visits.filter((v) => v.visitType === "Home"),
+    homeVisits: visits.filter(
+      (v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+    ),
     fines,
     attendance,
   };
@@ -569,8 +575,13 @@ export async function computeDashboardCharts(
   for (const v of visits) {
     if (!visitByDay.has(v.visitDate)) visitByDay.set(v.visitDate, { clinic: 0, home: 0, sessions: 0 });
     const row = visitByDay.get(v.visitDate)!;
-    if (v.visitType === "Home") row.home++;
-    else row.clinic++;
+    if (normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home") {
+      row.home++;
+    } else if (
+      normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic"
+    ) {
+      row.clinic++;
+    }
   }
   for (const s of ipSessions) {
     if (!visitByDay.has(s.sessionDate)) visitByDay.set(s.sessionDate, { clinic: 0, home: 0, sessions: 0 });
@@ -579,6 +590,26 @@ export async function computeDashboardCharts(
   const visitAnalytics = Array.from(visitByDay.entries())
     .map(([date, v]) => ({ date, ...v }))
     .sort((a, b) => a.date.localeCompare(b.date));
+
+  const homeVisitRevenueByDay = new Map<string, number>();
+  for (const v of visits) {
+    if (normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) !== "home") {
+      continue;
+    }
+    const amount = getVisitCollectedRevenue(v);
+    homeVisitRevenueByDay.set(v.visitDate, (homeVisitRevenueByDay.get(v.visitDate) ?? 0) + amount);
+  }
+  const homeVisitRevenueTrend: { date: string; revenue: number }[] = [];
+  if (rangeFrom && rangeTo) {
+    let cursor = rangeFrom;
+    while (cursor <= rangeTo) {
+      homeVisitRevenueTrend.push({
+        date: cursor,
+        revenue: homeVisitRevenueByDay.get(cursor) ?? 0,
+      });
+      cursor = clinicDateOffset(1, new Date(`${cursor}T12:00:00+05:30`));
+    }
+  }
 
   const allVisits = branchFilter
     ? visits
@@ -599,7 +630,7 @@ export async function computeDashboardCharts(
       incentiveAmount: r.incentiveAmount,
     }));
 
-  return { revenueTrend, attendanceTrend, visitAnalytics, branchRevenue, topIncentiveStaff };
+  return { revenueTrend, attendanceTrend, visitAnalytics, homeVisitRevenueTrend, branchRevenue, topIncentiveStaff };
 }
 
 /** Extended KPI fields for Part 4 dashboard cards. */
@@ -617,8 +648,12 @@ export async function computeExtendedDashboardKpis(
   let ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
   if (branchFilter) ipSessions = await filterSessionsByBranch(storage, ipSessions, branchFilter);
   const todaySessions = ipSessions.filter((s) => s.sessionDate === today).length;
-  const todayHomeVisits = todayVisitsList.filter((v) => v.visitType === "Home").length;
-  const todayClinicVisits = todayVisitsList.filter((v) => v.visitType === "Clinic").length;
+  const todayHomeVisits = todayVisitsList.filter(
+    (v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+  ).length;
+  const todayClinicVisits = todayVisitsList.filter(
+    (v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic"
+  ).length;
 
   const unpaid = await computeUnpaidReport(storage, staffFilter?.[0]);
   const scopedUnpaid = branchFilter

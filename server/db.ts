@@ -102,7 +102,6 @@ export async function ensureSqliteSchemaCompatibility() {
       auto_fine_amount TEXT NOT NULL DEFAULT '500',
       home_rate_colombo TEXT NOT NULL DEFAULT '1000',
       home_rate_bandaragama TEXT NOT NULL DEFAULT '500',
-      holiday_home_rate TEXT NOT NULL DEFAULT '1500',
       ot_rate_per_hour TEXT NOT NULL DEFAULT '250',
       extra_holiday_deduction TEXT NOT NULL DEFAULT '1500',
       free_absent_days INTEGER NOT NULL DEFAULT 4,

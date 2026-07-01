@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import { eq, desc } from "drizzle-orm";
 import Decimal from "decimal.js";
 import { isAutoFineSessionRole, syncAutoFineForStaffDate } from "./autoFineSync";
-import { createSession, destroySession, requireAuth } from "./auth";
+import { createSession, destroySession, requireAuth, requireRole } from "./auth";
 import { setAuthCookies, clearAuthCookies, getRefreshTokenFromRequest } from "./helpers/authCookies";
 import { attachBranchContext, requireBranchContext, resolveBranchFilter, getBranchFilter, getSelectedBranchId } from "./middleware/branchContext";
 import {
@@ -34,6 +34,7 @@ import {
   validatePaymentStatus,
   validateAttendanceStatus,
   computeNextSessionNumber,
+  normalizeVisitType,
 } from "./services/calculationEngine";
 import {
   canViewAllPatients,
@@ -100,6 +101,54 @@ function resolveSessionOrganization(req: Request): OrganizationId | null {
   return null;
 }
 
+function resolveUserScope(req: Request): {
+  branchId: string | null;
+  branchName: string | null;
+  organizationId: OrganizationId | null;
+} {
+  const user = (req as any).user as {
+    branchId?: string | null;
+    branchName?: string | null;
+    organizationId?: OrganizationId | null;
+    selectedBranchId?: string | null;
+  };
+  return {
+    branchId: user?.branchId ?? user?.selectedBranchId ?? null,
+    branchName: user?.branchName ?? null,
+    organizationId: user?.organizationId ?? resolveSessionOrganization(req),
+  };
+}
+
+function matchesBranchScope(
+  record: { branch?: string | null; branchId?: string | null },
+  branchId: string | null,
+  branchName: string | null
+): boolean {
+  if (!branchId && !branchName) return true;
+  if (branchId && record.branchId) return record.branchId === branchId;
+  if (branchName && record.branch) {
+    return normalizeBranchName(record.branch).toLowerCase() === normalizeBranchName(branchName).toLowerCase();
+  }
+  return false;
+}
+
+function matchesOrganizationScope(
+  record: { branch?: string | null },
+  organizationId: OrganizationId | null
+): boolean {
+  if (!organizationId) return true;
+  if (!record.branch) return false;
+  return organizationForBranch(record.branch) === organizationId;
+}
+
+async function resolveBranchNameById(branchId: string | null | undefined): Promise<string | null> {
+  if (!branchId) return null;
+  const branches = await storage.getAllBranches();
+  const match = branches.find((b) => b.id === branchId);
+  if (!match) return null;
+  return match.branchName ?? match.name ?? null;
+}
+
 const {
   staff: staffTable,
   insertStaffSchema,
@@ -116,6 +165,7 @@ const {
   updateInPatientSessionSchema,
   insertInPatientDischargeSchema,
   insertInPatientPaymentSchema,
+  updateInPatientPaymentSchema,
   updateInPatientDischargeSchema,
   insertExpenseSchema,
   updateExpenseSchema,
@@ -625,6 +675,9 @@ export async function registerRoutes(
         if (branchFilter) {
           const { filterStaffByBranchAccess } = await import("./services/staffService");
           filtered = await filterStaffByBranchAccess(storage, filtered, branchFilter);
+        } else if (currentUser.organizationId) {
+          const { filterStaffByOrganization } = await import("./services/staffService");
+          filtered = await filterStaffByOrganization(storage, filtered, currentUser.organizationId);
         }
 
         // Scope Managers/Branch Managers/Receptionists to their allowed branches (Bug 6).
@@ -953,14 +1006,7 @@ export async function registerRoutes(
   app.get("/api/patients", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
-      const branchParam = req.query.branch as string | undefined;
-      // `branch=all` lets pickers (e.g. Book Appointment) list patients across
-      // every branch the user is allowed to see, instead of just the selected one.
-      const allBranches =
-        typeof branchParam === "string" && branchParam.trim().toLowerCase() === "all";
-      const branch = allBranches
-        ? undefined
-        : await resolveBranchFilter(req as any, branchParam);
+      const { branchId, branchName, organizationId } = resolveUserScope(req);
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
       const page = req.query.page ? Number(req.query.page) : undefined;
@@ -974,15 +1020,18 @@ export async function registerRoutes(
         const { parsePagination } = await import("./helpers/pagination");
         const { page: p, limit: l } = parsePagination({ page, limit });
         const result = await storage.getPatientsPaginated({
-          branch,
+          branch: branchName ?? undefined,
           search,
           status,
           patientIds: staffPatientIds,
           page: p,
           limit: l,
         });
+        const scoped = result.data.filter(
+          (p) => matchesBranchScope(p, branchId, branchName) && matchesOrganizationScope(p, organizationId)
+        );
         return res.json({
-          data: result.data,
+          data: scoped,
           pagination: {
             page: p,
             limit: l,
@@ -994,18 +1043,21 @@ export async function registerRoutes(
 
       let patientList;
       if (canViewAllPatients(currentUser.role)) {
-        patientList = branch
-          ? await storage.getPatientsByBranch(branch)
+        patientList = branchName
+          ? await storage.getPatientsByBranch(branchName)
           : await storage.getAllPatients();
       } else {
         const all = await storage.getAllPatients();
         patientList = all.filter((p) => staffPatientIds!.includes(p.id));
-        if (branch) {
-          const target = normalizeBranchName(branch).toLowerCase();
+        if (branchName) {
+          const target = normalizeBranchName(branchName).toLowerCase();
           patientList = patientList.filter((p) => normalizeBranchName(p.branch).toLowerCase() === target);
         }
       }
-      return res.json(patientList);
+      const scoped = patientList.filter(
+        (p) => matchesBranchScope(p, branchId, branchName) && matchesOrganizationScope(p, organizationId)
+      );
+      return res.json(scoped);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -1059,10 +1111,6 @@ export async function registerRoutes(
     requirePatientsManage,
     async (req: Request, res: Response) => {
       try {
-        const organizationId = resolveSessionOrganization(req);
-        if (!organizationId) {
-          return res.status(400).json({ message: "Select a branch before scanning." });
-        }
         const token = String((req.body as any)?.token ?? "").trim();
         const verified = verifyPatientQrToken(token);
         if (!verified.ok || !verified.payload) {
@@ -1070,6 +1118,21 @@ export async function registerRoutes(
             return res.status(400).json({ message: "QR code invalid or expired", code: "QR_EXPIRED" });
           }
           return res.status(400).json({ message: "Invalid QR code, please try again", code: "QR_INVALID" });
+        }
+
+        const allowedOrgs = new Set<OrganizationId>();
+        const ctx = (req as any).branchContext;
+        const allowedBranches = ctx?.allowedBranches ?? [];
+        for (const branch of allowedBranches) {
+          allowedOrgs.add(organizationForBranch(branch.branchName ?? branch.name));
+        }
+        if (ctx?.selectedContext === "maximus-overview") allowedOrgs.add("maximus");
+        if (ctx?.selectedContext === "nexus-overview") allowedOrgs.add("nexus");
+        if (allowedOrgs.size === 0) {
+          return res.status(403).json({ message: "Branch access required", code: "BRANCH_REQUIRED" });
+        }
+        if (!allowedOrgs.has(verified.payload.organizationId)) {
+          return res.status(404).json({ message: "Patient not found", code: "QR_SCOPE" });
         }
 
         const scannedId = verified.payload.patientId;
@@ -1214,9 +1277,21 @@ export async function registerRoutes(
   });
 
   // Create patient (Receptionist, Physiotherapist, Admin, MD)
-  app.post("/api/patients", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
+  app.post("/api/patients", requireAuth, requireBranchContext(), requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const validatedData = insertPatientSchema.parse(req.body);
+      if (!validatedData.name || !validatedData.name.trim()) {
+        return res.status(400).json({ message: "Patient name is required", field: "name" });
+      }
+      if (!validatedData.condition || !validatedData.condition.trim()) {
+        return res.status(400).json({ message: "Patient condition is required", field: "condition" });
+      }
+      const { branchId, branchName } = resolveUserScope(req);
+      if (!branchId || !branchName) {
+        return res.status(403).json({ message: "Branch selection required" });
+      }
+      validatedData.branchId = branchId;
+      validatedData.branch = branchName;
       if (typeof validatedData.phone === "string" && validatedData.phone.trim() === "") {
         validatedData.phone = null as any;
       }
@@ -1250,11 +1325,17 @@ export async function registerRoutes(
   });
 
   // Update patient
-  app.patch("/api/patients/:id", requireAuth, requirePatientsManage, async (req: Request, res: Response) => {
+  app.patch("/api/patients/:id", requireAuth, requireBranchContext(), requirePatientsManage, async (req: Request, res: Response) => {
     try {
       const id = param(req, "id");
       const beforePatient = await storage.getPatient(id);
       const validatedData = updatePatientSchema.parse(req.body);
+      if (validatedData.name !== undefined && !validatedData.name.trim()) {
+        return res.status(400).json({ message: "Patient name is required", field: "name" });
+      }
+      if (validatedData.condition !== undefined && !validatedData.condition.trim()) {
+        return res.status(400).json({ message: "Patient condition is required", field: "condition" });
+      }
       if (typeof validatedData.phone === "string" && validatedData.phone.trim() === "") {
         validatedData.phone = null as any;
       }
@@ -1317,11 +1398,14 @@ export async function registerRoutes(
   app.get("/api/visits/unpaid", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
+      const { branchId, branchName, organizationId } = resolveUserScope(req);
       const staffId = canViewAllVisits(currentUser.role) ? undefined : currentUser.staffId;
       let unpaid = await storage.getUnpaidVisits(staffId);
-      const branchFilter = getBranchFilter(req as any);
-      if (branchFilter) unpaid = filterByBranchName(unpaid, branchFilter);
-      return res.json(unpaid);
+      if (branchName) unpaid = filterByBranchName(unpaid, branchName);
+      const scoped = unpaid.filter(
+        (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId)
+      );
+      return res.json(scoped);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -1331,10 +1415,10 @@ export async function registerRoutes(
   app.get("/api/visits", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
+      const { branchId, branchName, organizationId } = resolveUserScope(req);
       const patientId = req.query.patientId as string | undefined;
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
-      const branch = await resolveBranchFilter(req as any, req.query.branch as string | undefined);
       const page = req.query.page ? Number(req.query.page) : undefined;
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
 
@@ -1346,13 +1430,16 @@ export async function registerRoutes(
           patientId,
           startDate,
           endDate,
-          branch,
+          branch: branchName ?? undefined,
           staffId,
           page: p,
           limit: l,
         });
+        const scoped = result.data.filter(
+          (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId)
+        );
         return res.json({
-          data: result.data,
+          data: scoped,
           pagination: {
             page: p,
             limit: l,
@@ -1385,13 +1472,15 @@ export async function registerRoutes(
           }
         }
       }
-      if (branch && !patientId) {
+      if (branchName && !patientId) {
         visitList = visitList.filter(
-          (v) => normalizeBranchName(v.branch).toLowerCase() === normalizeBranchName(branch).toLowerCase()
+          (v) => normalizeBranchName(v.branch).toLowerCase() === normalizeBranchName(branchName).toLowerCase()
         );
       }
-
-      return res.json(visitList);
+      const scoped = visitList.filter(
+        (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId)
+      );
+      return res.json(scoped);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -1415,11 +1504,12 @@ export async function registerRoutes(
   app.post("/api/visits", requireAuth, requireBranchContext(), requireVisitsManage, async (req: Request, res: Response) => {
     try {
       const incoming = { ...req.body } as Record<string, unknown>;
-      const branchCheck = validateBranch(incoming.branch);
-      if (!branchCheck.ok) {
-        return res.status(400).json({ message: branchCheck.message });
+      const { branchId, branchName } = resolveUserScope(req);
+      if (!branchId || !branchName) {
+        return res.status(403).json({ message: "Branch selection required" });
       }
-      incoming.branch = branchCheck.branch;
+      incoming.branch = branchName;
+      (incoming as any).branchId = branchId;
       const receivedPaymentAmount = incoming.paymentAmount;
       if (!incoming.paymentAmount) {
         incoming.paymentAmount = "0";
@@ -1459,7 +1549,7 @@ export async function registerRoutes(
       if (receivedPaymentAmount !== undefined && String(receivedPaymentAmount) !== String(visit.paymentAmount)) {
         console.warn(`[WARNING] Payment amount mutated during save! Received: ${receivedPaymentAmount}, Stored: ${visit.paymentAmount}`);
       }
-      if (visit.visitType === "Home") {
+      if (normalizeVisitType((visit as { visitType?: string; type?: string }).visitType ?? (visit as any).type) === "home") {
         const hvType = await detectHomeVisitType(
           storage,
           visit.treatingStaffId,
@@ -1584,7 +1674,13 @@ export async function registerRoutes(
       }
       await syncAutoFineForStaffDate(storage, before.treatingStaffId, before.visitDate);
       await syncAutoFineForStaffDate(storage, visit.treatingStaffId, visit.visitDate);
-      if (visit.visitType === "Home" || before.visitType === "Home") {
+      const visitType = normalizeVisitType(
+        (visit as { visitType?: string; type?: string }).visitType ?? (visit as any).type
+      );
+      const beforeType = normalizeVisitType(
+        (before as { visitType?: string; type?: string }).visitType ?? (before as any).type
+      );
+      if (visitType === "home" || beforeType === "home") {
         const hvType = await detectHomeVisitType(
           storage,
           visit.treatingStaffId,
@@ -1592,7 +1688,7 @@ export async function registerRoutes(
           visit.branch,
           (visit as { homeVisitType?: string }).homeVisitType
         );
-        if (visit.visitType === "Home") {
+        if (visitType === "home") {
           await storage.updateVisit(visit.id, { homeVisitType: hvType } as any);
           await syncHomeVisitFromVisit(storage, { ...visit, homeVisitType: hvType } as any, hvType);
         }
@@ -1672,7 +1768,8 @@ export async function registerRoutes(
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       const month = req.query.month as string | undefined;
-      const branch = (req.query.branch as string | undefined) ?? getBranchFilter(req as any) ?? undefined;
+      const { branchId, branchName, organizationId } = resolveUserScope(req);
+      const branch = branchName ?? undefined;
       const page = req.query.page ? Number(req.query.page) : undefined;
       const limit = req.query.limit ? Number(req.query.limit) : undefined;
       const currentUser = (req as any).user;
@@ -1763,6 +1860,11 @@ export async function registerRoutes(
       if (branchStaffIds) {
         attendance = attendance.filter((a: any) => branchStaffIds!.has(a.staffId));
       }
+      if (branch || organizationId) {
+        attendance = attendance.filter(
+          (a: any) => matchesBranchScope(a, branchId, branchName) && matchesOrganizationScope(a, organizationId)
+        );
+      }
 
       if (!canViewLocation) {
         attendance = stripAttendanceLocation(attendance as any[]);
@@ -1775,9 +1877,10 @@ export async function registerRoutes(
   });
 
   // Create attendance record
-  app.post("/api/attendance", requireAuth, async (req: Request, res: Response) => {
+  app.post("/api/attendance", requireAuth, requireBranchContext(), async (req: Request, res: Response) => {
     try {
       const currentUser = (req as any).user;
+      const { branchName } = resolveUserScope(req);
       const body = req.body;
       const todayStr = clinicDateString();
 
@@ -1851,8 +1954,6 @@ export async function registerRoutes(
         });
       }
 
-      console.log(`[ATTENDANCE] staffId=${targetStaffId}, date=${attendanceDate}, status=${status}`);
-
       const existing = await storage.getAttendanceByStaffAndDate(targetStaffId, attendanceDate);
       if (existing) {
         if (!canManageOthers) {
@@ -1874,7 +1975,7 @@ export async function registerRoutes(
         staffId: targetStaffId,
         staffName: targetStaffName,
         role: targetRole,
-        branch: targetBranch ? normalizeBranchName(targetBranch) : null,
+        branch: branchName ? normalizeBranchName(branchName) : null,
         date: attendanceDate,
         status,
         checkInTime: checkInTime || undefined,
@@ -2155,10 +2256,26 @@ export async function registerRoutes(
       }
 
       const stats = {
-        colomboClinic: visits.filter((v) => v.branch === "Colombo" && v.visitType === "Clinic").length,
-        colomboHome: visits.filter((v) => v.branch === "Colombo" && v.visitType === "Home").length,
-        bandaragamaClinic: visits.filter((v) => v.branch === "Bandaragama" && v.visitType === "Clinic").length,
-        bandaragamaHome: visits.filter((v) => v.branch === "Bandaragama" && v.visitType === "Home").length,
+        colomboClinic: visits.filter(
+          (v) =>
+            v.branch === "Colombo" &&
+            normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic"
+        ).length,
+        colomboHome: visits.filter(
+          (v) =>
+            v.branch === "Colombo" &&
+            normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+        ).length,
+        bandaragamaClinic: visits.filter(
+          (v) =>
+            v.branch === "Bandaragama" &&
+            normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic"
+        ).length,
+        bandaragamaHome: visits.filter(
+          (v) =>
+            v.branch === "Bandaragama" &&
+            normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+        ).length,
       };
 
       const incentiveRows = await computeIncentiveReport(storage, startDate, endDate, targetStaffId);
@@ -2188,8 +2305,25 @@ export async function registerRoutes(
       const { status } = req.query;
       const branchId = getSelectedBranchId(req as any);
       let admissions;
-      if (status && typeof status === 'string') {
-        admissions = await storage.getInPatientAdmissionsByStatus(status, branchId);
+      if (status && typeof status === "string") {
+        const tokens = status
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+        const normalized = tokens.map((value) => value.toLowerCase());
+        if (normalized.includes("all")) {
+          admissions = await storage.getAllInPatientAdmissions(branchId);
+        } else if (normalized.includes("active")) {
+          const allAdmissions = await storage.getAllInPatientAdmissions(branchId);
+          admissions = allAdmissions.filter((entry) => {
+            const current = String(entry.status || "").toLowerCase();
+            return current === "admitted" || current === "active";
+          });
+        } else {
+          const allAdmissions = await storage.getAllInPatientAdmissions(branchId);
+          const allowed = new Set(normalized);
+          admissions = allAdmissions.filter((entry) => allowed.has(String(entry.status || "").toLowerCase()));
+        }
       } else {
         admissions = await storage.getAllInPatientAdmissions(branchId);
       }
@@ -3076,6 +3210,72 @@ export async function registerRoutes(
     }
   });
 
+  // Update payment (Admin, MD only)
+  app.patch("/api/inpatients/payments/:paymentId", requireAuth, requireRole("Admin", "MD"), async (req: Request, res: Response) => {
+    try {
+      const paymentId = param(req, "paymentId");
+      const payment = await storage.getInPatientPayment(paymentId);
+      if (!payment) {
+        return res.status(404).json({ message: "Payment not found" });
+      }
+      const admission = await storage.getInPatientAdmission(payment.admissionId);
+      if (!admission) {
+        return res.status(404).json({ message: "Admission not found" });
+      }
+      const { branchId, organizationId } = resolveUserScope(req);
+      if (branchId && admission.branchId && admission.branchId !== branchId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (organizationId) {
+        const admissionBranchName = await resolveBranchNameById(admission.branchId);
+        if (admissionBranchName && organizationForBranch(admissionBranchName) !== organizationId) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+      }
+
+      const body = { ...req.body };
+      if (body.notes === '' || body.notes === undefined) body.notes = null;
+      if (body.amount !== undefined) body.amount = String(body.amount);
+      const parsed = updateInPatientPaymentSchema.safeParse(body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
+      }
+
+      const changes: Record<string, { from: unknown; to: unknown }> = {};
+      if (parsed.data.amount !== undefined && String(parsed.data.amount) !== String(payment.amount)) {
+        changes.amount = { from: payment.amount, to: parsed.data.amount };
+      }
+      if (parsed.data.paymentMode !== undefined && parsed.data.paymentMode !== payment.paymentMode) {
+        changes.paymentMode = { from: payment.paymentMode, to: parsed.data.paymentMode };
+      }
+      if (parsed.data.paymentDate !== undefined && parsed.data.paymentDate !== payment.paymentDate) {
+        changes.paymentDate = { from: payment.paymentDate, to: parsed.data.paymentDate };
+      }
+      if (parsed.data.notes !== undefined && parsed.data.notes !== payment.notes) {
+        changes.notes = { from: payment.notes, to: parsed.data.notes };
+      }
+
+      const updated = await storage.updateInPatientPayment(paymentId, parsed.data);
+      if (!updated) {
+        return res.status(404).json({ message: "Payment not found" });
+      }
+      if (Object.keys(changes).length > 0) {
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "inpatient_payment",
+          action: "update",
+          recordId: paymentId,
+          oldValue: payment,
+          newValue: { ...updated, changes },
+        });
+      }
+      return res.json({ success: true, payment: updated });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // ========== In-Patient Extra Expense Routes ==========
 
   app.get("/api/inpatients/:admissionId/extra-expenses", requireAuth, async (req: Request, res: Response) => {
@@ -3163,7 +3363,7 @@ export async function registerRoutes(
   app.get("/api/expenses", requireAuth, requireBranchContext(), requireExpensesManage, async (req: Request, res: Response) => {
     try {
       const { startDate, endDate } = req.query;
-      const branchFilter = getBranchFilter(req as any);
+      const { branchId, branchName, organizationId } = resolveUserScope(req);
       let expensesList;
       
       if (startDate && endDate) {
@@ -3172,17 +3372,13 @@ export async function registerRoutes(
         expensesList = await storage.getAllExpenses();
       }
 
-      if (branchFilter) {
-        expensesList = filterByBranchName(expensesList, branchFilter);
-      } else {
-        const ctx = (req as any).branchContext;
-        if (ctx?.allowedBranches) {
-          const allowedNorms = new Set(ctx.allowedBranches.map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
-          expensesList = expensesList.filter((e: any) => allowedNorms.has(normalizeBranchName(e.branch).toLowerCase()));
-        }
+      if (branchName) {
+        expensesList = filterByBranchName(expensesList, branchName);
       }
-      
-      return res.json(expensesList);
+      const scoped = expensesList.filter(
+        (e: any) => matchesBranchScope(e, branchId, branchName) && matchesOrganizationScope(e, organizationId)
+      );
+      return res.json(scoped);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -3217,14 +3413,17 @@ export async function registerRoutes(
     try {
       const user = (req as any).user;
       const staffInfo = await storage.getStaff(user.staffId);
-      const branchName = getBranchFilter(req as any);
+      const { branchName } = resolveUserScope(req);
+      if (!branchName) {
+        return res.status(403).json({ message: "Branch selection required" });
+      }
       
       const body = { ...req.body };
       if (body.description === '' || body.description === undefined) body.description = null;
       
       const data = {
         ...body,
-        branch: body.branch ?? branchName ?? staffInfo?.branch ?? null,
+        branch: branchName,
         createdByStaffId: user.staffId,
         createdByName: staffInfo?.name || 'Unknown',
       };
@@ -3374,7 +3573,18 @@ export async function registerRoutes(
         ? await storage.getAppointmentsByDate(date as string)
         : await storage.getAllAppointments();
       if (branchFilter) appts = filterByBranchName(appts, branchFilter);
-      return res.json(appts);
+      const patientIds = Array.from(
+        new Set(appts.map((appt) => appt.patientId).filter((id): id is string => Boolean(id)))
+      );
+      const patients = await Promise.all(patientIds.map((id) => storage.getPatient(id)));
+      const patientCodeById = new Map(
+        patients.filter(Boolean).map((patient) => [patient!.id, (patient as any).patientCode]),
+      );
+      const enriched = appts.map((appt) => ({
+        ...appt,
+        patientCode: patientCodeById.get(appt.patientId) ?? null,
+      }));
+      return res.json(enriched);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -3384,7 +3594,8 @@ export async function registerRoutes(
     try {
       const appt = await storage.getAppointment(param(req, "id"));
       if (!appt) return res.status(404).json({ message: "Appointment not found" });
-      return res.json(appt);
+      const patient = appt.patientId ? await storage.getPatient(appt.patientId) : null;
+      return res.json({ ...appt, patientCode: (patient as any)?.patientCode ?? null });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

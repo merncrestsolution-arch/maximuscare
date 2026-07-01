@@ -188,6 +188,7 @@ export interface Appointment {
   appointmentTime: string;
   patientId: string;
   patientName: string;
+  patientCode?: string | null;
   treatingStaffId: string;
   treatingStaffName: string;
   status?: string;

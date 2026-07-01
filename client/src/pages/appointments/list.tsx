@@ -169,6 +169,11 @@ export default function AppointmentsList() {
                     <Link href={`/patients/${appointment.patientId}`} className="font-semibold text-foreground hover:text-primary" data-testid={`text-patient-${appointment.id}`}>
                       {appointment.patientName}
                     </Link>
+                    {appointment.patientCode && (
+                      <div className="text-xs text-muted-foreground font-mono" data-testid={`text-patient-code-${appointment.id}`}>
+                        {appointment.patientCode}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <User className="h-4 w-4" />
                       <span data-testid={`text-staff-${appointment.id}`}>{appointment.treatingStaffName}</span>

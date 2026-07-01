@@ -48,6 +48,7 @@ export default function PatientEditPage() {
   const [formData, setFormData] = useState<Patient | Omit<Patient, "id">>(
     isEdit && existingPatient ? { ...existingPatient } : { ...DEFAULT_PATIENT }
   );
+  const [errors, setErrors] = useState<{ name?: string; condition?: string }>({});
 
   const registeredDateForId = String((formData as Patient).registeredDate ?? "").trim();
   const branchForId = String((formData as Patient).branch ?? "").trim();
@@ -107,6 +108,18 @@ export default function PatientEditPage() {
   };
 
   const handleSave = async () => {
+    const nextErrors: { name?: string; condition?: string } = {};
+    if (!(formData as any).name?.trim()) {
+      nextErrors.name = "Patient name is required";
+    }
+    if (!(formData as any).condition?.trim()) {
+      nextErrors.condition = "Patient condition is required";
+    }
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      toast({ title: "Missing required fields", description: "Please fill in the required fields.", variant: "destructive" });
+      return;
+    }
     const rawAge = (formData as any).age;
     const age =
       rawAge === "" || rawAge === 0 || rawAge === null || rawAge === undefined
@@ -122,6 +135,7 @@ export default function PatientEditPage() {
     }
 
     try {
+      setErrors({});
       if (isEdit) {
         await updatePatientMutation.mutateAsync({ 
           id: patientId!, 
@@ -217,25 +231,26 @@ export default function PatientEditPage() {
             <div className="space-y-3">
               <Label className="text-base font-semibold text-black">Full Name</Label>
               <Input
-                className="h-12 text-base bg-white border-gray-300 text-black"
+                className={`h-12 text-base bg-white text-black ${errors.name ? "border-red-500" : "border-gray-300"}`}
                 value={(formData as any).name}
                 onChange={(e) => setFormData({ ...(formData as any), name: e.target.value })}
                 placeholder="e.g. John Doe"
                 data-testid="input-patient-name"
-                required
               />
+              {errors.name && <div className="text-xs text-red-600">{errors.name}</div>}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <div className="space-y-3">
-                <Label className="text-base font-semibold text-black">Phone</Label>
+                <Label className="text-base font-semibold text-black">
+                  Phone <span className="text-xs text-black/60 font-normal">(optional)</span>
+                </Label>
                 <Input
                   className="h-12 text-base bg-white border-gray-300 text-black"
                   value={(formData as any).phone}
                   onChange={(e) => setFormData({ ...(formData as any), phone: e.target.value })}
                   placeholder="077..."
                   data-testid="input-patient-phone"
-                  required
                 />
               </div>
               <div className="space-y-3">
@@ -344,14 +359,17 @@ export default function PatientEditPage() {
             </div>
 
             <div className="space-y-3">
-              <Label className="text-base font-semibold text-black">Condition</Label>
+              <Label className="text-base font-semibold text-black">
+                Condition <span className="text-red-600">*</span>
+              </Label>
               <Input
-                className="h-12 text-base bg-white border-gray-300 text-black"
+                className={`h-12 text-base bg-white text-black ${errors.condition ? "border-red-500" : "border-gray-300"}`}
                 value={(formData as any).condition || ""}
                 onChange={(e) => setFormData({ ...(formData as any), condition: e.target.value })}
                 placeholder="e.g. Lower Back Pain"
                 data-testid="input-patient-condition"
               />
+              {errors.condition && <div className="text-xs text-red-600">{errors.condition}</div>}
             </div>
 
             <div className="space-y-3">

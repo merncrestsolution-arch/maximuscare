@@ -90,6 +90,30 @@ export default function NewVisit() {
     };
   }, [formData.patientId]);
 
+  useEffect(() => {
+    const patientId = formData.patientId;
+    if (!patientId) return;
+    let active = true;
+    patientApi
+      .getOne(patientId)
+      .then((patient) => {
+        if (!active) return;
+        const condition = (patient as any)?.condition;
+        if (condition) {
+          setFormData((prev) => ({
+            ...prev,
+            condition: condition || prev.condition,
+          }));
+        }
+      })
+      .catch(() => {
+        /* ignore prefill errors */
+      });
+    return () => {
+      active = false;
+    };
+  }, [formData.patientId]);
+
   const clinicalStaff = useMemo(() => getClinicalStaff(staff as any[]), [staff]);
 
   useEffect(() => {

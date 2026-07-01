@@ -143,6 +143,25 @@
   scrollbar-width: none;
 }
 
+/* In-patient list: mobile cards vs desktop table */
+@media (max-width: 768px) {
+  .inpatient-table-view {
+    display: none;
+  }
+  .inpatient-card-view {
+    display: block;
+  }
+}
+
+@media (min-width: 769px) {
+  .inpatient-table-view {
+    display: block;
+  }
+  .inpatient-card-view {
+    display: none;
+  }
+}
+
 /* ============================================
    Light mode default — Maximus Care brand tokens
    ============================================ */

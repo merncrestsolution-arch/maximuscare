@@ -25,6 +25,10 @@ interface Props {
   patientCode?: string | null;
   phone?: string | null;
   address?: string | null;
+  condition?: string | null;
+  branchName?: string | null;
+  branchId?: string | null;
+  registeredDate?: string | null;
 }
 
 /**
@@ -33,7 +37,7 @@ interface Props {
  * id) so a scanned/printed card can't be forged across organizations. The ID card is
  * a print-ready CR80 PDF with the org logo, QR, name, ID, phone, hotline and footer.
  */
-export function PatientCredentials({ kind, id, patientName, patientCode, phone, address }: Props) {
+export function PatientCredentials({ kind, id, patientName, patientCode, phone, address, condition, branchName, branchId, registeredDate }: Props) {
   const { logoUri } = useBranding();
   const { toast } = useToast();
   const { data: allBranches = [] } = useBranches();
@@ -41,6 +45,16 @@ export function PatientCredentials({ kind, id, patientName, patientCode, phone, 
   /** Friendly label for a branch (falls back to its raw name). */
   const branchLabel = (value: string, fallback: string) =>
     BRANCH_OPTIONS.find((b) => b.value === value)?.label ?? fallback;
+
+  const resolvedBranchName =
+    branchName ||
+    (branchId
+      ? (allBranches as Array<{ id: string; name: string; branchName?: string | null }>).find((b) => b.id === branchId)
+          ?.branchName ??
+        (allBranches as Array<{ id: string; name: string; branchName?: string | null }>).find((b) => b.id === branchId)
+          ?.name ??
+        null
+      : null);
 
   /** Active branch display names for an organization — pulled dynamically. */
   const branchesForOrg = (org: "maximus" | "nexus"): string[] => {
@@ -97,7 +111,10 @@ export function PatientCredentials({ kind, id, patientName, patientCode, phone, 
         patientIdNumber: patientCode ?? result.patientCode ?? id,
         phone: phone ?? "",
         address: address ?? "",
+        condition: condition ?? "",
         branches: branchesForOrg(result.organizationId),
+        branchName: resolvedBranchName ?? undefined,
+        registeredDate: registeredDate ?? undefined,
       });
     } catch (e) {
       toast({

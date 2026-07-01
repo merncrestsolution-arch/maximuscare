@@ -363,6 +363,30 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
               <Card>
+                <CardHeader><CardTitle className="text-base">Home Visit Revenue</CardTitle></CardHeader>
+                <CardContent className="h-52">
+                  {loadingKpis ? (
+                    <div className="h-full w-full animate-pulse rounded-md bg-muted/40" />
+                  ) : !dashboardKpis.charts.homeVisitRevenueTrend ||
+                    dashboardKpis.charts.homeVisitRevenueTrend.length === 0 ||
+                    dashboardKpis.charts.homeVisitRevenueTrend.every((d: any) => Number(d.revenue) === 0) ? (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      No home visit revenue for this period
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={dashboardKpis.charts.homeVisitRevenueTrend}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} width={48} />
+                        <Tooltip formatter={(v: number) => formatCurrency(v)} />
+                        <Line type="monotone" dataKey="revenue" stroke="#F45627" strokeWidth={2.5} dot={{ fill: '#F45627', r: 4 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
+                </CardContent>
+              </Card>
+              <Card>
                 <CardHeader><CardTitle className="text-base">Attendance</CardTitle></CardHeader>
                 <CardContent className="h-52">
                   <ResponsiveContainer width="100%" height="100%">
@@ -645,7 +669,7 @@ export default function Dashboard() {
                   <div className="text-sm flex items-center gap-2">
                     <span className="font-medium">Pt:</span> {patientNameById.get(visit.patientId) || "Unknown"}
                     {(() => {
-                      const badge = getVisitTypeBadge(visit.visitType);
+                      const badge = getVisitTypeBadge((visit as any).visitType ?? (visit as any).type);
                       return (
                         <span style={{ backgroundColor: badge.bg, color: badge.color }} className="px-2 py-0.5 rounded text-xs font-semibold shrink-0">
                           {badge.label}

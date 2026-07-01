@@ -67,6 +67,7 @@ export function registerExtendedRoutes(app: Express) {
       const endDate = req.query.endDate as string;
       const staffId = req.query.staffId as string | undefined;
       const user = (req as any).user;
+      const ctx = await loadBranchContext(req as any);
 
       if (!startDate || !endDate) {
         return errorResponse(res, "startDate and endDate are required", 400);
@@ -82,7 +83,6 @@ export function registerExtendedRoutes(app: Express) {
           if (!target) return errorResponse(res, "Staff not found", 404);
           
           if (!isManagement) {
-            const ctx = await loadBranchContext(req as any);
             const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));
             const targetBranch = normalizeBranchName(target.branch).toLowerCase();
             const matchesAllowed = targetBranch === "both"
@@ -94,7 +94,6 @@ export function registerExtendedRoutes(app: Express) {
           }
           staffIds = [staffId];
         } else {
-          const ctx = await loadBranchContext(req as any);
           const ids = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
           
           if (!isManagement || ids === null) {
@@ -122,6 +121,15 @@ export function registerExtendedRoutes(app: Express) {
         staffIds = [user.staffId];
       } else {
         return errorResponse(res, "Forbidden", 403);
+      }
+
+      if (staffIds && ctx?.selectedContext) {
+        const { filterStaffByOrganization } = await import("../services/staffService");
+        const orgId = ctx.selectedContext === "nexus-overview" ? "nexus" : "maximus";
+        const allStaff = await storage.getAllStaff();
+        const scoped = await filterStaffByOrganization(storage, allStaff, orgId);
+        const scopedIds = new Set(scoped.map((s) => s.id));
+        staffIds = staffIds.filter((id) => scopedIds.has(id));
       }
 
       const report = await computePayrollReport(storage, startDate, endDate, staffIds);

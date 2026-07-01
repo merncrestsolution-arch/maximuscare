@@ -10,6 +10,7 @@ import {
   isPaidPaymentStatus,
   visitMatchesStaff,
   getVisitCollectedRevenue,
+  normalizeVisitType,
 } from "./calculationEngine";
 import { computeExtendedDashboardKpis, computeDashboardCharts, type DashboardCharts } from "./reportService";
 
@@ -162,7 +163,11 @@ export async function computeDashboardKpis(
     }
   }
 
-  const todayHomeVisits = visits.filter((v) => v.visitDate === today && v.visitType === "Home");
+  const todayHomeVisits = visits.filter(
+    (v) =>
+      v.visitDate === today &&
+      normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+  );
   homeVisitIncomeToday = todayHomeVisits.reduce((acc, v) => acc + getVisitCollectedRevenue(v), 0);
   console.log("[HomeVisitDiagnostics] today:", today, "visits count:", todayHomeVisits.length, "revenue:", homeVisitIncomeToday, "visits:", todayHomeVisits.map(v => ({ id: v.id, date: v.visitDate, type: v.visitType, amount: v.paymentAmount, paid: v.amountPaid, status: v.paymentStatus })));
 
@@ -221,8 +226,12 @@ export async function computeBranchDashboardStats(
     const branchName = branch.name;
 
     const branchVisits = visits.filter(v => v.branchId === branchId);
-    const clinicVisits = branchVisits.filter((v) => v.visitType === "Clinic").length;
-    const homeVisits = branchVisits.filter((v) => v.visitType === "Home").length;
+    const clinicVisits = branchVisits.filter(
+      (v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic"
+    ).length;
+    const homeVisits = branchVisits.filter(
+      (v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+    ).length;
     const branchStaffIds = new Set(
       staffDirectory
         .filter((s) => s.branch === branchName)

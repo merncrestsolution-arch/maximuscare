@@ -1,5 +1,4 @@
 import { jsPDF } from "jspdf";
-import QRCode from "qrcode";
 
 /**
  * Default clinic hotline printed on every patient ID card. The label on the card
@@ -25,13 +24,11 @@ const WHITE: RGB = [255, 255, 255];
 type RGB = [number, number, number];
 
 export function organizationDisplayName(org: OrganizationId | string | null | undefined): string {
-  return org === "nexus" ? "Nexus Physio & Rehab" : "Maximus Care";
+  return "Maximus Care";
 }
 
 function organizationSubtitle(org: OrganizationId | string | null | undefined): string {
-  return org === "nexus"
-    ? "PHYSIO & REHAB CENTER"
-    : "PHYSIO AND REHAB UNIT (PVT) LTD";
+  return "PHYSIO AND REHAB UNIT";
 }
 
 export interface PatientIdCardData {
@@ -43,12 +40,17 @@ export interface PatientIdCardData {
   patientIdNumber: string;
   phone: string;
   address?: string;
+  condition?: string;
   /** Dynamic "Our Branches" list for the patient's organization. */
   branches?: string[];
   /** Clinic hotline; defaults to {@link CLINIC_HOTLINE}. */
   clinicHotline?: string;
   /** Patient-facing website; defaults to {@link HOSPITAL_WEBSITE}. */
   website?: string;
+  /** Branch label for the card header badge. */
+  branchName?: string;
+  /** Registration date shown on the card. */
+  registeredDate?: string;
 }
 
 /** Load any image URL (asset path or data URL) into a PNG data URL for jsPDF. */
@@ -263,11 +265,13 @@ function drawTopRightAccent(doc: jsPDF, W: number, H: number) {
 export async function downloadPatientIdCard(data: PatientIdCardData): Promise<void> {
   const W = 85.6;
   const H = 54;
-  const cardId = generateCardId(data.patientIdNumber || data.patientName);
-  const org = data.organizationId;
-  const branches = (data.branches ?? []).filter(Boolean);
-  const clinicHotline = data.clinicHotline || (org === "nexus" ? "+94 77 123 4567" : CLINIC_HOTLINE);
-  const websiteRaw = data.website || (org === "nexus" ? "nexusphysio.lk" : HOSPITAL_WEBSITE);
+  const headerH = 12;
+  const footerH = 7;
+  const bodyTop = headerH;
+  const footerY = H - footerH;
+  const paddingX = 3.2;
+  const clinicHotline = data.clinicHotline || CLINIC_HOTLINE;
+  const websiteRaw = data.website || HOSPITAL_WEBSITE;
   const website = websiteRaw.startsWith("www.") ? websiteRaw : "www." + websiteRaw;
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: [W, H] });
@@ -276,273 +280,93 @@ export async function downloadPatientIdCard(data: PatientIdCardData): Promise<vo
   fill(doc, WHITE);
   doc.rect(0, 0, W, H, "F");
   stroke(doc, NAVY, 0.5);
-  doc.roundedRect(0.8, 0.8, W - 1.6, H - 1.6, 2.4, 2.4, "S");
+  doc.roundedRect(0.6, 0.6, W - 1.2, H - 1.2, 2.4, 2.4, "S");
 
-  // Top-right decorative curve accent
-  drawTopRightAccent(doc, W, H);
-
-  // Logo + brand info
-  const logo = await loadImageDataUrl(data.logoUri);
-  let textX = 4.5;
-  if (logo) {
-    const logoH = 11;
-    const aspect = logo.width && logo.height ? logo.width / logo.height : 1;
-    const logoW = Math.min(Math.max(aspect * logoH, 8), 17);
-    doc.addImage(logo.dataUrl, "PNG", 4.0, 2.2, logoW, logoH);
-    textX = 4.0 + logoW + 2.5;
-  }
-
-  drawBrandTitle(doc, organizationDisplayName(org), textX, 5.8, 12.5);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(5.2);
-  text(doc, NAVY);
-  doc.text(organizationSubtitle(org), textX, 8.6);
-
-  // "PATIENT IDENTIFICATION CARD" badge
-  const badgeLabel = "PATIENT IDENTIFICATION CARD";
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(5.6);
-  const badgeTextW = doc.getTextWidth(badgeLabel);
-  const badgeW = badgeTextW + 5.0;
-  const badgeH = 4.0;
-  const badgeY = 10.0;
+  // Header
   fill(doc, NAVY);
-  doc.roundedRect(textX, badgeY, badgeW, badgeH, 1.2, 1.2, "F");
+  doc.rect(0, 0, W, headerH, "F");
+
+  const logo = await loadImageDataUrl(data.logoUri);
+  let textX = paddingX;
+  if (logo) {
+    const logoH = 8;
+    const aspect = logo.width && logo.height ? logo.width / logo.height : 1;
+    const logoW = Math.min(Math.max(aspect * logoH, 8), 16);
+    const logoY = (headerH - logoH) / 2;
+    doc.addImage(logo.dataUrl, "PNG", paddingX, logoY, logoW, logoH);
+    textX = paddingX + logoW + 2;
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(6);
   text(doc, WHITE);
-  doc.text(badgeLabel, textX + badgeW / 2, badgeY + badgeH / 2 + 0.6, { align: "center" });
-  // Right column: QR code inside bordered rounded box
-  const qrDataUrl = await QRCode.toDataURL(data.qrToken, {
-    margin: 0,
-    width: 320,
-    errorCorrectionLevel: "M",
-  });
-  
-  const qrBoxSize = 19.0;
-  const qrBoxX = W - qrBoxSize - 4.5;
-  const qrBoxY = 16.5;
-  
-  stroke(doc, NAVY, 0.4);
-  doc.roundedRect(qrBoxX, qrBoxY, qrBoxSize, qrBoxSize, 1.6, 1.6, "S");
-  const qrImageSize = qrBoxSize - 2.4;
-  doc.addImage(qrDataUrl, "PNG", qrBoxX + 1.2, qrBoxY + 1.2, qrImageSize, qrImageSize);
-
-  // Caption group centered under QR code
-  const capX = qrBoxX + 0.6;
-  const capY = qrBoxY + qrBoxSize + 2.4;
-  iconPhoneScan(doc, capX, capY, 4.4, NAVY);
+  doc.text("MAXIMUS CARE", textX, 5.6);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(3.8);
+  doc.setFontSize(3.5);
+  doc.text("PHYSIO AND REHAB UNIT", textX, 8.6);
+
+  const branchLabel = (data.branchName || "").toUpperCase();
+  if (branchLabel) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(3.8);
+    const badgeW = doc.getTextWidth(branchLabel) + 4.2;
+    const badgeH = 4.8;
+    const badgeX = W - badgeW - paddingX;
+    const badgeY = (headerH - badgeH) / 2;
+    fill(doc, ORANGE);
+    doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 1.2, 1.2, "F");
+    text(doc, WHITE);
+    doc.text(branchLabel, badgeX + badgeW / 2, badgeY + badgeH / 2 + 1.1, { align: "center" });
+  }
+
+  // Body
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7.2);
   text(doc, NAVY);
-  doc.text("Scan to view", capX + 5.2, capY + 1.6);
-  doc.text("patient records", capX + 5.2, capY + 3.4);
+  doc.text(data.patientName || "—", paddingX, bodyTop + 8);
 
-  // Left column: Patient details rows
-  const leftX = 4.5;
-  const leftIconX = leftX;
-  const leftTextX = leftX + 6.0;
-  const leftRightEdge = 39.0;
-
-  function drawIconInCircle(
-    iconFunc: any,
-    x: number,
-    y: number,
-    size: number
-  ) {
-    fill(doc, NAVY);
-    doc.circle(x + size / 2, y + size / 2, size / 2, "F");
-    const s = size * 0.55;
-    const offset = (size - s) / 2;
-    if (iconFunc === iconPin) {
-      iconPin(doc, x + offset, y + offset, s, WHITE, NAVY);
-    } else {
-      iconFunc(doc, x + offset, y + offset, s, WHITE);
-    }
-  }
-
-  // Row 1: Patient Name
-  const r1Top = 16.5;
-  drawIconInCircle(iconPerson, leftIconX, r1Top + 0.5, 4.4);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.0);
+  doc.setFontSize(4.2);
   text(doc, SUBTLE);
-  doc.text("PATIENT NAME", leftTextX, r1Top + 1.6);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(6.8);
-  text(doc, INK);
-  doc.text(data.patientName ? data.patientName.toUpperCase() : "—", leftTextX, r1Top + 4.9);
+  doc.text(data.condition || "—", paddingX, bodyTop + 11.5);
 
-  const div1Y = r1Top + 6.3;
-  stroke(doc, DIVIDER, 0.25);
-  doc.line(leftX, div1Y, leftRightEdge, div1Y);
-
-  // Row 2: Patient ID
-  const r2Top = div1Y;
-  drawIconInCircle(iconIdCard, leftIconX, r2Top + 0.6, 4.4);
+  const rowY = footerY - 4.5;
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.0);
+  doc.setFontSize(3.6);
   text(doc, SUBTLE);
-  doc.text("PATIENT ID", leftTextX, r2Top + 3.6);
-  doc.text(":", 22.5, r2Top + 3.6);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(5.6);
-  text(doc, INK);
-  doc.text(data.patientIdNumber || "—", 24.0, r2Top + 3.6);
+  doc.text("Patient ID", paddingX, rowY);
+  doc.text("Registered", W - paddingX - 12, rowY, { align: "right" });
 
-  const div2Y = r2Top + 5.2;
-  stroke(doc, DIVIDER, 0.25);
-  doc.line(leftX, div2Y, leftRightEdge, div2Y);
-
-  // Row 3: Phone
-  const r3Top = div2Y;
-  drawIconInCircle(iconPhoneHandset, leftIconX, r3Top + 0.6, 4.4);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.0);
-  text(doc, SUBTLE);
-  doc.text("PHONE", leftTextX, r3Top + 3.6);
-  doc.text(":", 22.5, r3Top + 3.6);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(5.6);
-  text(doc, INK);
-  doc.text(data.phone || "—", 24.0, r3Top + 3.6);
-
-  const div3Y = r3Top + 5.2;
-  stroke(doc, DIVIDER, 0.25);
-  doc.line(leftX, div3Y, leftRightEdge, div3Y);
-
-  // Row 4: Address
-  const r4Top = div3Y;
-  drawIconInCircle(iconPin, leftIconX, r4Top + 0.6, 4.4);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(4.0);
-  text(doc, SUBTLE);
-  doc.text("ADDRESS", leftTextX, r4Top + 3.6);
-  doc.text(":", 22.5, r4Top + 3.6);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(5.6);
-  text(doc, INK);
-
-  const addrValue = data.address || "—";
-  const addrLines = doc.splitTextToSize(addrValue, leftRightEdge - 24.0);
-  doc.text(addrLines[0] || "—", 24.0, r4Top + 3.6);
-  if (addrLines[1]) {
-    doc.text(addrLines[1], 24.0, r4Top + 6.4);
-  }
-
-  // Vertical divider separating left and middle columns
-  stroke(doc, DIVIDER, 0.25);
-  doc.line(40.5, 16.5, 40.5, 44.5);
-
-  // Middle column: Our Branches
-  const midX = 42.0;
-  iconPin(doc, midX, 16.8, 3.0, ORANGE, WHITE);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(5.4);
-  text(doc, ORANGE);
-  doc.text("OUR BRANCHES", midX + 4.0, 19.2);
+  text(doc, NAVY);
+  doc.text(data.patientIdNumber || "—", paddingX, rowY + 4.2);
 
-  const cleanBranchName = (b: string): string => {
-    const lower = b.toLowerCase();
-    if (lower.includes("dehiwala")) return "Dehiwala (Main)";
-    if (lower.includes("bandaragama")) return "Bandaragama";
-    if (lower.includes("neuro") || lower.includes("kalubowila")) return "Kalubowila Neuro Unit";
-    if (lower.includes("beruwala") || lower.includes("nexus")) return "Beruwala";
-    return b;
-  };
-  const formattedBranches = branches.map(cleanBranchName);
-  const branchList = formattedBranches.length ? formattedBranches : ["—"];
-  
-  const branchLineH = 3.2;
-  let by = 22.5;
+  const registered = data.registeredDate ? new Date(data.registeredDate) : null;
+  const registeredText =
+    registered && !Number.isNaN(registered.getTime())
+      ? registered.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+      : "—";
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(4.2);
+  text(doc, INK);
+  doc.text(registeredText, W - paddingX, rowY + 4.2, { align: "right" });
+
+  // Footer
+  fill(doc, ORANGE);
+  doc.rect(0, footerY, W, footerH, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(3.6);
+  text(doc, WHITE);
+  doc.text(`☎ ${clinicHotline}`, paddingX, footerY + 4.6);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(3.4);
+  text(doc, [255, 255, 255]);
+  doc.text(website, W / 2, footerY + 4.6, { align: "center" });
   doc.setFont("helvetica", "normal");
   doc.setFontSize(3.2);
-  branchList.slice(0, 5).forEach((b) => {
-    fill(doc, ORANGE);
-    doc.circle(midX + 1.2, by - 0.8, 0.35, "F");
-    text(doc, INK);
-    doc.text(b, midX + 2.8, by);
-    by += branchLineH;
-  });
-
-  // Clinic Hotline
-  const hotY = 38.2;
-  fill(doc, NAVY);
-  doc.circle(midX + 1.8, hotY + 1.8, 1.8, "F");
-  iconPhoneHandset(doc, midX + 0.5, hotY + 0.5, 2.6, WHITE);
-  
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(3.8);
-  text(doc, SUBTLE);
-  doc.text("CLINIC HOTLINE", midX + 5.0, hotY + 1.4);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(5.2);
-  text(doc, INK);
-  doc.text(clinicHotline, midX + 5.0, hotY + 4.0);
-
-  // Footer: navy bar
-  const footY = H - 8.5;
-  fill(doc, NAVY);
-  doc.rect(0.8, footY, W - 1.6, H - 0.8 - footY, "F");
-  stroke(doc, NAVY, 0.5);
-  doc.roundedRect(0.8, 0.8, W - 1.6, H - 1.6, 2.4, 2.4, "S");
-
-  // Globe icon + website name
-  const footRow1 = footY + 4.5;
-  iconGlobe(doc, 4.5, footRow1 - 3.2, 3.2, WHITE);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(5.2);
-  text(doc, WHITE);
-  doc.text(website, 8.2, footRow1);
-
-  // Outer white rounded badge for CARD ID
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(4.0);
-  const cardIdLabel = "CARD ID:";
-  const cardIdLabelW = doc.getTextWidth(cardIdLabel);
-
-  doc.setFontSize(4.4);
-  const cardIdValW = doc.getTextWidth(cardId);
-
-  const innerPadding = 1.4;
-  const navyPillW = cardIdValW + 2 * innerPadding;
-
-  const outerPadding = 1.0;
-  const footBadgeW = outerPadding + cardIdLabelW + 1.2 + navyPillW + outerPadding;
-  const footBadgeH = 4.4;
-  const footBadgeX = 27.5;
-  const footBadgeY = footY + (8.5 - footBadgeH) / 2;
-
-  fill(doc, WHITE);
-  doc.roundedRect(footBadgeX, footBadgeY, footBadgeW, footBadgeH, 1.0, 1.0, "F");
-
-  // CARD ID: text inside outer badge
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(4.0);
-  text(doc, NAVY);
-  doc.text(cardIdLabel, footBadgeX + outerPadding, footBadgeY + footBadgeH / 2 + 0.6);
-
-  // Navy pill inside white badge
-  const navyPillX = footBadgeX + outerPadding + cardIdLabelW + 1.2;
-  const navyPillY = footBadgeY + (footBadgeH - 3.4) / 2;
-  fill(doc, NAVY);
-  doc.roundedRect(navyPillX, navyPillY, navyPillW, 3.4, 0.7, 0.7, "F");
-
-  // Card ID value inside navy pill
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(4.4);
-  text(doc, WHITE);
-  doc.text(cardId, navyPillX + navyPillW / 2, navyPillY + 3.4 / 2 + 0.7, { align: "center" });
-
-  // Vertical separator | between badge and Merncrest attribution
-  stroke(doc, [200, 214, 232], 0.2);
-  doc.line(61.5, footY + 1.5, 61.5, footY + 7.0);
-
-  // Right: MERNcrest Solutions Attribution (stacked, right-aligned)
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(2.6);
-  text(doc, [200, 214, 232]);
-  doc.text("Powered By", W - 4.5, footY + 2.4, { align: "right" });
-  doc.text("Merncrest Solutions (Pvt) Ltd", W - 4.5, footY + 4.2, { align: "right" });
-  doc.text("Merncrest.lk  |  0713838638", W - 4.5, footY + 6.0, { align: "right" });
+  text(doc, [255, 255, 255]);
+  doc.text("MERNcrest Solutions", W - paddingX, footerY + 4.6, { align: "right" });
 
   const safeName = (data.patientName || "patient").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   doc.save(`patient-id-card-${safeName}.pdf`);

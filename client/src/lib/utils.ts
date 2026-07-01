@@ -16,3 +16,13 @@ export const CLINIC_TIMEZONE = "Asia/Colombo";
 export function clinicTodayString(date: Date = new Date()): string {
   return date.toLocaleDateString("en-CA", { timeZone: CLINIC_TIMEZONE });
 }
+
+/** Create a Date anchored to the clinic day (midday in Sri Lanka). */
+export function clinicDateFromString(dateString: string): Date {
+  return new Date(`${dateString}T12:00:00+05:30`);
+}
+
+/** Date object representing "today" in the clinic timezone. */
+export function clinicTodayDate(): Date {
+  return clinicDateFromString(clinicTodayString());
+}

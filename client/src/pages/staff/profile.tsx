@@ -95,7 +95,7 @@ export default function StaffProfilePage() {
     : !rawBranch
     ? ["Head Office"]
     : isBoth
-    ? ["Dehiwala", "Neuro Rehabilitation"]
+    ? ["Dehiwala", "Neuro Unit"]
     : isAllBranches
     ? allBranchNames
     : rawBranch.split(",").map((s) => s.trim()).filter(Boolean);

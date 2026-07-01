@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -67,6 +67,7 @@ export default function InPatientProfilePage() {
     .filter((b) => b.isActive !== false && b.isActive !== 0)
     .map((b) => ({ id: b.id, label: b.name }));
   const createPayment = useCreateInPatientPayment();
+  const updatePayment = useUpdateInPatientPayment();
   const updateInPatient = useUpdateInPatient();
   const setDeduction = useSetInPatientDeduction();
   const createExtraExpense = useCreateInPatientExtraExpense();
@@ -91,6 +92,14 @@ export default function InPatientProfilePage() {
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
+    paymentDate: format(new Date(), "yyyy-MM-dd"),
+    amount: "",
+    paymentMode: "Cash" as "Cash" | "Online",
+    notes: "",
+  });
+  const [showEditPaymentModal, setShowEditPaymentModal] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<InPatientPayment | null>(null);
+  const [editPaymentForm, setEditPaymentForm] = useState({
     paymentDate: format(new Date(), "yyyy-MM-dd"),
     amount: "",
     paymentMode: "Cash" as "Cash" | "Online",
@@ -156,6 +165,10 @@ export default function InPatientProfilePage() {
 
   const paymentTotal = paymentTotalData?.total || 0;
   const extraExpenseTotal = extraExpenseTotalData?.total || 0;
+  const displayPatientCode =
+    patient?.patientCode?.trim() ||
+    patient?.patientIdNo?.trim() ||
+    `IP-${String(patient?.id ?? "").slice(0, 8).toUpperCase()}`;
 
   const handleAddPayment = async () => {
     if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
@@ -186,6 +199,46 @@ export default function InPatientProfilePage() {
         title: "Error", 
         description: error instanceof Error ? error.message : "Failed to add payment",
         variant: "destructive"
+      });
+    }
+  };
+
+  const openEditPayment = (payment: InPatientPayment) => {
+    setEditingPayment(payment);
+    setEditPaymentForm({
+      paymentDate: payment.paymentDate ? format(new Date(payment.paymentDate), "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
+      amount: String(payment.amount ?? ""),
+      paymentMode: (payment.paymentMode as "Cash" | "Online") || "Cash",
+      notes: payment.notes || "",
+    });
+    setShowEditPaymentModal(true);
+  };
+
+  const handleEditPaymentSave = async () => {
+    if (!editingPayment) return;
+    if (!editPaymentForm.amount || parseFloat(editPaymentForm.amount) <= 0) {
+      toast({ title: "Error", description: "Amount is required", variant: "destructive" });
+      return;
+    }
+    try {
+      await updatePayment.mutateAsync({
+        admissionId: patientId,
+        paymentId: editingPayment.id,
+        data: {
+          paymentDate: editPaymentForm.paymentDate,
+          amount: editPaymentForm.amount,
+          paymentMode: editPaymentForm.paymentMode,
+          notes: editPaymentForm.notes || undefined,
+        },
+      });
+      toast({ title: "Success", description: "Payment updated successfully" });
+      setShowEditPaymentModal(false);
+      setEditingPayment(null);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update payment",
+        variant: "destructive",
       });
     }
   };
@@ -644,6 +697,9 @@ export default function InPatientProfilePage() {
             patientCode={patient.patientCode ?? patient.patientIdNo}
             phone={patient.phone}
             address={patient.address}
+            condition={patient.condition}
+            branchId={patient.branchId}
+            registeredDate={patient.admitDate}
           />
         </div>
 
@@ -781,7 +837,7 @@ export default function InPatientProfilePage() {
           themeColor="#105691"
           meta={[
             { label: "Patient", value: patient.patientName },
-            { label: "Patient ID", value: (patient.patientIdNo?.trim() || `IP-${String(patient.id).slice(0, 8).toUpperCase()}`) },
+            { label: "Patient ID", value: displayPatientCode },
             { label: "Admit Date", value: format(new Date(patient.admitDate), "dd MMM yyyy") },
             { label: "Generated", value: format(new Date(), "dd MMM yyyy hh:mm a") },
             { label: "Prepared By", value: user?.name || "System" },
@@ -798,7 +854,7 @@ export default function InPatientProfilePage() {
             </div>
             <div className="text-right text-xs text-muted-foreground">
               <div>{patient.patientName}</div>
-              <div className="font-mono">ID: {patient.patientIdNo?.trim() || `IP-${String(patient.id).slice(0, 8).toUpperCase()}`}</div>
+              <div className="font-mono">ID: {displayPatientCode}</div>
             </div>
           </div>
 
@@ -1149,9 +1205,29 @@ export default function InPatientProfilePage() {
                 <div className="text-sm font-medium text-muted-foreground mb-2">Payment History:</div>
                 {payments.map((payment: InPatientPayment) => (
                   <div key={payment.id} className="bg-white rounded p-3 border text-sm" data-testid={`payment-${payment.id}`}>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-start gap-2">
                       <span className="text-muted-foreground">{format(new Date(payment.paymentDate), "dd MMM yyyy")}</span>
-                      <span className="font-medium">LKR {parseFloat(payment.amount).toLocaleString()}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">LKR {parseFloat(payment.amount).toLocaleString()}</span>
+                        {isAdminMD && (
+                          <button
+                            onClick={() => openEditPayment(payment)}
+                            style={{
+                              background: "#EEF5FB",
+                              color: "#105691",
+                              border: "none",
+                              borderRadius: "6px",
+                              width: "32px",
+                              height: "32px",
+                              cursor: "pointer",
+                              fontSize: "14px",
+                            }}
+                            title="Edit payment"
+                          >
+                            ✏️
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="flex justify-between mt-1">
                       <span className="text-muted-foreground text-xs">By: {payment.createdByName}</span>
@@ -1409,6 +1485,83 @@ export default function InPatientProfilePage() {
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : null}
                 Save Payment
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showEditPaymentModal} onOpenChange={setShowEditPaymentModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Payment</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="editPaymentDate">Date</Label>
+              <Input
+                id="editPaymentDate"
+                type="date"
+                value={editPaymentForm.paymentDate}
+                onChange={(e) => setEditPaymentForm((prev) => ({ ...prev, paymentDate: e.target.value }))}
+                className="h-12"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="editPaymentAmount">Amount (LKR) *</Label>
+              <Input
+                id="editPaymentAmount"
+                type="number"
+                value={editPaymentForm.amount}
+                onChange={(e) => setEditPaymentForm((prev) => ({ ...prev, amount: e.target.value }))}
+                className="h-12"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="editPaymentMode">Mode</Label>
+              <Select
+                value={editPaymentForm.paymentMode}
+                onValueChange={(v) => setEditPaymentForm((prev) => ({ ...prev, paymentMode: v as "Cash" | "Online" }))}
+              >
+                <SelectTrigger className="h-12">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="Online">Online</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="editPaymentNotes">Notes (optional)</Label>
+              <Textarea
+                id="editPaymentNotes"
+                value={editPaymentForm.notes}
+                onChange={(e) => setEditPaymentForm((prev) => ({ ...prev, notes: e.target.value }))}
+                rows={2}
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 h-12"
+                onClick={() => setShowEditPaymentModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="flex-1 h-12"
+                onClick={handleEditPaymentSave}
+                disabled={updatePayment.isPending}
+              >
+                {updatePayment.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Save Changes
               </Button>
             </div>
           </div>

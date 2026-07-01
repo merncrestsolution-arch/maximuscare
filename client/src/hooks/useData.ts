@@ -201,8 +201,9 @@ export function useDeleteAttendance() {
 // Staff hooks
 export function useStaff(params?: { includeInactive?: boolean }) {
   const { user } = useAuth();
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['staff', params],
+    queryKey: ['staff', params, selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => staffApi.getAll(params),
     // API returns full list for Admin/MD, or [self] for others — needed for visit staff dropdowns
     enabled: !!user,
@@ -240,6 +241,7 @@ export function useCreateStaff() {
     mutationFn: staffApi.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-directory'] });
     },
   });
 }
@@ -250,6 +252,7 @@ export function useUpdateStaff() {
     mutationFn: ({ id, data }: { id: string; data: any }) => staffApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-directory'] });
     },
   });
 }
@@ -260,6 +263,7 @@ export function useDeleteStaff() {
     mutationFn: staffApi.delete,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
+      queryClient.invalidateQueries({ queryKey: ['staff-directory'] });
     },
   });
 }
@@ -595,6 +599,19 @@ export function useCreateInPatientPayment() {
   });
 }
 
+export function useUpdateInPatientPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ admissionId, paymentId, data }: { admissionId: string; paymentId: string; data: any }) =>
+      inPatientApi.updatePayment(paymentId, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['inpatients'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'payments'] });
+      queryClient.invalidateQueries({ queryKey: ['inpatients', variables.admissionId, 'payments', 'total'] });
+    },
+  });
+}
+
 // In-Patient Extra Expense hooks
 export function useInPatientExtraExpenses(admissionId: string) {
   return useQuery({
@@ -689,6 +706,7 @@ export function useUpdateExpense() {
     mutationFn: ({ id, data }: { id: string; data: any }) => expenseApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expenses', 'my'] });
       queryClient.invalidateQueries({ queryKey: ['revenue-summary'] });
     },
   });
@@ -700,6 +718,7 @@ export function useDeleteExpense() {
     mutationFn: (id: string) => expenseApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      queryClient.invalidateQueries({ queryKey: ['expenses', 'my'] });
       queryClient.invalidateQueries({ queryKey: ['revenue-summary'] });
     },
   });
@@ -812,8 +831,9 @@ export function useAuditLogs(params?: { entityType?: string; limit?: number }, e
 }
 
 export function useStaffDirectory(params?: Record<string, string | boolean>, enabled = true) {
+  const { selectedBranchId, selectedBranchName, selectedContext } = useBranch();
   return useQuery({
-    queryKey: ['staff-directory', params],
+    queryKey: ['staff-directory', params, selectedBranchId, selectedBranchName, selectedContext],
     queryFn: () => staffApi.directory(params),
     enabled,
   });

@@ -3,6 +3,7 @@ import { Patient, Visit, AttendanceRecord } from '@/lib/types';
 import { MOCK_PATIENTS, MOCK_VISITS, MOCK_ATTENDANCE } from '@/lib/mockData';
 import { useAuth } from './auth-context';
 import { format } from 'date-fns';
+import { clinicTodayString } from '@/lib/utils';
 
 interface DataContextType {
   patients: Patient[];
@@ -67,7 +68,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const markAttendance = (status: 'Present' | 'Absent') => {
     if (!user) return;
-    const today = format(new Date(), 'yyyy-MM-dd');
+    const today = clinicTodayString();
 
     const existing = attendance.find(a => a.staffId === user.id && a.date === today);
     if (existing) return;
@@ -87,7 +88,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const checkoutAttendance = () => {
     if (!user) return;
-    const today = format(new Date(), 'yyyy-MM-dd');
+    const today = clinicTodayString();
 
     setAttendance(prev => prev.map(a => {
       if (a.staffId === user.id && a.date === today && a.status === 'Present' && !a.checkOutTime) {
@@ -99,7 +100,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const saveOvertimeHours = (hours: number) => {
     if (!user) return;
-    const today = format(new Date(), 'yyyy-MM-dd');
+    const today = clinicTodayString();
 
     setAttendance(prev => prev.map(a => {
       if (a.staffId === user.id && a.date === today && a.status === 'Present') {
@@ -111,7 +112,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const getTodayAttendance = () => {
     if (!user) return undefined;
-    const today = format(new Date(), 'yyyy-MM-dd');
+    const today = clinicTodayString();
     return attendance.find(a => a.staffId === user.id && a.date === today);
   };
 

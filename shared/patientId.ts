@@ -15,10 +15,12 @@ export const PATIENT_CODE_SEQ_DIGITS = 2;
 /** Maps the clinic's canonical branch short-names to their 3-letter patient-code segment. */
 export const PATIENT_BRANCH_CODES: Record<string, string> = {
   "Dehiwala": "DEH",
+  "Neuro Unit": "NEU",
   "Neuro Rehabilitation": "NEU",
+  "Colombo Clinic": "COC",
+  "Colombo Home": "COH",
+  "Colombo": "COC",
   "Bandaragama": "BAN",
-  "Nexus Physio": "NEX",
-  "Colombo": "COL",
   "Beruwala": "BER",
   "Kandy": "KAN",
 };

@@ -97,6 +97,7 @@ import type {
   UpdateInPatientDischarge,
   InPatientPayment,
   InsertInPatientPayment,
+  UpdateInPatientPayment,
   Expense,
   InsertExpense,
   UpdateExpense,
@@ -267,8 +268,10 @@ export interface IStorage {
 
   // In-Patient Payment methods
   getInPatientPaymentsByAdmission(admissionId: string): Promise<InPatientPayment[]>;
+  getInPatientPayment(id: string): Promise<InPatientPayment | undefined>;
   getPaymentTotalByAdmission(admissionId: string): Promise<number>;
   createInPatientPayment(data: InsertInPatientPayment): Promise<InPatientPayment>;
+  updateInPatientPayment(id: string, data: UpdateInPatientPayment): Promise<InPatientPayment | undefined>;
 
   // In-Patient Extra Expense methods
   getInPatientExtraExpensesByAdmission(admissionId: string): Promise<InPatientExtraExpense[]>;
@@ -1128,6 +1131,11 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(inPatientPayments).where(eq(inPatientPayments.admissionId, admissionId)).orderBy(desc(inPatientPayments.paymentDate));
   }
 
+  async getInPatientPayment(id: string): Promise<InPatientPayment | undefined> {
+    const result = await db.select().from(inPatientPayments).where(eq(inPatientPayments.id, id)).limit(1);
+    return result[0];
+  }
+
   async getPaymentTotalByAdmission(admissionId: string): Promise<number> {
     const result = await db
       .select({ total: sql<string>`COALESCE(SUM(amount), 0)` })
@@ -1138,6 +1146,15 @@ export class DatabaseStorage implements IStorage {
 
   async createInPatientPayment(data: InsertInPatientPayment): Promise<InPatientPayment> {
     const result = await db.insert(inPatientPayments).values(data).returning();
+    return result[0];
+  }
+
+  async updateInPatientPayment(id: string, data: UpdateInPatientPayment): Promise<InPatientPayment | undefined> {
+    const result = await db
+      .update(inPatientPayments)
+      .set({ ...data, updatedAt: new Date() } as any)
+      .where(eq(inPatientPayments.id, id))
+      .returning();
     return result[0];
   }
 
@@ -1701,7 +1718,7 @@ export class DatabaseStorage implements IStorage {
   async updateClinicSettings(data: UpdateClinicSettings): Promise<ClinicSettings> {
     const existing = await this.getClinicSettings();
     const normalized = { ...data } as Record<string, unknown>;
-    for (const k of ["autoFineAmount", "homeRateColombo", "homeRateBandaragama", "holidayHomeRate", "otRatePerHour", "extraHolidayDeduction"] as const) {
+    for (const k of ["autoFineAmount", "homeRateColombo", "homeRateBandaragama", "otRatePerHour", "extraHolidayDeduction"] as const) {
       if (normalized[k] !== undefined) normalized[k] = String(normalized[k]);
     }
     if (existing) {

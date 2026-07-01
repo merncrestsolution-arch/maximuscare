@@ -27,6 +27,7 @@ const DEFAULT_PATIENT: Omit<Patient, 'id'> = {
   branch: "",
   status: "Active",
   defaultVisitType: "Clinic",
+  condition: "",
 };
 
 export function PatientDialog({ patient, isOpen, onClose, onSave }: PatientDialogProps) {
@@ -46,6 +47,14 @@ export function PatientDialog({ patient, isOpen, onClose, onSave }: PatientDialo
   }, [patient, isOpen]);
 
   const handleSave = () => {
+    if (!formData.name?.trim()) {
+      toast({ title: "Patient name is required", variant: "destructive" });
+      return;
+    }
+    if (!(formData as any).condition?.trim()) {
+      toast({ title: "Patient condition is required", variant: "destructive" });
+      return;
+    }
     const rawAge = (formData as any).age;
     const age =
       rawAge === "" || rawAge === 0 || rawAge === null || rawAge === undefined
@@ -83,7 +92,9 @@ export function PatientDialog({ patient, isOpen, onClose, onSave }: PatientDialo
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
               <div className="space-y-3">
-                <Label className="text-base font-semibold text-foreground">Phone</Label>
+                <Label className="text-base font-semibold text-foreground">
+                  Phone <span className="text-xs text-muted-foreground font-normal">(optional)</span>
+                </Label>
                 <Input 
                   className="h-12 text-base bg-card"
                   value={formData.phone} 
@@ -150,6 +161,18 @@ export function PatientDialog({ patient, isOpen, onClose, onSave }: PatientDialo
                 value={formData.address} 
                 onChange={(e) => setFormData({...formData, address: e.target.value})}
                 placeholder="City or full address"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-base font-semibold text-foreground">
+                Condition <span className="text-red-600">*</span>
+              </Label>
+              <Input
+                className="h-12 text-base bg-card"
+                value={(formData as any).condition || ""}
+                onChange={(e) => setFormData({ ...(formData as any), condition: e.target.value })}
+                placeholder="e.g. Lower Back Pain"
               />
             </div>
 

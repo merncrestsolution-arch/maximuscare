@@ -552,8 +552,9 @@ export const reportsApi = {
 // In-Patient API
 export const inPatientApi = {
   // Admissions
-  getAll: (status?: string) => {
-    const query = status ? `?status=${status}` : '';
+  getAll: (status?: string | string[]) => {
+    const normalized = Array.isArray(status) ? status.join(",") : status;
+    const query = normalized ? `?status=${normalized}` : '';
     return apiRequest<any[]>(`/inpatients${query}`);
   },
   getOne: (id: string) => apiRequest<any>(`/inpatients/${id}`),
@@ -651,6 +652,11 @@ export const inPatientApi = {
   createPayment: (admissionId: string, data: any) =>
     apiRequest<any>(`/inpatients/${admissionId}/payments`, {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updatePayment: (paymentId: string, data: any) =>
+    apiRequest<any>(`/inpatients/payments/${paymentId}`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
     }),
 

@@ -17,6 +17,7 @@ import {
   computeFinesTotal,
   computeFinalSalary,
   computeMonthlyIncentiveAmount,
+  normalizeVisitType,
 } from "./calculationEngine";
 
 export const PAYROLL_RATES = DEFAULT_RATES;
@@ -63,9 +64,6 @@ export interface PayrollSummary {
   incentiveTotal: number;
   incentiveDays: IncentiveDay[];
   incentiveCount: number;
-  /** Bug 7: holiday home-visit rate removed — always 0, retained only for response-shape compatibility. */
-  holidayHomeVisits: number;
-  holidayHomeIncome: number;
   extraHolidays: number;
   extraHolidayDeduction: number;
   finesTotal: number;
@@ -114,10 +112,14 @@ export function computePayrollForStaff(
   // Compare on normalized branch names so legacy labels (e.g. "Colombo" -> "Dehiwala")
   // match the stored value.
   const colomboClinic = physioVisits.filter(
-    (v) => normalizeBranchName(v.branch) === "Dehiwala" && v.visitType === "Clinic"
+    (v) =>
+      normalizeBranchName(v.branch) === "Dehiwala" &&
+      normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic"
   ).length;
   const bandaragamaClinic = physioVisits.filter(
-    (v) => normalizeBranchName(v.branch) === "Bandaragama" && v.visitType === "Clinic"
+    (v) =>
+      normalizeBranchName(v.branch) === "Bandaragama" &&
+      normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic"
   ).length;
 
   // Dynamic per-branch breakdown so cases from EVERY branch the therapist
@@ -127,7 +129,9 @@ export function computePayrollForStaff(
   for (const v of physioVisits) {
     const branch = normalizeBranchName(v.branch) || "Unknown";
     const entry = branchMap.get(branch) ?? { clinic: 0, home: 0 };
-    if (v.visitType === "Home") entry.home += 1;
+    if (normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home") {
+      entry.home += 1;
+    }
     else entry.clinic += 1;
     branchMap.set(branch, entry);
   }
@@ -152,7 +156,9 @@ export function computePayrollForStaff(
     }, 0);
 
   const scopedClinicVisits = physioVisits.filter(
-    (v) => v.visitType === "Clinic" && scopeMatchesVisit(settings.clinicLocationScope, v.branch)
+    (v) =>
+      normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic" &&
+      scopeMatchesVisit(settings.clinicLocationScope, v.branch)
   );
 
   const ipForStaff = ipSessions.filter(
@@ -187,7 +193,9 @@ export function computePayrollForStaff(
   const incentiveTotal = computeMonthlyIncentiveAmount(dailyIncentives.map((d) => d.amount));
   const incentiveCount = dailyIncentives.reduce((acc, d) => acc + d.count, 0);
 
-  const homeVisits = physioVisits.filter((v) => v.visitType === "Home");
+  const homeVisits = physioVisits.filter(
+    (v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+  );
   const homeBreakdown = computeHomeVisitBreakdown(homeVisits, settings);
 
   const otIncome = computeOtAmount(totalOt, settings.otPerHour);
@@ -229,8 +237,6 @@ export function computePayrollForStaff(
     incentiveTotal,
     incentiveDays,
     incentiveCount,
-    holidayHomeVisits: 0,
-    holidayHomeIncome: 0,
     extraHolidays,
     extraHolidayDeduction,
     finesTotal,

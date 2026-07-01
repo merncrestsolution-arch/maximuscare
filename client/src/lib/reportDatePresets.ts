@@ -1,4 +1,5 @@
 import { format, subDays, startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear } from "date-fns";
+import { clinicTodayDate, clinicTodayString } from "./utils";
 
 export type DatePreset =
   | "today"
@@ -11,30 +12,43 @@ export type DatePreset =
   | "custom";
 
 export function getDateRangeForPreset(preset: DatePreset, customFrom?: string, customTo?: string) {
-  const today = new Date();
+  const today = clinicTodayDate();
+  const todayStr = clinicTodayString(today);
   switch (preset) {
     case "today":
-      return { startDate: format(today, "yyyy-MM-dd"), endDate: format(today, "yyyy-MM-dd") };
+      return { startDate: todayStr, endDate: todayStr };
     case "yesterday": {
       const y = subDays(today, 1);
-      const s = format(y, "yyyy-MM-dd");
+      const s = clinicTodayString(y);
       return { startDate: s, endDate: s };
     }
     case "last7":
-      return { startDate: format(subDays(today, 6), "yyyy-MM-dd"), endDate: format(today, "yyyy-MM-dd") };
+      return { startDate: clinicTodayString(subDays(today, 6)), endDate: todayStr };
     case "last30":
-      return { startDate: format(subDays(today, 29), "yyyy-MM-dd"), endDate: format(today, "yyyy-MM-dd") };
+      return { startDate: clinicTodayString(subDays(today, 29)), endDate: todayStr };
     case "currentMonth":
-      return { startDate: format(startOfMonth(today), "yyyy-MM-dd"), endDate: format(endOfMonth(today), "yyyy-MM-dd") };
+      return {
+        startDate: clinicTodayString(startOfMonth(today)),
+        endDate: clinicTodayString(endOfMonth(today)),
+      };
     case "previousMonth": {
       const prev = subMonths(today, 1);
-      return { startDate: format(startOfMonth(prev), "yyyy-MM-dd"), endDate: format(endOfMonth(prev), "yyyy-MM-dd") };
+      return {
+        startDate: clinicTodayString(startOfMonth(prev)),
+        endDate: clinicTodayString(endOfMonth(prev)),
+      };
     }
     case "currentYear":
-      return { startDate: format(startOfYear(today), "yyyy-MM-dd"), endDate: format(endOfYear(today), "yyyy-MM-dd") };
+      return {
+        startDate: clinicTodayString(startOfYear(today)),
+        endDate: clinicTodayString(endOfYear(today)),
+      };
     case "custom":
     default:
-      return { startDate: customFrom ?? format(startOfMonth(today), "yyyy-MM-dd"), endDate: customTo ?? format(today, "yyyy-MM-dd") };
+      return {
+        startDate: customFrom ?? clinicTodayString(startOfMonth(today)),
+        endDate: customTo ?? todayStr,
+      };
   }
 }
 

@@ -122,6 +122,13 @@ export function validateVisitStatus(status: unknown): { ok: true; status: string
   return { ok: true, status: match };
 }
 
+export function normalizeVisitType(type: string | null | undefined): "home" | "clinic" | "unknown" {
+  const normalized = String(type ?? "").trim().toLowerCase();
+  if (normalized.includes("home")) return "home";
+  if (normalized.includes("clinic")) return "clinic";
+  return "unknown";
+}
+
 export function computeOutstandingBalance(totalAmount: number, amountPaid: number): number {
   return Math.max(0, totalAmount - Math.max(0, amountPaid));
 }
@@ -367,10 +374,14 @@ export function computeRevenueBreakdown(
 ): RevenueBreakdown {
   const paidVisits = visits.filter((v) => isPaidPaymentStatus(v.paymentStatus));
   const clinicVisits = sum(
-    paidVisits.filter((v) => v.visitType === "Clinic").map((v) => Number(v.paymentAmount) || 0)
+    paidVisits
+      .filter((v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "clinic")
+      .map((v) => Number(v.paymentAmount) || 0)
   );
   const homeVisits = sum(
-    paidVisits.filter((v) => v.visitType === "Home").map((v) => Number(v.paymentAmount) || 0)
+    paidVisits
+      .filter((v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home")
+      .map((v) => Number(v.paymentAmount) || 0)
   );
   const inpatientSessions = computeInPatientPaymentRevenue([...inpatientPayments, ...dischargePayments]);
   return {

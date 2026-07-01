@@ -5,9 +5,17 @@ import {
   assertBranchAccess,
   type BranchAccessContext,
 } from "../services/branchService";
+import { organizationForBranch, type OrganizationId } from "@shared/branchAccess";
 
 export interface AuthenticatedRequest extends Request {
-  user?: { staffId: string; email: string; role: string };
+  user?: {
+    staffId: string;
+    email: string;
+    role: string;
+    branchId?: string | null;
+    branchName?: string | null;
+    organizationId?: OrganizationId | null;
+  };
   sessionId?: string;
   branchContext?: BranchAccessContext;
 }
@@ -25,6 +33,19 @@ export async function loadBranchContext(req: AuthenticatedRequest): Promise<Bran
     session
   );
   req.branchContext = ctx;
+  if (req.user) {
+    req.user.branchId = ctx.selectedBranchId ?? null;
+    req.user.branchName = ctx.selectedBranchName ?? null;
+    if (ctx.selectedBranchName) {
+      req.user.organizationId = organizationForBranch(ctx.selectedBranchName);
+    } else if (ctx.selectedContext === "nexus-overview") {
+      req.user.organizationId = "nexus";
+    } else if (ctx.selectedContext === "maximus-overview") {
+      req.user.organizationId = "maximus";
+    } else {
+      req.user.organizationId = null;
+    }
+  }
   return ctx;
 }
 

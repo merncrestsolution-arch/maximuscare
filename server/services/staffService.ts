@@ -1,10 +1,11 @@
 import type { IStorage } from "../storage";
 import type { Staff, Branch } from "@shared/schema";
 import { normalizeBranchName } from "@shared/branches";
+import { organizationForBranch, NEXUS_BRANCH_CODE, type OrganizationId } from "@shared/branchAccess";
 import { isClinicalRole, isOperationalLead } from "@shared/roles";
 import { clinicDateString } from "../clinicTime";
 import { computePayrollReport } from "./payrollService";
-import { summarizeAttendance, inDateRange, computeExtraHolidayCount } from "./calculationEngine";
+import { summarizeAttendance, inDateRange, computeExtraHolidayCount, normalizeVisitType } from "./calculationEngine";
 import { loadPayrollSettings } from "./payrollService";
 
 export interface StaffProfileStats {
@@ -60,7 +61,9 @@ export async function computeStaffProfileStats(
   const totalDays = attSummary.present + attSummary.absent + attSummary.leave + attSummary.holiday;
   const attendancePercent = totalDays > 0 ? Math.round((attSummary.present / totalDays) * 100) : 0;
   const extraHolidays = computeExtraHolidayCount(attSummary.absent, settings.freeAbsentDays);
-  const homeVisits = visits.filter((v) => v.visitType === "Home");
+  const homeVisits = visits.filter(
+    (v) => normalizeVisitType((v as { visitType?: string; type?: string }).visitType ?? (v as any).type) === "home"
+  );
   const payroll = await computePayrollReport(storage, startDate, endDate, [staffId]);
   const summary = payroll.summaries[0];
   const otHours = attendance.reduce((sum, a) => sum + Number(a.overtimeHours || 0), 0);
@@ -225,6 +228,43 @@ export async function filterStaffByBranchAccess(
   }
   return list.filter((s) =>
     staffMatchesBranch(s, branchName) ||
+    permittedIds.has(s.id)
+  );
+}
+
+export async function filterStaffByOrganization(
+  storage: IStorage,
+  list: Staff[],
+  organizationId: OrganizationId | null | undefined,
+): Promise<Staff[]> {
+  if (!organizationId) return list;
+
+  const branches = await storage.getAllBranches();
+  const orgBranches = branches.filter((b: any) => {
+    const code = String(b.code ?? "").toUpperCase();
+    if (code) {
+      return organizationId === "nexus" ? code === NEXUS_BRANCH_CODE : code !== NEXUS_BRANCH_CODE;
+    }
+    return organizationForBranch(b.branchName ?? b.name) === organizationId;
+  });
+  if (orgBranches.length === 0) return list;
+
+  let permittedIds = new Set<string>();
+  try {
+    for (const b of orgBranches) {
+      const ids = await storage.getStaffIdsWithBranchPermission(b.id);
+      for (const id of ids) permittedIds.add(id);
+    }
+  } catch {
+    // fall back to branch-name heuristics only
+  }
+
+  const orgBranchNames = orgBranches
+    .map((b: any) => b.branchName ?? b.name)
+    .filter(Boolean);
+
+  return list.filter((s) =>
+    orgBranchNames.some((name) => staffMatchesBranch(s, name)) ||
     permittedIds.has(s.id)
   );
 }

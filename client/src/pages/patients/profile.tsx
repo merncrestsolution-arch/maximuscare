@@ -345,6 +345,10 @@ export default function PatientProfile() {
               patientCode={patient.patientCode}
               phone={patient.phone}
               address={patient.address}
+              condition={patient.condition}
+              branchName={patient.branch}
+              branchId={patient.branchId}
+              registeredDate={patient.registeredDate}
             />
             <Button
               type="button"

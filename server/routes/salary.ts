@@ -60,6 +60,13 @@ async function branchScopedStaffIds(req: Request): Promise<Set<string> | null> {
   const { branchStaffIdSet } = await import("../services/staffService");
   const selectedIds = await branchStaffIdSet(storage, ctx?.selectedBranchName ?? null);
 
+  if (!ctx?.selectedBranchName && user.organizationId) {
+    const { filterStaffByOrganization } = await import("../services/staffService");
+    const allStaff = await storage.getAllStaff();
+    const scoped = await filterStaffByOrganization(storage, allStaff, user.organizationId);
+    return new Set(scoped.map((s) => s.id));
+  }
+
   if (isLead) {
     // Scoped to allowed branches
     const allowedNames = new Set((ctx?.allowedBranches ?? []).map((b: any) => normalizeBranchName(b.branchName ?? b.name).toLowerCase()));

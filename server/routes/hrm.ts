@@ -58,6 +58,12 @@ export function registerHrmRoutes(app: Express) {
       let list = includeInactive ? await storage.getAllStaff() : await storage.getActiveStaff();
       if (branch) {
         list = await filterStaffByBranchAccess(storage, list, branch);
+      } else {
+        const orgId = (req as any).user?.organizationId ?? null;
+        if (orgId) {
+          const { filterStaffByOrganization } = await import("../services/staffService");
+          list = await filterStaffByOrganization(storage, list, orgId);
+        }
       }
       if (role) list = list.filter((s) => s.role === role);
       if (status === "Active") list = list.filter((s) => s.isActive !== false && (s.isActive as unknown) !== 0);
@@ -80,7 +86,11 @@ export function registerHrmRoutes(app: Express) {
         list.map(async (s) => {
           if (!s.employeeCode) await ensureEmployeeCode(storage, s);
           const fresh = (await storage.getStaff(s.id)) ?? s;
-          return staffDirectoryRow(fresh, attByStaff.get(s.id) ?? null);
+          const branchPermissions = await storage.getUserBranchPermissions(fresh.id);
+          return {
+            ...staffDirectoryRow(fresh, attByStaff.get(s.id) ?? null),
+            branchIds: branchPermissions.map((row) => row.branchId),
+          };
         }),
       );
 

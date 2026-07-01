@@ -1,7 +1,7 @@
 import type { IStorage } from "../storage";
 import type { Visit } from "@shared/schema";
 import { normalizeBranchName, getHomeVisitRateTier } from "@shared/branches";
-import { DEFAULT_RATES } from "./calculationEngine";
+import { DEFAULT_RATES, normalizeVisitType } from "./calculationEngine";
 
 // Bug 7: flat per-branch home-visit rate — no holiday rate.
 export const HOME_VISIT_RATES = {
@@ -36,7 +36,9 @@ export async function syncHomeVisitFromVisit(
   visit: Visit,
   homeVisitType?: HomeVisitType
 ): Promise<void> {
-  if (visit.visitType !== "Home") return;
+  if (normalizeVisitType((visit as { visitType?: string; type?: string }).visitType ?? (visit as any).type) !== "home") {
+    return;
+  }
 
   const settings = await storage.getClinicSettings();
   const type = homeVisitType ?? (await detectHomeVisitType(
