@@ -281,12 +281,15 @@ export async function pngToIdCardPdfBuffer(png: Buffer): Promise<Buffer> {
     .toBuffer();
 
   const doc = new jsPDF({
+    orientation: "landscape",
     unit: "mm",
     format: [CARD_WIDTH_MM, CARD_HEIGHT_MM],
     compress: true,
   });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
   const dataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
-  doc.addImage(dataUrl, "JPEG", 0, 0, CARD_WIDTH_MM, CARD_HEIGHT_MM, undefined, "FAST");
+  doc.addImage(dataUrl, "JPEG", 0, 0, pageW, pageH, undefined, "FAST");
   return Buffer.from(doc.output("arraybuffer"));
 }
 
