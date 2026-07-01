@@ -38,6 +38,37 @@ async function runDeleteSql(q: SQL) {
   await runRaw(q);
 }
 
+let branchVerificationReady: Promise<void> | null = null;
+async function ensureBranchVerificationColumn() {
+  if (branchVerificationReady) {
+    await branchVerificationReady;
+    return;
+  }
+  branchVerificationReady = (async () => {
+    try {
+      if (usePostgres) {
+        await runRaw(
+          sql.raw(
+            "ALTER TABLE branches ADD COLUMN IF NOT EXISTS verified_by_admin BOOLEAN NOT NULL DEFAULT FALSE",
+          ),
+        );
+      } else {
+        await runRaw(
+          sql.raw(
+            "ALTER TABLE branches ADD COLUMN verified_by_admin INTEGER NOT NULL DEFAULT 0",
+          ),
+        );
+      }
+    } catch (error: unknown) {
+      const msg = String((error as Error)?.message ?? "");
+      if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
+        throw error;
+      }
+    }
+  })();
+  await branchVerificationReady;
+}
+
 const {
   staff,
   patients,
@@ -1771,6 +1802,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllBranches(): Promise<Branch[]> {
+    await ensureBranchVerificationColumn();
     return await db.select().from(branches).where(eq(branches.isActive, true)).orderBy(asc(branches.name));
   }
 
