@@ -2357,6 +2357,44 @@ export async function registerRoutes(
     try {
       const { status } = req.query;
       const branchId = getSelectedBranchId(req as any);
+
+      const resolveAdmissionKey = (entry: any): string => {
+        if (entry.patientId) return `patient:${entry.patientId}`;
+        if (entry.patientCode) return `code:${entry.patientCode}`;
+        const name = String(entry.patientName || "").trim().toLowerCase();
+        const phone = String(entry.phone || "").trim();
+        const idNo = String(entry.patientIdNo || "").trim();
+        return `legacy:${name}|${phone}|${idNo}`;
+      };
+
+      const compareAdmissionDates = (left: any, right: any): number => {
+        const leftAdmit = left?.admitDate ? new Date(left.admitDate) : null;
+        const rightAdmit = right?.admitDate ? new Date(right.admitDate) : null;
+        if (leftAdmit && rightAdmit && !Number.isNaN(leftAdmit.valueOf()) && !Number.isNaN(rightAdmit.valueOf())) {
+          if (leftAdmit > rightAdmit) return -1;
+          if (leftAdmit < rightAdmit) return 1;
+        }
+        const leftCreated = left?.createdAt ? new Date(left.createdAt) : null;
+        const rightCreated = right?.createdAt ? new Date(right.createdAt) : null;
+        if (leftCreated && rightCreated && !Number.isNaN(leftCreated.valueOf()) && !Number.isNaN(rightCreated.valueOf())) {
+          if (leftCreated > rightCreated) return -1;
+          if (leftCreated < rightCreated) return 1;
+        }
+        return 0;
+      };
+
+      const pickLatestAdmissions = (entries: any[]) => {
+        const latestByKey = new Map<string, any>();
+        for (const entry of entries) {
+          const key = resolveAdmissionKey(entry);
+          const current = latestByKey.get(key);
+          if (!current || compareAdmissionDates(entry, current) < 0) {
+            latestByKey.set(key, entry);
+          }
+        }
+        return Array.from(latestByKey.values()).sort(compareAdmissionDates);
+      };
+
       let admissions;
       if (status && typeof status === "string") {
         const tokens = status
@@ -2366,16 +2404,18 @@ export async function registerRoutes(
         const normalized = tokens.map((value) => value.toLowerCase());
         if (normalized.includes("all")) {
           admissions = await storage.getAllInPatientAdmissions(branchId);
-        } else if (normalized.includes("active")) {
-          const allAdmissions = await storage.getAllInPatientAdmissions(branchId);
-          admissions = allAdmissions.filter((entry) => {
-            const current = String(entry.status || "").toLowerCase();
-            return current === "admitted" || current === "active";
-          });
         } else {
           const allAdmissions = await storage.getAllInPatientAdmissions(branchId);
-          const allowed = new Set(normalized);
-          admissions = allAdmissions.filter((entry) => allowed.has(String(entry.status || "").toLowerCase()));
+          const latestAdmissions = pickLatestAdmissions(allAdmissions);
+          if (normalized.includes("active")) {
+            admissions = latestAdmissions.filter((entry) => {
+              const current = String(entry.status || "").toLowerCase();
+              return current === "admitted" || current === "active";
+            });
+          } else {
+            const allowed = new Set(normalized);
+            admissions = latestAdmissions.filter((entry) => allowed.has(String(entry.status || "").toLowerCase()));
+          }
         }
       } else {
         admissions = await storage.getAllInPatientAdmissions(branchId);
@@ -2961,6 +3001,8 @@ export async function registerRoutes(
         address: admission.address,
         patientIdNo: admission.patientIdNo,
         careTakerIdNo: admission.careTakerIdNo,
+        patientId: admission.patientId ?? null,
+        patientCode: admission.patientCode ?? null,
         packageType: admission.packageType,
         amountPerDay: admission.amountPerDay,
         branchId: admission.branchId,
