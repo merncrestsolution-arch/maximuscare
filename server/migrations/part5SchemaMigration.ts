@@ -3,9 +3,10 @@
  * Additive only; no table drops.
  */
 import { sql } from "drizzle-orm";
+import { migrationUsePostgres } from "./pgDetect";
 import { db } from "../db";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = migrationUsePostgres();
 
 async function run(statement: string) {
   const query = sql.raw(statement);

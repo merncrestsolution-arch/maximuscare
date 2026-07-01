@@ -3,6 +3,7 @@
  * unique index so only one non-deleted record can exist for (staff_id, date).
  */
 import { eq, isNull, sql } from "drizzle-orm";
+import { migrationUsePostgres } from "./pgDetect";
 import { db, schema } from "../db";
 import {
   compareAttendanceRecords,
@@ -10,7 +11,7 @@ import {
 } from "../services/calculationEngine";
 
 const { attendance } = schema;
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = migrationUsePostgres();
 
 async function run(statement: string) {
   const query = sql.raw(statement);

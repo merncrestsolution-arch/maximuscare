@@ -52,6 +52,54 @@ const BOOT_COLUMNS: Array<[string, string, string]> = [
   ["patients", "id_card_generated_at", "TIMESTAMP"],
 ];
 
+/** JWT refresh-token store (Part 10). Created via native pg so login works on Vercel/Neon. */
+export async function ensureRefreshTokensTable(): Promise<void> {
+  const connectionString = process.env.DATABASE_URL || "";
+  if (!isPostgresDatabaseUrl(connectionString)) return;
+
+  const pool = new pg.Pool({
+    connectionString,
+    ssl: poolSsl(connectionString),
+  });
+
+  try {
+    const exists = await pool.query(
+      `SELECT to_regclass('public.refresh_tokens') AS reg`,
+    );
+    if (exists.rows[0]?.reg) return;
+
+    const staff = await pool.query(`SELECT to_regclass('public.staff') AS reg`);
+    if (!staff.rows[0]?.reg) {
+      console.warn("[pg-bootstrap] staff table missing; defer refresh_tokens create");
+      return;
+    }
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        staff_id VARCHAR NOT NULL REFERENCES staff(id),
+        session_id VARCHAR NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMP NOT NULL,
+        revoked_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_refresh_tokens_staff ON refresh_tokens(staff_id)`,
+    );
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_refresh_tokens_session ON refresh_tokens(session_id)`,
+    );
+    console.log("[pg-bootstrap] created refresh_tokens table");
+  } catch (error) {
+    console.error("[pg-bootstrap] refresh_tokens ensure failed:", error);
+    throw error;
+  } finally {
+    await pool.end();
+  }
+}
+
 /** Critical columns required by the current Drizzle schema before broad table scans. */
 export async function ensurePostgresBootColumns(): Promise<void> {
   for (const [table, column, definition] of BOOT_COLUMNS) {
@@ -60,5 +108,10 @@ export async function ensurePostgresBootColumns(): Promise<void> {
     } catch (error) {
       console.warn(`[pg-bootstrap] non-fatal ${table}.${column} ensure failed:`, error);
     }
+  }
+  try {
+    await ensureRefreshTokensTable();
+  } catch (error) {
+    console.warn("[pg-bootstrap] non-fatal refresh_tokens ensure failed:", error);
   }
 }

@@ -3,8 +3,9 @@
  */
 import { sql } from "drizzle-orm";
 import { db } from "../db";
+import { migrationUsePostgres } from "./pgDetect";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = migrationUsePostgres();
 
 async function run(statement: string) {
   const query = sql.raw(statement);

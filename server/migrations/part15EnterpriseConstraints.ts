@@ -2,11 +2,12 @@
  * Part 15 — soft deletes on appointments, branch_id on appointments, audit indexes.
  */
 import { sql } from "drizzle-orm";
+import { migrationUsePostgres } from "./pgDetect";
 import { db } from "../db";
 import { storage } from "../storage";
 import { normalizeBranchName } from "@shared/branches";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = migrationUsePostgres();
 
 async function run(statement: string) {
   const query = sql.raw(statement);

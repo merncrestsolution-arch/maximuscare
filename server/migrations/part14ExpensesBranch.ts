@@ -2,11 +2,12 @@
  * Part 14 — branch column on expenses for branch-isolated reporting.
  */
 import { sql } from "drizzle-orm";
+import { migrationUsePostgres } from "./pgDetect";
 import { db } from "../db";
 import { storage } from "../storage";
 import { normalizeBranchName } from "@shared/branches";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = migrationUsePostgres();
 
 async function run(statement: string) {
   const query = sql.raw(statement);

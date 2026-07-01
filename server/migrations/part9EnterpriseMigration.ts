@@ -2,9 +2,10 @@
  * Part 9 — enterprise multi-branch DDL: user_branch_access, session branch, indexes.
  */
 import { sql } from "drizzle-orm";
+import { migrationUsePostgres } from "./pgDetect";
 import { db } from "../db";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = migrationUsePostgres();
 
 async function run(statement: string) {
   const query = sql.raw(statement);

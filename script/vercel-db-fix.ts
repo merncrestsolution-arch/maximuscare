@@ -48,6 +48,31 @@ async function run() {
   });
 
   try {
+    const staffExists = await pool.query(`SELECT to_regclass('public.staff') AS reg`);
+    if (staffExists.rows[0]?.reg) {
+      const rtExists = await pool.query(`SELECT to_regclass('public.refresh_tokens') AS reg`);
+      if (!rtExists.rows[0]?.reg) {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS refresh_tokens (
+            id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+            staff_id VARCHAR NOT NULL REFERENCES staff(id),
+            session_id VARCHAR NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TIMESTAMP NOT NULL,
+            revoked_at TIMESTAMP,
+            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+          )
+        `);
+        await pool.query(
+          `CREATE INDEX IF NOT EXISTS idx_refresh_tokens_staff ON refresh_tokens(staff_id)`,
+        );
+        await pool.query(
+          `CREATE INDEX IF NOT EXISTS idx_refresh_tokens_session ON refresh_tokens(session_id)`,
+        );
+        console.log("[db-fix] created refresh_tokens table");
+      }
+    }
+
     for (const [table, column, definition] of newColumns) {
       try {
         const { rows } = await pool.query(
