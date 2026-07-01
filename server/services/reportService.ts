@@ -157,7 +157,7 @@ export async function computeRevenueReport(
   branchFilter?: string | null
 ): Promise<RevenueReport> {
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
-  if (branchFilter) visits = filterVisitsByBranch(visits, branchFilter);
+  if (branchFilter) visits = await scopeVisitsByBranch(storage, visits, branchFilter);
   let unpaidVisits = await storage.getUnpaidVisits();
   if (branchFilter) unpaidVisits = applyBranchFilter(unpaidVisits, branchFilter);
 
@@ -208,22 +208,90 @@ export async function computeRevenueReport(
   };
 }
 
-export function filterVisitsByBranch(visits: Visit[], branchFilter: string | string[]): Visit[] {
-  const targets = new Set(
-    Array.isArray(branchFilter)
-      ? branchFilter.map(b => normalizeBranchName(b).toLowerCase())
-      : [normalizeBranchName(branchFilter).toLowerCase()]
+export function branchFilterTargets(
+  branchFilter?: string | string[] | null
+): Set<string> | null {
+  if (!branchFilter || (Array.isArray(branchFilter) && branchFilter.length === 0)) return null;
+  return new Set(
+    (Array.isArray(branchFilter) ? branchFilter : [branchFilter]).map((b) =>
+      normalizeBranchName(b).toLowerCase()
+    )
   );
-  return visits.filter((v) => targets.has(normalizeBranchName(v.branch).toLowerCase()));
+}
+
+export function buildBranchIdToShortMap(
+  branches: { id: string; name: string; branchName?: string | null }[]
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const b of branches) {
+    const short = normalizeBranchName((b as { branchName?: string | null }).branchName ?? b.name).toLowerCase();
+    if (short) map.set(b.id, short);
+  }
+  return map;
+}
+
+export function visitMatchesBranchTargets(
+  visit: { branch?: string | null; branchId?: string | null },
+  targets: Set<string>,
+  branchIdToShort: Map<string, string>,
+  includeLegacy = true
+): boolean {
+  const fromText = normalizeBranchName(visit.branch).toLowerCase();
+  if (fromText && targets.has(fromText)) return true;
+  if (visit.branchId) {
+    const short = branchIdToShort.get(visit.branchId) ?? "";
+    if (short && targets.has(short)) return true;
+  }
+  if (includeLegacy && !visit.branchId && !fromText) return true;
+  return false;
+}
+
+export function filterVisitsByBranch(
+  visits: Visit[],
+  branchFilter: string | string[],
+  branchIdToShort: Map<string, string> = new Map()
+): Visit[] {
+  const targets = branchFilterTargets(branchFilter);
+  if (!targets) return visits;
+  return visits.filter((v) => visitMatchesBranchTargets(v, targets, branchIdToShort, true));
+}
+
+export async function scopeVisitsByBranch(
+  storage: IStorage,
+  visits: Visit[],
+  branchFilter?: string | string[] | null
+): Promise<Visit[]> {
+  if (!branchFilter || (Array.isArray(branchFilter) && branchFilter.length === 0)) return visits;
+  const branches = await storage.getAllBranches();
+  return filterVisitsByBranch(visits, branchFilter, buildBranchIdToShortMap(branches));
+}
+
+/** Attendance rows rarely carry a branch column — scope by staff IDs in the branch. */
+export async function filterAttendanceByBranch(
+  storage: IStorage,
+  attendance: Attendance[],
+  branchFilter?: string | string[] | null
+): Promise<Attendance[]> {
+  const names = Array.isArray(branchFilter)
+    ? branchFilter
+    : branchFilter
+      ? [branchFilter]
+      : [];
+  if (names.length === 0) return attendance;
+  const { branchStaffIdSet } = await import("./staffService");
+  const staffIds = new Set<string>();
+  for (const name of names) {
+    const set = await branchStaffIdSet(storage, name);
+    if (set) Array.from(set).forEach((id) => staffIds.add(id));
+  }
+  if (staffIds.size === 0) return [];
+  return attendance.filter((a) => staffIds.has(a.staffId));
 }
 
 function applyBranchFilter<T extends { branch?: string | null }>(items: T[], branchFilter?: string | string[] | null): T[] {
   if (!branchFilter || (Array.isArray(branchFilter) && branchFilter.length === 0)) return items;
-  const targets = new Set(
-    Array.isArray(branchFilter)
-      ? branchFilter.map(b => normalizeBranchName(b).toLowerCase())
-      : [normalizeBranchName(branchFilter).toLowerCase()]
-  );
+  const targets = branchFilterTargets(branchFilter);
+  if (!targets) return items;
   return items.filter((item) => targets.has(normalizeBranchName(item.branch).toLowerCase()));
 }
 
@@ -244,7 +312,7 @@ async function filterSessionsByBranch(
   const branches = await storage.getAllBranches();
   const branchIdToShort = new Map<string, string>();
   for (const b of branches) {
-    const short = normalizeBranchName((b as any).branchName ?? b.name).toLowerCase();
+    const short = normalizeBranchName((b as { branchName?: string | null }).branchName ?? b.name).toLowerCase();
     if (short) branchIdToShort.set(b.id, short);
   }
   const staffList = await storage.getAllStaff();
@@ -353,7 +421,7 @@ export async function computeUnpaidReport(
   branchFilter?: string | null
 ): Promise<UnpaidVisitRow[]> {
   let visits = await storage.getUnpaidVisits(staffId);
-  if (branchFilter) visits = filterVisitsByBranch(visits, branchFilter);
+  if (branchFilter) visits = await scopeVisitsByBranch(storage, visits, branchFilter);
   const patients = await storage.getAllPatients();
   const patientMap = new Map(patients.map((p) => [p.id, p]));
 
@@ -509,18 +577,19 @@ export async function computeDashboardCharts(
   let ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
   let attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
   if (branchFilter && (Array.isArray(branchFilter) ? branchFilter.length > 0 : true)) {
-    visits = filterVisitsByBranch(visits, branchFilter);
-    attendance = applyBranchFilter(attendance, branchFilter);
-    
     const branches = await storage.getAllBranches();
-    const targets = new Set(
-      Array.isArray(branchFilter)
-        ? branchFilter.map((b) => normalizeBranchName(b).toLowerCase())
-        : [normalizeBranchName(branchFilter).toLowerCase()]
-    );
+    const branchIdToShort = buildBranchIdToShortMap(branches);
+    const targets = branchFilterTargets(branchFilter)!;
+    visits = filterVisitsByBranch(visits, branchFilter, branchIdToShort);
+    attendance = await filterAttendanceByBranch(storage, attendance, branchFilter);
+
     const matchingBranchIds = new Set(
       branches
-        .filter((b) => targets.has(normalizeBranchName(b.name).toLowerCase()))
+        .filter((b) =>
+          targets.has(
+            normalizeBranchName((b as { branchName?: string | null }).branchName ?? b.name).toLowerCase()
+          )
+        )
         .map((b) => b.id)
     );
     const branchStaffIds = new Set(
@@ -643,7 +712,7 @@ export async function computeExtendedDashboardKpis(
 ) {
   const today = clinicDateString();
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
-  if (branchFilter) visits = filterVisitsByBranch(visits, branchFilter);
+  if (branchFilter) visits = await scopeVisitsByBranch(storage, visits, branchFilter);
   const todayVisitsList = visits.filter((v) => v.visitDate === today);
   let ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
   if (branchFilter) ipSessions = await filterSessionsByBranch(storage, ipSessions, branchFilter);
@@ -670,7 +739,7 @@ export async function computeExtendedDashboardKpis(
   let todayAttendance = await storage.getAttendanceByDateRange(today, today);
   console.log("[AttendanceDiagnostics] today:", today, "raw attendance rows count:", todayAttendance.length, "rows:", todayAttendance.map((a: any) => ({ id: a.id, staffId: a.staffId, date: a.date, branch: a.branch, status: a.status })));
   if (branchFilter) {
-    todayAttendance = applyBranchFilter(todayAttendance, branchFilter);
+    todayAttendance = await filterAttendanceByBranch(storage, todayAttendance, branchFilter);
     console.log("[AttendanceDiagnostics] after branch filter count:", todayAttendance.length, "branchFilter:", branchFilter);
   }
   const todayAttendanceSummary = summarizeAttendance(todayAttendance);

@@ -1317,11 +1317,26 @@ export class DatabaseStorage implements IStorage {
           ? branchName.map(b => normalizeBranchName(b).toLowerCase())
           : [normalizeBranchName(branchName).toLowerCase()]
       );
+      const branches = await this.getAllBranches();
+      const branchIdToShort = new Map<string, string>();
+      for (const b of branches) {
+        const short = normalizeBranchName((b as any).branchName ?? b.name).toLowerCase();
+        if (short) branchIdToShort.set(b.id, short);
+      }
       const allVisits = startDate && endDate
         ? await this.getVisitsByDateRange(startDate, endDate)
         : await this.getAllVisits();
       return allVisits
-        .filter((v: any) => !v.deletedAt && targets.has(normalizeBranchName(v.branch).toLowerCase()))
+        .filter((v: any) => {
+          if (v.deletedAt) return false;
+          const fromText = normalizeBranchName(v.branch).toLowerCase();
+          if (fromText && targets.has(fromText)) return true;
+          if (v.branchId) {
+            const short = branchIdToShort.get(v.branchId) ?? "";
+            if (short && targets.has(short)) return true;
+          }
+          return !v.branchId && !fromText;
+        })
         .reduce((sum: number, v: any) => {
           const status = String(v.paymentStatus ?? "").toLowerCase();
           if (status === "paid") return sum + (parseFloat(v.paymentAmount) || 0);
@@ -1382,7 +1397,9 @@ export class DatabaseStorage implements IStorage {
       const branches = await this.getAllBranches();
       const matchingBranchIds = new Set(
         branches
-          .filter((b) => targets.has(normalizeBranchName(b.name).toLowerCase()))
+          .filter((b) =>
+            targets.has(normalizeBranchName((b as any).branchName ?? b.name).toLowerCase())
+          )
           .map((b) => b.id)
       );
       allowedAdmissionIds = new Set(

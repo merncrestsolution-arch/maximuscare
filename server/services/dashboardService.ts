@@ -12,7 +12,7 @@ import {
   getVisitCollectedRevenue,
   normalizeVisitType,
 } from "./calculationEngine";
-import { computeExtendedDashboardKpis, computeDashboardCharts, type DashboardCharts } from "./reportService";
+import { computeExtendedDashboardKpis, computeDashboardCharts, type DashboardCharts, scopeVisitsByBranch, filterAttendanceByBranch, branchFilterTargets } from "./reportService";
 
 export interface DashboardKpis {
   date: string;
@@ -47,21 +47,6 @@ export interface BranchDashboardStat {
   incentiveAmount: number;
 }
 
-function filterVisitsByBranch(visits: Visit[], branch: string | string[]) {
-  const targets = Array.isArray(branch)
-    ? new Set(branch.map((b) => normalizeBranchName(b).toLowerCase()))
-    : new Set([normalizeBranchName(branch).toLowerCase()]);
-  return visits.filter((v) => targets.has(normalizeBranchName(v.branch).toLowerCase()));
-}
-
-function filterByBranchName<T extends { branch?: string | null }>(items: T[], branchName?: string | string[] | null): T[] {
-  if (!branchName) return items;
-  const targets = Array.isArray(branchName)
-    ? new Set(branchName.map((b) => normalizeBranchName(b).toLowerCase()))
-    : new Set([normalizeBranchName(branchName).toLowerCase()]);
-  return items.filter((item) => targets.has(normalizeBranchName(item.branch ?? "").toLowerCase()));
-}
-
 export async function computeDashboardKpis(
   storage: IStorage,
   rangeFrom: string,
@@ -71,19 +56,19 @@ export async function computeDashboardKpis(
 ): Promise<DashboardKpis> {
   const today = clinicDateString();
   let visits = await storage.getVisitsByDateRange(rangeFrom, rangeTo);
-  if (branchFilter) visits = filterVisitsByBranch(visits, branchFilter);
+  if (branchFilter) visits = await scopeVisitsByBranch(storage, visits, branchFilter);
   const todayVisits = visits.filter((v) => v.visitDate === today);
   let ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
   if (branchFilter && (Array.isArray(branchFilter) ? branchFilter.length > 0 : true)) {
     const branches = await storage.getAllBranches();
-    const targets = new Set(
-      Array.isArray(branchFilter)
-        ? branchFilter.map((b) => normalizeBranchName(b).toLowerCase())
-        : [normalizeBranchName(branchFilter).toLowerCase()]
-    );
+    const targets = branchFilterTargets(branchFilter)!;
     const matchingBranchIds = new Set(
       branches
-        .filter((b) => targets.has(normalizeBranchName(b.name).toLowerCase()))
+        .filter((b) =>
+          targets.has(
+            normalizeBranchName((b as { branchName?: string | null }).branchName ?? b.name).toLowerCase()
+          )
+        )
         .map((b) => b.id)
     );
     const branchStaffIds = new Set(
@@ -126,7 +111,7 @@ export async function computeDashboardKpis(
   // branch-scopes them, so use it for both scoped and unscoped views.
   const totalRevenue = await storage.getTotalIncome(rangeFrom, rangeTo, branchFilter ?? null);
   let attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
-  if (branchFilter) attendance = filterByBranchName(attendance, branchFilter);
+  if (branchFilter) attendance = await filterAttendanceByBranch(storage, attendance, branchFilter);
   const attendanceSummary = summarizeAttendance(attendance);
 
   const settings = await loadPayrollSettings(storage);
@@ -176,7 +161,10 @@ export async function computeDashboardKpis(
   // getExpenseTotal). Previously this filtered by the creator's branch, which
   // misattributed expenses logged for a different branch.
   if (branchFilter) {
-    expensesList = filterByBranchName(expensesList, branchFilter);
+    const targets = branchFilterTargets(branchFilter)!;
+    expensesList = expensesList.filter((e) =>
+      targets.has(normalizeBranchName((e as { branch?: string | null }).branch).toLowerCase())
+    );
   }
   const expenses = computeExpenseBreakdown(expensesList);
 

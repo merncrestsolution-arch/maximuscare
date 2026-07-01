@@ -4,9 +4,30 @@ import { broadcastToActiveStaff } from "./notificationService";
 
 const APP_UPDATE_TYPE = "app_update";
 
+/** Unique id per Vercel deploy (commit SHA); falls back to APP_RELEASE.version locally. */
+function getDeployId(): string {
+  const sha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
+  if (sha) return sha.length > 12 ? sha.slice(0, 12) : sha;
+  return APP_RELEASE.version;
+}
+
 /** Marker embedded in the notification title so we can detect prior announcements. */
-function versionTag(version: string): string {
-  return `v${version}`;
+function versionTag(deployId: string): string {
+  return `v${deployId}`;
+}
+
+function buildDeployMessage(): string {
+  const commitMsg = process.env.VERCEL_GIT_COMMIT_MESSAGE?.trim();
+  if (commitMsg) {
+    return [
+      `We just deployed an update (${getDeployId()}).`,
+      "",
+      commitMsg,
+      "",
+      "Tip: refresh your browser to load the latest version.",
+    ].join("\n");
+  }
+  return buildReleaseMessage();
 }
 
 /**
@@ -19,9 +40,10 @@ export async function announceAppUpdateIfNeeded(
   storage: IStorage,
   options: { force?: boolean } = {},
 ): Promise<number> {
-  const tag = versionTag(APP_RELEASE.version);
+  const deployId = getDeployId();
+  const tag = versionTag(deployId);
 
-  // Idempotency guard: bail out if this version was already announced (unless
+  // Idempotency guard: bail out if this deploy was already announced (unless
   // an admin explicitly forces a re-send).
   if (!options.force) {
     try {
@@ -38,7 +60,7 @@ export async function announceAppUpdateIfNeeded(
   try {
     const count = await broadcastToActiveStaff(storage, {
       title: `${APP_RELEASE.title} (${tag})`,
-      message: buildReleaseMessage(),
+      message: buildDeployMessage(),
       type: APP_UPDATE_TYPE,
     });
     if (count > 0) {

@@ -1,12 +1,9 @@
 // Single source of truth for the current app release.
 //
-// Bump `version` and update `highlights` whenever you ship a deploy that you
-// want every user to be notified about. On the first request after the new
-// build goes live on Vercel, the server broadcasts a one-time "What's New"
-// notification to all active staff (see server/services/appUpdateService.ts).
-//
-// The announcement is idempotent: it only fires once per `version`, no matter
-// how many serverless cold starts or instances Vercel spins up.
+// Human-readable release notes for local builds and fallback notifications.
+// On Vercel, each git push auto-deploys and the server announces once per commit
+// (VERCEL_GIT_COMMIT_SHA) — no manual version bump required for staff alerts.
+// The client refresh banner polls /version.json every 30s and compares commit SHA.
 
 export interface AppRelease {
   version: string;
@@ -15,13 +12,13 @@ export interface AppRelease {
 }
 
 export const APP_RELEASE: AppRelease = {
-  version: "1.5.0",
+  version: "1.5.1",
   title: "App Updated — What's New",
   highlights: [
-    "Staff branch scoping: Salary, payroll, and attendance now show only staff assigned to the selected branch — no more mixing staff across Dehiwala, Bandaragama, Neuro, or Nexus.",
-    "Data visibility fix: Patients, visits, attendance, and expenses load correctly again after branch selection (legacy records without branch metadata are no longer hidden).",
-    "In-Patient mobile layout: New card-based list on phones with scrollable Admitted / Discharged tabs; desktop table view unchanged.",
-    "New branch switcher: Tap the branch name in the header to open the updated workspace picker with branch cards and overview shortcuts.",
+    "Dashboard fix: Home screen charts and cards (Revenue trend, Home visit revenue, Attendance, Visit analytics, Branch revenue, Revenue summary, Expenses, Today attendance) now load branch-scoped data correctly.",
+    "Attendance on the dashboard is scoped by staff in the selected branch instead of a missing branch column on attendance rows.",
+    "Visits and revenue match by branch name or branch ID, so legacy and newer records both count.",
+    "Nexus MD users now see the full financial dashboard like Admin and MD.",
     "Please refresh your browser after this update to load the latest version.",
   ],
 };

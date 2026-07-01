@@ -70,7 +70,7 @@ export default function Dashboard() {
 
   const { selectedBranchName, selectedContext } = useBranch();
   const role = (user?.role || "").toLowerCase();
-  const isManagement = role === "admin" || role === "md";
+  const isManagement = isManagementRole(user?.role);
   const isManagerRole = isManager(user?.role);
   const isBranchManagerRole = isBranchManager(user?.role);
   const canSeeFinancials = canViewFinancialSummary(user?.role);

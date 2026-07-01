@@ -667,8 +667,9 @@ export function useDeleteInPatientExtraExpense() {
 
 // Expense hooks (MD/Admin only)
 export function useExpenses(params?: { startDate?: string; endDate?: string }, enabled: boolean = true) {
+  const { selectedBranchId, selectedBranchName } = useBranch();
   return useQuery({
-    queryKey: ['expenses', params],
+    queryKey: ['expenses', params, selectedBranchId, selectedBranchName],
     queryFn: () => expenseApi.getAll(params),
     enabled,
   });
@@ -775,8 +776,9 @@ export function useDeleteAppointment() {
 
 // Revenue Summary hooks (MD/Admin only)
 export function useRevenueSummary(params?: { startDate?: string; endDate?: string }, enabled: boolean = true) {
+  const { selectedBranchId, selectedBranchName } = useBranch();
   return useQuery({
-    queryKey: ['revenue-summary', params],
+    queryKey: ['revenue-summary', params, selectedBranchId, selectedBranchName],
     queryFn: () => revenueApi.getSummary(params),
     enabled,
   });
@@ -961,8 +963,9 @@ export function useDeleteTask() {
 }
 
 export function useDashboardKpis(params: { startDate: string; endDate: string }, enabled = true) {
+  const { selectedBranchId, selectedBranchName } = useBranch();
   return useQuery({
-    queryKey: ['dashboard-kpis', params],
+    queryKey: ['dashboard-kpis', params, selectedBranchId, selectedBranchName],
     queryFn: () => reportsApiExtended.dashboardKpis(params),
     enabled: enabled && !!params.startDate && !!params.endDate,
   });

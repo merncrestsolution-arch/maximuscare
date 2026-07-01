@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const POLL_INTERVAL_MS = 60_000;
+/** Poll often so users see the refresh banner soon after a Vercel deploy lands. */
+const POLL_INTERVAL_MS = 30_000;
 
 /**
  * Plays a short two-tone notification chime using the Web Audio API so we
