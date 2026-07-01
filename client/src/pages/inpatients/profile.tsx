@@ -17,6 +17,7 @@ import {
   computeDeductionAmount,
   computeTotalPendingBalance,
   isCarriedForwardExpense,
+  parseReadmitAdmissionSource,
   splitReAdmissionPayments,
   sumCarriedForwardAmounts,
 } from "@shared/inpatientBilling";
@@ -667,7 +668,11 @@ export default function InPatientProfilePage() {
   const caretakerCharges = careTakerRate * careTakerDays;
   const carriedForwardTotal = sumCarriedForwardAmounts(extraExpenses);
   const hasCarriedForwardBalance = carriedForwardTotal > 0;
-  const showBillingHistoryToggle = hasPriorEpisodes || hasCarriedForwardBalance;
+  const isReadmitAdmission =
+    Boolean(parseReadmitAdmissionSource((patient as { admissionSource?: string | null }).admissionSource)) ||
+    hasCarriedForwardBalance;
+  const showBillingHistoryToggle =
+    hasCarriedForwardBalance || (isReadmitAdmission && hasPriorEpisodes);
   const currentExtraExpenseTotal = Math.max(0, extraExpenseTotal - carriedForwardTotal);
   const carriedForwardExpenses = (extraExpenses || []).filter(isCarriedForwardExpense);
   const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
@@ -713,9 +718,11 @@ export default function InPatientProfilePage() {
   };
   const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode, index) => {
     return sum + getPriorEpisodeBilling(episode, index).pending;
-  }, hasPriorEpisodes ? 0 : priorBalanceDue);
-  const totalBalanceDue = computeTotalPendingBalance(currentBalanceDue, totalPriorPendingBalance);
-  const hasPriorPendingInSummary = totalPriorPendingBalance > 0;
+  }, 0);
+  /** Only a carried-forward charge (created on re-admit) affects the current bill. */
+  const priorPendingForCurrentAdmission = hasCarriedForwardBalance ? priorBalanceDue : 0;
+  const totalBalanceDue = computeTotalPendingBalance(currentBalanceDue, priorPendingForCurrentAdmission);
+  const hasPriorPendingInSummary = priorPendingForCurrentAdmission > 0;
   // Discharge balance is recomputed from the snapshot grand total minus ALL recorded
   // payments so the Discharge Summary reconciles with the live Billing Summary even
   // when payments are added after the discharge was created.
@@ -801,7 +808,7 @@ export default function InPatientProfilePage() {
         ...(hasPriorPendingInSummary
           ? [
               { item: "Current Episode Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) },
-              { item: "Previous Admission Due", quantity: "-", rate: "-", amount: formatMoney(totalPriorPendingBalance) },
+              { item: "Previous Admission Due", quantity: "-", rate: "-", amount: formatMoney(priorPendingForCurrentAdmission) },
               { item: "Total Balance Due", quantity: "-", rate: "-", amount: formatMoney(totalBalanceDue) },
             ]
           : [{ item: "Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) }]),
@@ -1226,7 +1233,7 @@ export default function InPatientProfilePage() {
                     {hasPriorPendingInSummary && (
                       <BillingLine
                         label="Previous Admission Due"
-                        value={`LKR ${formatMoney(totalPriorPendingBalance)}`}
+                        value={`LKR ${formatMoney(priorPendingForCurrentAdmission)}`}
                         tone="danger"
                         testId="text-prior-balance-due-inline"
                       />
@@ -1252,7 +1259,7 @@ export default function InPatientProfilePage() {
 
                 {showBillingHistoryToggle && !showingPreviousBilling && hasPriorPendingInSummary && (
                   <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="text-prior-balance-note">
-                    Includes LKR {formatMoney(totalPriorPendingBalance)} from previous admission(s).
+                    Includes LKR {formatMoney(priorPendingForCurrentAdmission)} carried forward from a previous admission.
                     Switch to <span className="font-semibold">Previous</span> for a full breakdown.
                   </p>
                 )}

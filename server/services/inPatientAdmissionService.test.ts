@@ -152,18 +152,19 @@ describe("inPatientAdmissionService", () => {
           return {
             id: "prior",
             patientId: "p1",
-            admitDate: "2024-05-01",
+            admitDate: "2024-06-01",
             status: "Discharged",
+            amountPerDay: "10000",
           } as any;
         }
         return undefined;
       },
       getInPatientAdmissionsForPatient: async () => [
-        { id: "prior", patientId: "p1", admitDate: "2024-05-01", status: "Discharged" },
+        { id: "prior", patientId: "p1", admitDate: "2024-06-01", status: "Discharged", amountPerDay: "10000" },
         { id: "current", patientId: "p1", admitDate: "2024-07-01", status: "Admitted" },
       ] as any,
       getAllInPatientAdmissions: async () => [
-        { id: "prior", patientId: "p1", admitDate: "2024-05-01", status: "Discharged" },
+        { id: "prior", patientId: "p1", admitDate: "2024-06-01", status: "Discharged", amountPerDay: "10000" },
         { id: "current", patientId: "p1", admitDate: "2024-07-01", status: "Admitted", admissionSource: "readmit:prior" },
       ] as any,
       getInPatientDischargeByAdmission: async (id: string) =>
@@ -171,6 +172,7 @@ describe("inPatientAdmissionService", () => {
           ? ({ dischargeDate: "2024-06-01", grandTotal: "10000" } as any)
           : undefined,
       getPaymentTotalByAdmission: async (id: string) => (id === "prior" ? 3500 : 0),
+      getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async (id: string) =>
         id === "prior" ? ([{ id: "s1" }] as any) : [],
     };
@@ -179,5 +181,49 @@ describe("inPatientAdmissionService", () => {
     expect(episodes).toHaveLength(1);
     expect(episodes[0].pendingBalance).toBe(6500);
     expect(episodes[0].sessionCount).toBe(1);
+  });
+
+  it("does not attach unrelated prior admissions to a first-time admission bill", async () => {
+    const storage = {
+      getInPatientAdmission: async (id: string) => {
+        if (id === "current") {
+          return {
+            id: "current",
+            patientId: "p1",
+            admitDate: "2024-07-01",
+            status: "Admitted",
+            amountPerDay: "1000",
+          } as any;
+        }
+        if (id === "old") {
+          return {
+            id: "old",
+            patientId: "p1",
+            admitDate: "2024-01-01",
+            status: "Discharged",
+            amountPerDay: "1000",
+          } as any;
+        }
+        return undefined;
+      },
+      getInPatientAdmissionsForPatient: async () => [
+        { id: "old", patientId: "p1", admitDate: "2024-01-01", status: "Discharged", amountPerDay: "1000" },
+        { id: "current", patientId: "p1", admitDate: "2024-07-01", status: "Admitted", amountPerDay: "1000" },
+      ] as any,
+      getAllInPatientAdmissions: async () => [
+        { id: "old", patientId: "p1", admitDate: "2024-01-01", status: "Discharged", amountPerDay: "1000" },
+        { id: "current", patientId: "p1", admitDate: "2024-07-01", status: "Admitted", amountPerDay: "1000" },
+      ] as any,
+      getInPatientDischargeByAdmission: async (id: string) =>
+        id === "old"
+          ? ({ dischargeDate: "2024-02-01", grandTotal: "5000" } as any)
+          : undefined,
+      getPaymentTotalByAdmission: async (id: string) => (id === "old" ? 0 : 0),
+      getInPatientExtraExpensesByAdmission: async () => [],
+      getInPatientSessionsByAdmission: async () => [],
+    };
+
+    const episodes = await getPriorInPatientEpisodes(storage as any, "current");
+    expect(episodes).toHaveLength(0);
   });
 });

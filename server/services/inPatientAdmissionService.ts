@@ -1,5 +1,20 @@
 import type { InPatientAdmission } from "@shared/schema";
 import type { IStorage } from "../storage";
+import {
+  collectReadmitChainPriorAdmissionIds,
+  computeAdmissionBalanceDue,
+  computeAdmissionGrandTotal,
+  formatReadmitAdmissionSource,
+  parseReadmitAdmissionSource,
+} from "@shared/inpatientBilling";
+
+export {
+  formatReadmitAdmissionSource,
+  parseReadmitAdmissionSource,
+} from "@shared/inpatientBilling";
+
+/** @deprecated import READMIT_SOURCE_PREFIX from @shared/inpatientBilling */
+export { READMIT_SOURCE_PREFIX } from "@shared/inpatientBilling";
 
 /** Outstanding balance from a discharged admission (grand total minus all payments). */
 export function priorAdmissionBalanceFromDischarge(
@@ -7,30 +22,37 @@ export function priorAdmissionBalanceFromDischarge(
   paymentTotal: number,
 ): number {
   const grand = parseFloat(String(grandTotal ?? 0)) || 0;
-  return Math.max(0, grand - paymentTotal);
+  return computeAdmissionBalanceDue(grand, paymentTotal);
 }
 
+/** Live outstanding balance on a discharged admission (matches billing summary, not stale discharge snapshot). */
 export async function computePriorAdmissionBalance(
   storage: IStorage,
   admissionId: string,
 ): Promise<number> {
+  const admission = await storage.getInPatientAdmission(admissionId);
+  if (!admission) return 0;
+
   const discharge = await storage.getInPatientDischargeByAdmission(admissionId);
   if (!discharge) return 0;
-  const paymentTotal = await storage.getPaymentTotalByAdmission(admissionId);
-  return priorAdmissionBalanceFromDischarge(discharge.grandTotal, paymentTotal);
-}
 
-/** Prefix stored in `admissionSource` when an admission was created via re-admit. */
-export const READMIT_SOURCE_PREFIX = "readmit:";
+  const [paymentTotal, extraExpenses] = await Promise.all([
+    storage.getPaymentTotalByAdmission(admissionId),
+    storage.getInPatientExtraExpensesByAdmission(admissionId),
+  ]);
 
-export function formatReadmitAdmissionSource(priorAdmissionId: string): string {
-  return `${READMIT_SOURCE_PREFIX}${priorAdmissionId}`;
-}
+  const grandTotal = computeAdmissionGrandTotal({
+    admitDate: admission.admitDate,
+    endDate: discharge.dischargeDate,
+    amountPerDay: admission.amountPerDay,
+    careTakerRatePerDay: admission.careTakerRatePerDay,
+    careTakerDaysOverride: admission.careTakerDaysOverride,
+    deductionType: (admission as { deductionType?: "fixed" | "percentage" | null }).deductionType,
+    deductionValue: (admission as { deductionValue?: string | null }).deductionValue,
+    extraExpenses,
+  });
 
-export function parseReadmitAdmissionSource(admissionSource?: string | null): string | null {
-  if (!admissionSource?.startsWith(READMIT_SOURCE_PREFIX)) return null;
-  const id = admissionSource.slice(READMIT_SOURCE_PREFIX.length).trim();
-  return id || null;
+  return computeAdmissionBalanceDue(grandTotal, paymentTotal);
 }
 
 export function resolveInPatientAdmissionKey(entry: {
@@ -172,7 +194,7 @@ export interface PriorInPatientEpisode {
   sessionCount: number;
 }
 
-/** Prior admission episodes with billing + session counts (for history toggles). */
+/** Prior admission episodes with billing + session counts (read-only; readmit chain only). */
 export async function getPriorInPatientEpisodes(
   storage: IStorage,
   admissionId: string,
@@ -181,16 +203,32 @@ export async function getPriorInPatientEpisodes(
   if (!admission) return [];
 
   const related = await getRelatedInPatientAdmissions(storage, admission);
+  const relatedById = new Map(related.map((entry) => [entry.id, entry]));
+  const readmitChainIds = new Set(collectReadmitChainPriorAdmissionIds(admission, relatedById));
   const priorAdmissions = related
-    .filter((entry) => entry.id !== admissionId)
+    .filter((entry) => entry.id !== admissionId && readmitChainIds.has(entry.id))
     .sort(compareAdmissionRecency);
 
   const episodes: PriorInPatientEpisode[] = [];
   for (const prior of priorAdmissions) {
     const discharge = await storage.getInPatientDischargeByAdmission(prior.id);
-    const amountPaid = await storage.getPaymentTotalByAdmission(prior.id);
+    const [amountPaid, extraExpenses] = await Promise.all([
+      storage.getPaymentTotalByAdmission(prior.id),
+      storage.getInPatientExtraExpensesByAdmission(prior.id),
+    ]);
     const sessions = await storage.getInPatientSessionsByAdmission(prior.id);
-    const grandTotal = discharge ? parseFloat(String(discharge.grandTotal)) || 0 : null;
+    const grandTotal = discharge
+      ? computeAdmissionGrandTotal({
+          admitDate: prior.admitDate,
+          endDate: discharge.dischargeDate,
+          amountPerDay: prior.amountPerDay,
+          careTakerRatePerDay: prior.careTakerRatePerDay,
+          careTakerDaysOverride: prior.careTakerDaysOverride,
+          deductionType: (prior as { deductionType?: "fixed" | "percentage" | null }).deductionType,
+          deductionValue: (prior as { deductionValue?: string | null }).deductionValue,
+          extraExpenses,
+        })
+      : null;
     episodes.push({
       admissionId: prior.id,
       admitDate: prior.admitDate,
@@ -198,7 +236,7 @@ export async function getPriorInPatientEpisodes(
       dischargeDate: discharge?.dischargeDate ?? null,
       grandTotal,
       amountPaid,
-      pendingBalance: discharge ? priorAdmissionBalanceFromDischarge(grandTotal, amountPaid) : 0,
+      pendingBalance: grandTotal !== null ? computeAdmissionBalanceDue(grandTotal, amountPaid) : 0,
       sessionCount: sessions.length,
     });
   }
