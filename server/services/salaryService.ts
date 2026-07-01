@@ -98,7 +98,7 @@ function sumDeductions(rows: StaffDeduction[]): number {
 
 function sumAdjustments(rows: { type: string; amount: string }[], type: "addition" | "decrement" | "fine"): number {
   return rows
-    .filter((a) => a.type === type)
+    .filter((a) => String(a.type).toLowerCase() === type)
     .reduce((acc, a) => acc + Math.max(0, Number(a.amount) || 0), 0);
 }
 
@@ -625,10 +625,10 @@ export async function buildSalaryReport(
     amount: Number(a.amount) || 0,
     source: "adjustment" as const,
   });
-  const additions = adjustments.filter((a) => a.type === "addition").map(toLine);
-  const decrements = adjustments.filter((a) => a.type === "decrement").map(toLine);
+  const additions = adjustments.filter((a) => String(a.type).toLowerCase() === "addition").map(toLine);
+  const decrements = adjustments.filter((a) => String(a.type).toLowerCase() === "decrement").map(toLine);
   const fineAdjustments = adjustments
-    .filter((a) => a.type === "fine")
+    .filter((a) => String(a.type).toLowerCase() === "fine")
     .map((a) => ({ ...toLine(a), source: "fine" as const }));
   const fines = staffFines
     .filter((f) => String(f.status ?? "active") !== "waived")

@@ -73,6 +73,8 @@ export function SalaryDetailSection({ staffId, staffName, canEdit }: Props) {
     Number(s?.staffDeductionsTotal ?? 0) +
     Number(s?.decrementsTotal ?? 0) +
     (Number(s?.otherAdjustments ?? 0) < 0 ? Math.abs(Number(s?.otherAdjustments)) : 0);
+  const manualDecrements = Number(s?.decrementsTotal ?? 0);
+  const staffDeductions = Number(s?.staffDeductionsTotal ?? 0);
   const otherCredits = Number(s?.otherAdjustments ?? 0) > 0 ? Number(s?.otherAdjustments) : 0;
 
   const rows = useMemo(() => {
@@ -100,15 +102,29 @@ export function SalaryDetailSection({ staffId, staffName, canEdit }: Props) {
       { label: "OT Hours", calc: `${s.totalOt} hrs`, amount: formatLkr(s.otIncome) },
       { label: "Extra Holidays", calc: `${s.extraHolidays} days`, amount: `-${formatLkr(s.extraHolidayDeduction)}` },
       { label: "Fines", calc: "", amount: `-${formatLkr(s.finesTotal)}` },
-      { label: "Other Decrements", calc: "", amount: `-${formatLkr(otherDecrements)}` },
     ];
+    if (staffDeductions > 0) {
+      out.push({ label: "Staff Deductions", calc: "", amount: `-${formatLkr(staffDeductions)}` });
+    }
+    if (manualDecrements > 0) {
+      out.push({ label: "Manual Decrements", calc: "", amount: `-${formatLkr(manualDecrements)}` });
+    }
+    if (Number(s?.otherAdjustments ?? 0) < 0) {
+      out.push({
+        label: "Other Adjustment (deduction)",
+        calc: "",
+        amount: `-${formatLkr(Math.abs(Number(s.otherAdjustments)))}`,
+      });
+    } else if (otherDecrements > 0 && staffDeductions === 0 && manualDecrements === 0) {
+      out.push({ label: "Other Decrements", calc: "", amount: `-${formatLkr(otherDecrements)}` });
+    }
     if (Number(s?.additionsTotal ?? 0) > 0) {
       out.push({ label: "Manual Additions", calc: "", amount: formatLkr(s.additionsTotal) });
     }
     if (otherCredits > 0) out.push({ label: "Other Additions", calc: "", amount: formatLkr(otherCredits) });
     out.push({ label: "Final Salary", calc: "", amount: formatLkr(s.finalSalary) });
     return out;
-  }, [s, otherDecrements, otherCredits]);
+  }, [s, otherDecrements, otherCredits, manualDecrements, staffDeductions]);
 
   return (
     <Card>

@@ -203,6 +203,7 @@ function PhysioSummaryContent() {
     { key: "inPatientSessions", label: "In-Patient Sessions" },
     { key: "incentiveCount", label: "Incentive Count" },
     { key: "fines", label: "Fines LKR" },
+    { key: "decrements", label: "Decrements LKR" },
     { key: "extraHolidays", label: "Extra Holidays" },
     { key: "basicSalary", label: "Basic Salary LKR" },
     { key: "otherAdjustments", label: "Other Adj. LKR" },
@@ -221,6 +222,7 @@ function PhysioSummaryContent() {
     inPatientSessions: String(s.inPatientSessionsCount),
     incentiveCount: String(s.incentiveCount),
     fines: String(s.finesTotal),
+    decrements: String(Number(s.decrementsTotal ?? 0) + Number(s.staffDeductionsTotal ?? 0)),
     extraHolidays: String(s.extraHolidays),
     basicSalary: String(s.basicSalary),
     otherAdjustments: String(s.otherAdjustments),
@@ -633,6 +635,11 @@ function PhysioSummaryContent() {
                       <div className="px-3 py-1 rounded-full bg-amber-50 text-amber-900 text-xs font-semibold border border-amber-200" data-testid={`badge-fines-${s.id}`}>
                         Fines: {s.finesTotal.toLocaleString()} LKR
                       </div>
+                      {(Number(s.decrementsTotal ?? 0) + Number(s.staffDeductionsTotal ?? 0)) > 0 && (
+                        <div className="px-3 py-1 rounded-full bg-orange-50 text-orange-800 text-xs font-semibold border border-orange-200" data-testid={`badge-decrements-${s.id}`}>
+                          Decrements: {(Number(s.decrementsTotal ?? 0) + Number(s.staffDeductionsTotal ?? 0)).toLocaleString()} LKR
+                        </div>
+                      )}
                       <div className="px-3 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-semibold border border-rose-200">
                         Extra holidays: {s.extraHolidays}
                       </div>
@@ -670,6 +677,7 @@ function PhysioSummaryContent() {
                       { key: "incentiveCount", label: "Incentive Count" },
                       { key: "incentiveAmount", label: "Incentive Amount (LKR)" },
                       { key: "finesTotal", label: "Fines (LKR)" },
+                      { key: "decrementsTotal", label: "Decrements (LKR)" },
                       { key: "extraHolidays", label: "Extra Holidays" },
                       { key: "extraHolidayDeduction", label: "Extra Holiday Deduction (LKR)" },
                       { key: "basicSalary", label: "Basic Salary (LKR)" },
@@ -692,6 +700,7 @@ function PhysioSummaryContent() {
                         incentiveCount: s.incentiveCount,
                         incentiveAmount: s.incentiveTotal,
                         finesTotal: s.finesTotal,
+                        decrementsTotal: Number(s.decrementsTotal ?? 0) + Number(s.staffDeductionsTotal ?? 0),
                         extraHolidays: s.extraHolidays,
                         extraHolidayDeduction: s.extraHolidayDeduction,
                         basicSalary: s.basicSalary,

@@ -257,7 +257,7 @@ export function computePayrollForStaff(
 
 function sumAdjustments(rows: StaffSalaryAdjustment[], type: "addition" | "decrement" | "fine"): number {
   return rows
-    .filter((r) => r.type === type)
+    .filter((r) => String(r.type).toLowerCase() === type)
     .reduce((acc, r) => acc + Math.max(0, Number(r.amount) || 0), 0);
 }
 

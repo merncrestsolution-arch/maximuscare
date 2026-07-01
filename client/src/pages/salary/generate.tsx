@@ -37,6 +37,9 @@ function SalaryGenerateContent() {
   const generate = useGenerateSalary();
 
   const s = preview?.summary;
+  const staffDeductionsTotal = Number((s as any)?.staffDeductionsTotal ?? 0);
+  const decrementsTotal = Number((s as any)?.decrementsTotal ?? 0);
+  const otherDeductionsTotal = staffDeductionsTotal + decrementsTotal;
 
   return (
     <ReportPageShell
@@ -132,7 +135,8 @@ function SalaryGenerateContent() {
             <ReportSummaryCard label="OT" value={formatLkr(s.otIncome)} />
             <ReportSummaryCard label="Fines" value={formatLkr(s.finesTotal)} />
             <ReportSummaryCard label="Extra Holiday" value={formatLkr(s.extraHolidayDeduction)} />
-            <ReportSummaryCard label="Other Deductions" value={formatLkr((s as any).staffDeductionsTotal ?? 0)} />
+            <ReportSummaryCard label="Decrements" value={formatLkr(decrementsTotal)} />
+            <ReportSummaryCard label="Other Deductions" value={formatLkr(otherDeductionsTotal)} />
             <ReportSummaryCard label="Final Salary" value={formatLkr(s.finalSalary)} />
           </div>
           <div className="grid md:grid-cols-3 gap-4 text-sm">

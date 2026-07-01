@@ -652,6 +652,7 @@ function SalaryReportContent() {
                       <th className="py-1 px-3 text-right">Basic</th>
                       <th className="py-1 px-3 text-right">Total HV</th>
                       <th className="py-1 px-3 text-right">OT</th>
+                      <th className="py-1 px-3 text-right">Decrements</th>
                       <th className="py-1 pl-3 text-right">Final</th>
                     </tr>
                   </thead>
@@ -662,6 +663,9 @@ function SalaryReportContent() {
                         <td className="py-1 px-3 text-right whitespace-nowrap">{formatMoney(h.basicSalary)}</td>
                         <td className="py-1 px-3 text-right whitespace-nowrap">{formatMoney(h.homeVisitsTotal)}</td>
                         <td className="py-1 px-3 text-right whitespace-nowrap">{formatMoney(h.otTotal)}</td>
+                        <td className="py-1 px-3 text-right whitespace-nowrap text-red-600">
+                          {h.decrementsTotal > 0 ? `-${formatMoney(h.decrementsTotal)}` : formatMoney(0)}
+                        </td>
                         <td className="py-1 pl-3 text-right font-medium whitespace-nowrap">{formatMoney(h.finalSalary)}</td>
                       </tr>
                     ))}
