@@ -52,7 +52,11 @@ import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
 import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
 import { signPatientQrToken, verifyPatientQrToken } from "./services/qrTokenService";
-import { generateCardId, generatePatientCardBuffers } from "./services/patientIdCardService";
+import {
+  generateCardId,
+  generatePatientCardPdf,
+  resolvePatientQrTokenForCard,
+} from "./services/patientIdCardService";
 import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
 import { logAudit } from "./services/auditService";
@@ -1219,7 +1223,7 @@ export async function registerRoutes(
     }
   );
 
-  // Printable patient ID card (template.svg → PNG/SVG download).
+  // Printable patient ID card (PDF download).
   app.get(
     "/api/patients/:id/id-card",
     requireAuth,
@@ -1239,9 +1243,12 @@ export async function registerRoutes(
         }
         const organizationId = organizationForBranch(patient.branch);
         const patientCode = patient.patientCode ?? id;
-        const token = signPatientQrToken({ patientId: patient.id, organizationId });
-        const format = String(req.query.format ?? "png").toLowerCase();
-        const { svg, png } = await generatePatientCardBuffers({
+        const token = resolvePatientQrTokenForCard(
+          String(req.query.token ?? ""),
+          patient.id,
+          organizationId
+        );
+        const pdf = await generatePatientCardPdf({
           id: patientCode,
           name: patient.name ?? "—",
           phone: patient.phone ?? "",
@@ -1250,14 +1257,9 @@ export async function registerRoutes(
           qrToken: token,
         });
         const safeName = patientCode.replace(/[^a-z0-9._-]+/gi, "-");
-        if (format === "svg") {
-          res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
-          res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.svg"`);
-          return res.send(svg);
-        }
-        res.setHeader("Content-Type", "image/png");
-        res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.png"`);
-        return res.send(png);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.pdf"`);
+        return res.send(pdf);
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }
@@ -2542,7 +2544,7 @@ export async function registerRoutes(
     }
   );
 
-  // Printable in-patient ID card (same template.svg flow as out-patients).
+  // Printable in-patient ID card (PDF download).
   app.get(
     "/api/inpatients/:id/id-card",
     requireAuth,
@@ -2555,12 +2557,13 @@ export async function registerRoutes(
         }
         const organizationId = resolveSessionOrganization(req) ?? "maximus";
         const patientCode = admission.patientCode ?? admission.patientIdNo ?? admission.id;
-        const token = signPatientQrToken({
-          patientId: admission.patientId ?? admission.id,
-          organizationId,
-        });
-        const format = String(req.query.format ?? "png").toLowerCase();
-        const { svg, png } = await generatePatientCardBuffers({
+        const masterPatientId = admission.patientId ?? admission.id;
+        const token = resolvePatientQrTokenForCard(
+          String(req.query.token ?? ""),
+          masterPatientId,
+          organizationId
+        );
+        const pdf = await generatePatientCardPdf({
           id: patientCode,
           name: admission.patientName ?? "—",
           phone: admission.phone ?? "",
@@ -2569,14 +2572,9 @@ export async function registerRoutes(
           qrToken: token,
         });
         const safeName = patientCode.replace(/[^a-z0-9._-]+/gi, "-");
-        if (format === "svg") {
-          res.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
-          res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.svg"`);
-          return res.send(svg);
-        }
-        res.setHeader("Content-Type", "image/png");
-        res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.png"`);
-        return res.send(png);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.pdf"`);
+        return res.send(pdf);
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }

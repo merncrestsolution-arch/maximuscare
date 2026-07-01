@@ -6,7 +6,7 @@ import { generateCardId, generatePatientCardBuffers } from "./server/services/pa
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Generate ID card files in output/ — run: npx tsx generateIdCard.ts */
+/** Generate ID card PDF in output/ — run: npx tsx generateIdCard.ts */
 export async function generatePatientCard(patient: {
   id: string;
   name: string;
@@ -15,18 +15,16 @@ export async function generatePatientCard(patient: {
   cardId?: string;
 }) {
   const token = signPatientQrToken({ patientId: patient.id, organizationId: "maximus" });
-  const { svg, png } = await generatePatientCardBuffers({
+  const { pdf } = await generatePatientCardBuffers({
     ...patient,
     cardId: patient.cardId ?? generateCardId(patient.id),
     qrToken: token,
   });
   const outputDir = path.join(__dirname, "output");
   await fs.mkdir(outputDir, { recursive: true });
-  const svgPath = path.join(outputDir, `${patient.id}-card.svg`);
-  const pngPath = path.join(outputDir, `${patient.id}-card.png`);
-  await fs.writeFile(svgPath, svg);
-  await fs.writeFile(pngPath, png);
-  return { svgPath, pngPath };
+  const pdfPath = path.join(outputDir, `${patient.id}-card.pdf`);
+  await fs.writeFile(pdfPath, pdf);
+  return { pdfPath };
 }
 
 const sample = {
@@ -37,10 +35,9 @@ const sample = {
 };
 
 generatePatientCard(sample)
-  .then(({ svgPath, pngPath }) => {
+  .then(({ pdfPath }) => {
     console.log("ID card generated:");
-    console.log(" ", svgPath);
-    console.log(" ", pngPath);
+    console.log(" ", pdfPath);
   })
   .catch((err) => {
     console.error(err);

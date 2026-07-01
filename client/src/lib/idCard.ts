@@ -39,14 +39,19 @@ export interface PatientIdCardDownloadInput {
   /** Patient master id (out-patient) or admission id (in-patient). */
   recordId: string;
   patientCode?: string | null;
+  /** Same signed token as “Show QR Code” so the printed card matches the dialog. */
+  qrToken?: string | null;
 }
 
-/** Download a print-ready PNG generated from template.svg on the server. */
+/** Download a print-ready PDF generated on the server. */
 export async function downloadPatientIdCard(input: PatientIdCardDownloadInput): Promise<void> {
+  const params = new URLSearchParams();
+  if (input.qrToken) params.set("token", input.qrToken);
+  const qs = params.toString();
   const endpoint =
     input.kind === "outpatient"
-      ? `/patients/${encodeURIComponent(input.recordId)}/id-card?format=png`
-      : `/inpatients/${encodeURIComponent(input.recordId)}/id-card?format=png`;
-  const fallback = `${(input.patientCode || input.recordId).replace(/[^a-z0-9._-]+/gi, "-")}-card.png`;
+      ? `/patients/${encodeURIComponent(input.recordId)}/id-card${qs ? `?${qs}` : ""}`
+      : `/inpatients/${encodeURIComponent(input.recordId)}/id-card${qs ? `?${qs}` : ""}`;
+  const fallback = `${(input.patientCode || input.recordId).replace(/[^a-z0-9._-]+/gi, "-")}-card.pdf`;
   await downloadAuthenticatedFile(endpoint, fallback);
 }

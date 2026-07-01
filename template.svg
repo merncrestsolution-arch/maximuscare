@@ -1,19 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     width="1152" height="728" viewBox="0 0 1152 728.25">
-  <image id="card-background" x="0" y="0" width="1152" height="728.25"
-         preserveAspectRatio="xMidYMid meet"
-         xlink:href="{{BACKGROUND_IMAGE}}" href="{{BACKGROUND_IMAGE}}"/>
-
-  <g id="patient-fields" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
-    <text x="138" y="314" font-size="22" font-weight="bold" fill="#1a3a6e">{patient.name}</text>
-    <text x="312" y="358" font-size="18" fill="#1a3a6e">{patient.id}</text>
-    <text x="312" y="408" font-size="18" fill="#1a3a6e">{patient.phone}</text>
-    <text x="312" y="458" font-size="18" fill="#1a3a6e">{patient.address}</text>
-
-    <image id="patient-qr" x="886" y="292" width="160" height="160"
-           xlink:href="{{QR_PLACEHOLDER}}" href="{{QR_PLACEHOLDER}}"/>
-
-    <text x="988" y="698" font-size="14" fill="#ffffff">{patient.cardId}</text>
-  </g>
+<!-- Text positions + QR box live in id-card-layout.json; QR is composited with sharp. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1152" height="728" viewBox="0 0 1152 728.25">
+  <image href="assets/id-card-background.png" width="1152" height="728.25"/>
 </svg>

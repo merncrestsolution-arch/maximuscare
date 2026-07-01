@@ -1,7 +1,10 @@
 import fs from "fs/promises";
 import path from "path";
 import QRCode from "qrcode";
+import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
+import type { OrganizationId } from "@shared/branchAccess";
+import { signPatientQrToken, verifyPatientQrToken } from "./qrTokenService";
 
 export interface PatientCardInput {
   id: string;
@@ -9,20 +12,74 @@ export interface PatientCardInput {
   phone: string;
   address: string;
   cardId: string;
+  /** Signed patient QR token — same payload as the in-app “Show QR Code” button. */
   qrToken: string;
 }
 
 export interface PatientCardFiles {
   svg: Buffer;
   png: Buffer;
+  pdf: Buffer;
 }
 
-type QrLayout = { x: number; y: number; size: number };
+/** ISO/IEC 7810 ID-1 (credit card) landscape — matches the Canva template aspect ratio. */
+const CARD_WIDTH_MM = 85.6;
+const CARD_HEIGHT_MM = 53.98;
 
-const DEFAULT_QR: QrLayout = { x: 886, y: 292, size: 160 };
+type FieldLayout = {
+  x: number;
+  y: number;
+  size: number;
+  bold?: boolean;
+  color: string;
+};
 
-/** ~300 DPI rasterization for a 1152px-wide card. */
-const PNG_OUTPUT_WIDTH = 4800;
+type CardLayoutConfig = {
+  viewBox: { width: number; height: number };
+  outputWidth: number;
+  fields: {
+    name: FieldLayout;
+    id: FieldLayout;
+    phone: FieldLayout;
+    address: FieldLayout;
+    cardId: FieldLayout;
+  };
+  qr: {
+    x: number;
+    y: number;
+    size: number;
+    margin: number;
+    box?: { x: number; y: number; width: number; height: number };
+    padding?: number;
+    paddingTop?: number;
+    paddingLeft?: number;
+    paddingRight?: number;
+    paddingBottom?: number;
+  };
+};
+
+const DEFAULT_LAYOUT: CardLayoutConfig = {
+  viewBox: { width: 1152, height: 728.25 },
+  outputWidth: 4800,
+  fields: {
+    name: { x: 138, y: 314, size: 22, bold: true, color: "#1a3a6e" },
+    id: { x: 310, y: 388, size: 17, color: "#1a3a6e" },
+    phone: { x: 310, y: 453, size: 17, color: "#1a3a6e" },
+    address: { x: 310, y: 513, size: 17, color: "#1a3a6e" },
+    cardId: { x: 792, y: 682, size: 12, color: "#ffffff" },
+  },
+  qr: {
+    x: 854,
+    y: 276,
+    size: 164,
+    margin: 0,
+    box: { x: 868, y: 286, width: 154, height: 154 },
+    paddingTop: 3,
+    paddingLeft: 3,
+    paddingRight: 3,
+    paddingBottom: 3,
+  },
+};
 
 function escapeXml(value: string): string {
   return value
@@ -35,96 +92,111 @@ function escapeXml(value: string): string {
 async function resolveProjectRoot(): Promise<string> {
   for (const root of [process.cwd(), path.join(process.cwd(), "..")]) {
     try {
-      await fs.access(path.join(root, "template.svg"));
+      await fs.access(path.join(root, "assets", "id-card-background.png"));
       return root;
     } catch {
       // try next
     }
   }
-  throw new Error("template.svg not found in the project root.");
+  throw new Error("assets/id-card-background.png not found in the project root.");
 }
 
-async function loadQrLayout(root: string): Promise<QrLayout> {
+async function loadLayout(root: string): Promise<CardLayoutConfig> {
   try {
     const raw = await fs.readFile(path.join(root, "id-card-layout.json"), "utf8");
-    const json = JSON.parse(raw) as { qr?: Partial<QrLayout> };
-    return { ...DEFAULT_QR, ...json.qr };
+    const json = JSON.parse(raw) as Partial<CardLayoutConfig>;
+    return {
+      ...DEFAULT_LAYOUT,
+      ...json,
+      viewBox: { ...DEFAULT_LAYOUT.viewBox, ...json.viewBox },
+      fields: { ...DEFAULT_LAYOUT.fields, ...json.fields },
+      qr: { ...DEFAULT_LAYOUT.qr, ...json.qr },
+    };
   } catch {
-    return DEFAULT_QR;
+    return DEFAULT_LAYOUT;
   }
 }
 
-async function loadBackgroundDataUrl(root: string): Promise<string | null> {
-  const bgPath = path.join(root, "assets", "id-card-background.png");
-  try {
-    const bg = await fs.readFile(bgPath);
-    return `data:image/png;base64,${bg.toString("base64")}`;
-  } catch {
-    return null;
+/** Center QR inside the Canva box; asymmetric padding corrects visual offset in the frame. */
+function resolveQrRect(layout: CardLayoutConfig): { x: number; y: number; size: number; margin: number } {
+  const { qr } = layout;
+  if (qr.box) {
+    const fallback = qr.padding ?? 8;
+    const pt = qr.paddingTop ?? fallback;
+    const pl = qr.paddingLeft ?? fallback;
+    const pr = qr.paddingRight ?? fallback;
+    const pb = qr.paddingBottom ?? fallback;
+    const innerW = qr.box.width - pl - pr;
+    const innerH = qr.box.height - pt - pb;
+    const size = Math.min(innerW, innerH);
+    return {
+      x: qr.box.x + pl + (innerW - size) / 2,
+      y: qr.box.y + pt + (innerH - size) / 2,
+      size,
+      margin: qr.margin ?? 0,
+    };
   }
+  return { x: qr.x, y: qr.y, size: qr.size, margin: qr.margin };
 }
 
-async function generateQrDataUrl(qrToken: string): Promise<string> {
-  return QRCode.toDataURL(qrToken, {
-    errorCorrectionLevel: "H",
-    margin: 1,
-    width: 400,
+function textNode(field: FieldLayout, value: string): string {
+  const weight = field.bold ? ` font-weight="bold"` : "";
+  return `<text x="${field.x}" y="${field.y}" font-family="DejaVu Sans, Arial, Helvetica, sans-serif" font-size="${field.size}"${weight} fill="${field.color}">${escapeXml(value)}</text>`;
+}
+
+function buildTextOverlaySvg(patient: PatientCardInput, layout: CardLayoutConfig): string {
+  const { viewBox, fields } = layout;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${viewBox.width}" height="${viewBox.height}" viewBox="0 0 ${viewBox.width} ${viewBox.height}">
+  <g id="patient-fields">
+    ${textNode(fields.name, patient.name)}
+    ${textNode(fields.id, patient.id)}
+    ${textNode(fields.phone, patient.phone)}
+    ${textNode(fields.address, patient.address)}
+    ${textNode(fields.cardId, patient.cardId)}
+  </g>
+</svg>`;
+}
+
+function renderSvgWidth(svg: string, width: number): Buffer {
+  const resvg = new Resvg(svg, {
+    fitTo: { mode: "width", value: width },
+    font: { loadSystemFonts: true },
   });
+  return Buffer.from(resvg.render().asPng());
 }
 
-/** Remove SVG/XML snippet text accidentally pasted into the Canva QR box. */
-export function stripCanvaQrSnippetText(svg: string): string {
-  return svg.replace(/<text\b[^>]*>([\s\S]*?)<\/text>/gi, (match, inner: string) => {
-    const compact = inner.replace(/\s+/g, " ");
-    if (/<\s*(rect|image|svg)\b/i.test(compact)) return "";
-    if (/qrCode|QR_PLACEHOLDER/i.test(compact) && /<\s*(rect|image)/i.test(compact)) return "";
-    if (/xlink:href|xmlns=|<\?xml/i.test(compact)) return "";
-    return match;
+/** Same QR settings as the in-app “Show QR Code” dialog, scaled to the card box. */
+async function generateQrPng(qrToken: string, pixelSize: number, margin: number): Promise<Buffer> {
+  const raw = await QRCode.toBuffer(qrToken, {
+    type: "png",
+    width: pixelSize,
+    margin,
+    errorCorrectionLevel: "M",
+    color: { dark: "#000000ff", light: "#ffffffff" },
   });
+  // Remove quiet-zone whitespace so the modules fill the Canva frame evenly.
+  return sharp(raw).trim().resize(pixelSize, pixelSize, { fit: "fill" }).png().toBuffer();
 }
 
-function fillPatientFields(svg: string, patient: PatientCardInput): string {
-  return svg
-    .replace(/\{patient\.name\}/g, escapeXml(patient.name))
-    .replace(/\{patient\.id\}/g, escapeXml(patient.id))
-    .replace(/\{patient\.phone\}/g, escapeXml(patient.phone))
-    .replace(/\{patient\.address\}/g, escapeXml(patient.address))
-    .replace(/\{patient\.cardId\}/g, escapeXml(patient.cardId));
-}
-
-function injectQrImage(svg: string, qrDataUrl: string, layout: QrLayout): string {
-  let out = svg
-    .replace(/<text\b[^>]*>\s*\{\{QR_PLACEHOLDER\}\}\s*<\/text>/gi, "")
-    .replace(/\{\{QR_PLACEHOLDER\}\}/g, qrDataUrl);
-
-  if (out.includes(qrDataUrl)) {
-    return out;
-  }
-
-  const slot = `<g id="patient-qr-slot">
-  <rect x="${layout.x - 4}" y="${layout.y - 4}" width="${layout.size + 8}" height="${layout.size + 8}" fill="#ffffff"/>
-  <image id="patient-qr" x="${layout.x}" y="${layout.y}" width="${layout.size}" height="${layout.size}" xlink:href="${qrDataUrl}" href="${qrDataUrl}"/>
-</g>`;
-
-  return out.replace(/<\/svg>\s*$/i, `  ${slot}\n</svg>`);
-}
-
-function fillTemplate(
-  svgTemplate: string,
-  patient: PatientCardInput,
-  qrDataUrl: string,
-  backgroundDataUrl: string | null,
-  qrLayout: QrLayout
+/** Reuse the dialog QR token when valid; otherwise mint a fresh signed token. */
+export function resolvePatientQrTokenForCard(
+  provided: string | undefined,
+  expectedPatientId: string,
+  organizationId: OrganizationId
 ): string {
-  let svg = stripCanvaQrSnippetText(svgTemplate);
-
-  if (backgroundDataUrl && svg.includes("{{BACKGROUND_IMAGE}}")) {
-    svg = svg.replaceAll("{{BACKGROUND_IMAGE}}", backgroundDataUrl);
+  const raw = String(provided ?? "").trim();
+  if (raw) {
+    const verified = verifyPatientQrToken(raw);
+    if (
+      verified.ok &&
+      verified.payload?.patientId === expectedPatientId &&
+      verified.payload?.organizationId === organizationId
+    ) {
+      return raw;
+    }
   }
-
-  svg = fillPatientFields(svg, patient);
-  svg = injectQrImage(svg, qrDataUrl, qrLayout);
-  return svg;
+  return signPatientQrToken({ patientId: expectedPatientId, organizationId });
 }
 
 export function generateCardId(seed: string): string {
@@ -142,35 +214,78 @@ export function generateCardId(seed: string): string {
   return `MX-${base}-${hash}`;
 }
 
-function svgToPng(svgContent: string): Buffer {
-  const resvg = new Resvg(svgContent, {
-    fitTo: { mode: "width", value: PNG_OUTPUT_WIDTH },
-    font: { loadSystemFonts: true },
-  });
-  return Buffer.from(resvg.render().asPng());
-}
-
+/**
+ * Pillow-style compositing: background PNG + text overlay + patient QR stamped
+ * at exact pixel coordinates so the code fills the Canva box.
+ */
 export async function generatePatientCardBuffers(
   patient: PatientCardInput
 ): Promise<PatientCardFiles> {
   const root = await resolveProjectRoot();
-  const templatePath = path.join(root, "template.svg");
-  const [svgTemplate, qrLayout] = await Promise.all([
-    fs.readFile(templatePath, "utf8"),
-    loadQrLayout(root),
-  ]);
+  const layout = await loadLayout(root);
+  const bgPath = path.join(root, "assets", "id-card-background.png");
+  const background = await fs.readFile(bgPath);
 
-  const backgroundDataUrl = svgTemplate.includes("{{BACKGROUND_IMAGE}}")
-    ? await loadBackgroundDataUrl(root)
-    : null;
+  const outputWidth = layout.outputWidth;
+  const bgMeta = await sharp(background).metadata();
+  const outputHeight = Math.round(outputWidth * ((bgMeta.height ?? 1) / (bgMeta.width ?? 1)));
 
-  if (svgTemplate.includes("{{BACKGROUND_IMAGE}}") && !backgroundDataUrl) {
-    throw new Error("template.svg uses {{BACKGROUND_IMAGE}} but assets/id-card-background.png is missing.");
-  }
+  const basePng = await sharp(background).resize(outputWidth, outputHeight).png().toBuffer();
+  const textPng = renderSvgWidth(buildTextOverlaySvg(patient, layout), outputWidth);
 
-  const qrDataUrl = await generateQrDataUrl(patient.qrToken);
-  const svgContent = fillTemplate(svgTemplate, patient, qrDataUrl, backgroundDataUrl, qrLayout);
-  const svg = Buffer.from(svgContent, "utf8");
-  const png = svgToPng(svgContent);
-  return { svg, png };
+  const scale = outputWidth / layout.viewBox.width;
+  const qrRect = resolveQrRect(layout);
+  const qrSize = Math.round(qrRect.size * scale);
+  const qrLeft = Math.round(qrRect.x * scale);
+  const qrTop = Math.round(qrRect.y * scale);
+  const qrPng = await generateQrPng(patient.qrToken, qrSize, qrRect.margin);
+
+  const png = await sharp(basePng)
+    .composite([
+      { input: textPng, top: 0, left: 0 },
+      { input: qrPng, top: qrTop, left: qrLeft },
+    ])
+    .png()
+    .toBuffer();
+
+  const svg = Buffer.from(
+    `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth}" height="${outputHeight}" viewBox="0 0 ${layout.viewBox.width} ${layout.viewBox.height}">
+  <!-- Generated via sharp composite; see id-card-layout.json -->
+  ${buildTextOverlaySvg(patient, layout)}
+</svg>`,
+    "utf8"
+  );
+
+  return { svg, png, pdf: await pngToIdCardPdfBuffer(png) };
+}
+
+/** Embed the rendered card raster in a print-ready PDF (ID-1 landscape). */
+export async function pngToIdCardPdfBuffer(png: Buffer): Promise<Buffer> {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({
+    unit: "mm",
+    format: [CARD_WIDTH_MM, CARD_HEIGHT_MM],
+    compress: true,
+  });
+  const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
+  doc.addImage(dataUrl, "PNG", 0, 0, CARD_WIDTH_MM, CARD_HEIGHT_MM, undefined, "FAST");
+  return Buffer.from(doc.output("arraybuffer"));
+}
+
+/** Printable patient ID card as PDF only (used by the download API). */
+export async function generatePatientCardPdf(patient: PatientCardInput): Promise<Buffer> {
+  const { pdf } = await generatePatientCardBuffers(patient);
+  return pdf;
+}
+
+/** @deprecated Canva cleanup helper — kept for prepare-canva-template.mjs */
+export function stripCanvaQrSnippetText(svg: string): string {
+  return svg.replace(/<text\b[^>]*>([\s\S]*?)<\/text>/gi, (match, inner: string) => {
+    const compact = inner.replace(/\s+/g, " ");
+    if (/<\s*(rect|image|svg)\b/i.test(compact)) return "";
+    if (/qrCode|QR_PLACEHOLDER/i.test(compact) && /<\s*(rect|image)/i.test(compact)) return "";
+    if (/xlink:href|xmlns=|<\?xml/i.test(compact)) return "";
+    return match;
+  });
 }

@@ -32,7 +32,7 @@ interface Props {
  * Shared "Show QR Code" + "Download ID Card" actions for any patient profile
  * (out-patient or in-patient). The QR encodes a server-signed token (never the raw
  * id) so a scanned/printed card can't be forged across organizations. The ID card is
- * a print-ready PNG generated from template.svg on the server.
+ * a print-ready PDF generated on the server.
  */
 export function PatientCredentials({ kind, id, patientName, patientCode }: Props) {
   const { toast } = useToast();
@@ -69,10 +69,17 @@ export function PatientCredentials({ kind, id, patientName, patientCode }: Props
   const handleDownloadIdCard = async () => {
     setDownloading(true);
     try {
+      setActive(true);
+      let qrToken = token;
+      if (!qrToken) {
+        const refreshed = await tokenQuery.refetch();
+        qrToken = refreshed.data?.token;
+      }
       await downloadPatientIdCard({
         kind,
         recordId: id,
         patientCode: patientCode ?? tokenQuery.data?.patientCode ?? null,
+        qrToken: qrToken ?? null,
       });
     } catch (e) {
       toast({
