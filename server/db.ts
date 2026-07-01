@@ -230,6 +230,22 @@ export async function ensureSqliteSchemaCompatibility() {
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
 export async function ensurePostgresSchemaCompatibility() {
   if (!usePostgres) return;
+
+  // Ensure columns required by the current Drizzle schema exist before any query
+  // that selects full branch rows (migrations and seed both touch branches early).
+  try {
+    await (db as { execute: (q: ReturnType<typeof sql.raw>) => Promise<unknown> }).execute(
+      sql.raw(
+        "ALTER TABLE branches ADD COLUMN IF NOT EXISTS verified_by_admin BOOLEAN NOT NULL DEFAULT FALSE",
+      ),
+    );
+  } catch (error: unknown) {
+    const msg = String((error as Error)?.message ?? "");
+    if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
+      console.warn("[db] branches.verified_by_admin ensure failed:", msg);
+    }
+  }
+
   const { runPart2SchemaMigration } = await import("./migrations/part2SchemaMigration");
   await runPart2SchemaMigration();
   const { runPart5SchemaMigration } = await import("./migrations/part5SchemaMigration");
@@ -276,6 +292,10 @@ export async function ensurePostgresSchemaCompatibility() {
   await runPart25SalaryLineItems();
   const { runPart26BranchVerification } = await import("./migrations/part26BranchVerification");
   await runPart26BranchVerification();
-  const { runPart27PatientDataVersion } = await import("./migrations/part27PatientDataVersion");
-  await runPart27PatientDataVersion();
+  try {
+    const { runPart27PatientDataVersion } = await import("./migrations/part27PatientDataVersion");
+    await runPart27PatientDataVersion();
+  } catch (error) {
+    console.error("[db] Part 27 patient data migration failed (non-fatal):", error);
+  }
 }

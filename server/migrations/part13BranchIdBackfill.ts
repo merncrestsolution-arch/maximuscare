@@ -6,7 +6,7 @@ import { db } from "../db";
 import { storage } from "../storage";
 import { ENTERPRISE_BRANCHES, normalizeBranchName } from "@shared/branches";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
 
 async function run(statement: string) {
   const query = sql.raw(statement);

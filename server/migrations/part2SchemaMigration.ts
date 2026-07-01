@@ -6,7 +6,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
 
 async function run(statement: string) {
   const query = sql.raw(statement);
@@ -83,6 +83,11 @@ export async function runPart2SchemaMigration() {
   // ── branches ──
   await addColumn("branches", "branch_name", "TEXT");
   await addColumn("branches", "address", "TEXT");
+  await addColumn(
+    "branches",
+    "verified_by_admin",
+    usePostgres ? "BOOLEAN NOT NULL DEFAULT FALSE" : "INTEGER NOT NULL DEFAULT 0",
+  );
 
   // ── staff_fines (fines) ──
   await addColumn("staff_fines", "updated_by_staff_id", "TEXT");

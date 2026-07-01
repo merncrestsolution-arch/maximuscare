@@ -30,6 +30,10 @@ const columns: Array<[string, string, "true" | "false"]> = [
   ["appointments", "reminder_sent", "false"],
 ];
 
+const newColumns: Array<[string, string, string]> = [
+  ["branches", "verified_by_admin", "BOOLEAN NOT NULL DEFAULT FALSE"],
+];
+
 async function run() {
   const pool = new pg.Pool({
     connectionString: url,
@@ -37,6 +41,21 @@ async function run() {
   });
 
   try {
+    for (const [table, column, definition] of newColumns) {
+      try {
+        const { rows } = await pool.query(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_name = $1 AND column_name = $2`,
+          [table, column],
+        );
+        if (rows.length > 0) continue;
+        await pool.query(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`);
+        console.log(`[db-fix] added ${table}.${column}`);
+      } catch (err) {
+        console.warn(`[db-fix] skip add ${table}.${column}:`, (err as Error).message);
+      }
+    }
+
     for (const [table, column, def] of columns) {
       try {
         // Skip if the column is already boolean (keeps logs clean and avoids churn).

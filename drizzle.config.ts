@@ -2,7 +2,7 @@ import "dotenv/config";
 import path from "path";
 import { defineConfig } from "drizzle-kit";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgresql");
+const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
 
 export default defineConfig({
   schema: usePostgres ? "./shared/schema-pg.ts" : "./shared/schema-sqlite.ts",
