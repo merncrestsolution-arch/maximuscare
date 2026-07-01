@@ -1798,6 +1798,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seedEnterpriseBranches(): Promise<void> {
+    try {
+      if (usePostgres) {
+        await runRaw(
+          sql.raw(
+            "ALTER TABLE branches ADD COLUMN IF NOT EXISTS verified_by_admin BOOLEAN NOT NULL DEFAULT FALSE",
+          ),
+        );
+      } else {
+        await runRaw(
+          sql.raw(
+            "ALTER TABLE branches ADD COLUMN verified_by_admin INTEGER NOT NULL DEFAULT 0",
+          ),
+        );
+      }
+    } catch (error: unknown) {
+      const msg = String((error as Error)?.message ?? "");
+      if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
+        throw error;
+      }
+    }
+
     const { ENTERPRISE_BRANCHES, LEGACY_BRANCH_ALIASES, normalizeBranchName } = await import("@shared/branches");
 
     for (const b of ENTERPRISE_BRANCHES) {

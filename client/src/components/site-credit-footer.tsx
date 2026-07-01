@@ -69,7 +69,6 @@ export function SiteCreditFooter() {
     try {
       buildDateLabel = new Intl.DateTimeFormat("en-GB", {
         dateStyle: "medium",
-        timeStyle: "short",
       }).format(new Date(buildDateRaw));
     } catch {
       buildDateLabel = buildDateRaw;
@@ -81,18 +80,18 @@ export function SiteCreditFooter() {
       className="flex flex-col items-center justify-center gap-1.5 px-3 pb-safe select-none"
       aria-hidden
     >
-      <div className="inline-flex max-w-[min(100%,20rem)] flex-wrap items-center justify-center gap-x-1.5 gap-y-1">
-        <span className="inline-flex max-w-full items-center gap-0.5 whitespace-nowrap rounded-full border border-primary/30 bg-gradient-to-r from-primary/[0.12] via-accent/80 to-secondary/[0.14] px-1.5 py-0.5 text-[10px] font-medium tabular-nums shadow-sm ring-1 ring-primary/10">
+      <div className="inline-flex w-full max-w-[min(100%,20rem)] flex-col items-center justify-center gap-1 sm:flex-row">
+        <span className="inline-flex max-w-full items-center gap-1 whitespace-nowrap rounded-full border border-primary/30 bg-gradient-to-r from-primary/[0.12] via-accent/80 to-secondary/[0.14] px-2 py-0.5 text-[9px] font-medium tabular-nums shadow-sm ring-1 ring-primary/10">
           <CrestSunriseMark gradientId={gradPill} className="h-3 w-3" />
-          <span className="text-primary">Last Updated</span>
+          <span className="text-primary">Updated</span>
           <span className="text-muted-foreground/45" aria-hidden>
             ·
           </span>
           <span className="text-secondary">{buildDateLabel}</span>
         </span>
-        <span className="inline-flex max-w-full items-center gap-0.5 whitespace-nowrap rounded-full border border-primary/30 bg-gradient-to-r from-primary/[0.12] via-accent/80 to-secondary/[0.14] px-1.5 py-0.5 text-[10px] font-medium tabular-nums shadow-sm ring-1 ring-primary/10">
+        <span className="inline-flex max-w-full items-center gap-1 whitespace-nowrap rounded-full border border-primary/30 bg-gradient-to-r from-primary/[0.12] via-accent/80 to-secondary/[0.14] px-2 py-0.5 text-[9px] font-medium tabular-nums shadow-sm ring-1 ring-primary/10">
           <CrestSunriseMark gradientId={gradPill} className="h-3 w-3" />
-          <span className="text-primary">App Version</span>
+          <span className="text-primary">Version</span>
           <span className="text-muted-foreground/45" aria-hidden>
             ·
           </span>

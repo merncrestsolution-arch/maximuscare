@@ -12,7 +12,7 @@ export interface AppRelease {
 }
 
 export const APP_RELEASE: AppRelease = {
-  version: "1.5.2",
+  version: "1.2.4",
   title: "App Updated — What's New",
   highlights: [
     "Branch picker: close (X) button added on the workspace drawer.",
