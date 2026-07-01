@@ -34,6 +34,14 @@ export function splitReAdmissionPayments(
   };
 }
 
+/** Total still owed across the current episode plus any prior-admission pending balance. */
+export function computeTotalPendingBalance(
+  currentBalanceDue: number,
+  priorPendingBalance: number,
+): number {
+  return Math.max(0, currentBalanceDue + priorPendingBalance);
+}
+
 export function computeDeductionAmount(
   subtotal: number,
   deductionType: "fixed" | "percentage" | null | undefined,

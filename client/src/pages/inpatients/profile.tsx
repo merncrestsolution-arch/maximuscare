@@ -15,6 +15,7 @@ import { format, differenceInDays } from "date-fns";
 import { formatMoney } from "@/lib/reportDatePresets";
 import {
   computeDeductionAmount,
+  computeTotalPendingBalance,
   isCarriedForwardExpense,
   splitReAdmissionPayments,
   sumCarriedForwardAmounts,
@@ -713,6 +714,8 @@ export default function InPatientProfilePage() {
   const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode, index) => {
     return sum + getPriorEpisodeBilling(episode, index).pending;
   }, hasPriorEpisodes ? 0 : priorBalanceDue);
+  const totalBalanceDue = computeTotalPendingBalance(currentBalanceDue, totalPriorPendingBalance);
+  const hasPriorPendingInSummary = totalPriorPendingBalance > 0;
   // Discharge balance is recomputed from the snapshot grand total minus ALL recorded
   // payments so the Discharge Summary reconciles with the live Billing Summary even
   // when payments are added after the discharge was created.
@@ -795,7 +798,13 @@ export default function InPatientProfilePage() {
           : []),
         { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(currentGrandTotal) },
         { item: "Total Paid", quantity: "-", rate: "-", amount: formatMoney(currentEpisodePaid) },
-        { item: "Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) },
+        ...(hasPriorPendingInSummary
+          ? [
+              { item: "Current Episode Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) },
+              { item: "Previous Admission Due", quantity: "-", rate: "-", amount: formatMoney(totalPriorPendingBalance) },
+              { item: "Total Balance Due", quantity: "-", rate: "-", amount: formatMoney(totalBalanceDue) },
+            ]
+          : [{ item: "Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) }]),
       ];
 
   return (
@@ -1214,20 +1223,37 @@ export default function InPatientProfilePage() {
                       tone="success"
                       testId="text-total-paid"
                     />
+                    {hasPriorPendingInSummary && (
+                      <BillingLine
+                        label="Previous Admission Due"
+                        value={`LKR ${formatMoney(totalPriorPendingBalance)}`}
+                        tone="danger"
+                        testId="text-prior-balance-due-inline"
+                      />
+                    )}
                     <BillingLine
-                      label="Balance Due"
+                      label={hasPriorPendingInSummary ? "Current Episode Balance Due" : "Balance Due"}
                       value={`LKR ${formatMoney(currentBalanceDue)}`}
                       tone={currentBalanceDue > 0 ? "danger" : "success"}
-                      emphasized
+                      emphasized={!hasPriorPendingInSummary}
                       testId="text-balance-due"
                     />
+                    {hasPriorPendingInSummary && (
+                      <BillingLine
+                        label="Total Balance Due"
+                        value={`LKR ${formatMoney(totalBalanceDue)}`}
+                        tone={totalBalanceDue > 0 ? "danger" : "success"}
+                        emphasized
+                        testId="text-total-balance-due"
+                      />
+                    )}
                   </>
                 )}
 
-                {showBillingHistoryToggle && !showingPreviousBilling && totalPriorPendingBalance > 0 && (
+                {showBillingHistoryToggle && !showingPreviousBilling && hasPriorPendingInSummary && (
                   <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="text-prior-balance-note">
-                    Previous admission pending balance: LKR {formatMoney(totalPriorPendingBalance)}.
-                    Switch to <span className="font-semibold">Previous</span> to view details.
+                    Includes LKR {formatMoney(totalPriorPendingBalance)} from previous admission(s).
+                    Switch to <span className="font-semibold">Previous</span> for a full breakdown.
                   </p>
                 )}
               </div>

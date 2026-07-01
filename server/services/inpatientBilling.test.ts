@@ -3,6 +3,7 @@ import {
   isCarriedForwardExpense,
   splitReAdmissionPayments,
   sumCarriedForwardAmounts,
+  computeTotalPendingBalance,
 } from "../../shared/inpatientBilling";
 
 describe("inpatientBilling", () => {
@@ -42,5 +43,10 @@ describe("inpatientBilling", () => {
       currentBalanceDue: 0,
       priorBalanceDue: 0,
     });
+  });
+
+  it("totals current and prior pending balance", () => {
+    expect(computeTotalPendingBalance(2000, 1000)).toBe(3000);
+    expect(computeTotalPendingBalance(0, 0)).toBe(0);
   });
 });
