@@ -43,9 +43,13 @@ export async function ensurePostgresColumn(
 
 /** Critical columns required by the current Drizzle schema before any branch query. */
 export async function ensurePostgresBootColumns(): Promise<void> {
-  await ensurePostgresColumn(
-    "branches",
-    "verified_by_admin",
-    "BOOLEAN NOT NULL DEFAULT FALSE",
-  );
+  try {
+    await ensurePostgresColumn(
+      "branches",
+      "verified_by_admin",
+      "BOOLEAN NOT NULL DEFAULT FALSE",
+    );
+  } catch (error) {
+    console.warn("[pg-bootstrap] non-fatal column ensure failed:", error);
+  }
 }

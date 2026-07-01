@@ -46,15 +46,15 @@ async function ensureBranchVerificationColumn() {
     return;
   }
   branchVerificationReady = (async () => {
-    if (usePostgres) {
-      await ensurePostgresColumn(
-        "branches",
-        "verified_by_admin",
-        "BOOLEAN NOT NULL DEFAULT FALSE",
-      );
-      return;
-    }
     try {
+      if (usePostgres) {
+        await ensurePostgresColumn(
+          "branches",
+          "verified_by_admin",
+          "BOOLEAN NOT NULL DEFAULT FALSE",
+        );
+        return;
+      }
       await runRaw(
         sql.raw(
           "ALTER TABLE branches ADD COLUMN verified_by_admin INTEGER NOT NULL DEFAULT 0",
@@ -62,9 +62,8 @@ async function ensureBranchVerificationColumn() {
       );
     } catch (error: unknown) {
       const msg = String((error as Error)?.message ?? "");
-      if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
-        throw error;
-      }
+      if (msg.includes("duplicate column") || msg.includes("already exists")) return;
+      console.warn("[storage] verified_by_admin ensure skipped:", msg);
     }
   })();
   await branchVerificationReady;
@@ -117,17 +116,22 @@ async function fetchBranchesRaw(opts: {
   return rows.map((row) => mapBranchRow({ ...row, verifiedByAdmin: false }));
 }
 
+function withDefaultVerifiedFlag(rows: Omit<Branch, "verifiedByAdmin">[]): Branch[] {
+  return rows.map((row) => ({ ...row, verifiedByAdmin: false }));
+}
+
 async function fetchBranches(opts: {
   name?: string;
   activeOnly?: boolean;
 } = {}): Promise<Branch[]> {
-  await ensureBranchVerificationColumn();
+  void ensureBranchVerificationColumn();
+
   try {
     const conditions = [];
     if (opts.activeOnly) conditions.push(eq(branches.isActive, true));
     if (opts.name) conditions.push(eq(branches.name, opts.name));
 
-    let query = db.select().from(branches);
+    let query = db.select(branchCoreSelect()).from(branches);
     if (conditions.length === 1) {
       query = query.where(conditions[0]) as typeof query;
     } else if (conditions.length > 1) {
@@ -139,10 +143,9 @@ async function fetchBranches(opts: {
     if (opts.name) {
       query = query.limit(1) as typeof query;
     }
-    return await query;
+    return withDefaultVerifiedFlag(await query);
   } catch (error: unknown) {
-    const msg = String((error as Error)?.message ?? "");
-    if (!msg.includes("verified_by_admin")) throw error;
+    console.warn("[storage] branch select fallback:", String((error as Error)?.message ?? error));
     return fetchBranchesRaw(opts);
   }
 }
@@ -181,6 +184,19 @@ const {
   userBranchPermissions,
   staffSalaryAdjustments,
 } = schema;
+
+function branchCoreSelect() {
+  return {
+    id: branches.id,
+    name: branches.name,
+    branchName: branches.branchName,
+    code: branches.code,
+    address: branches.address,
+    isActive: branches.isActive,
+    createdAt: branches.createdAt,
+    updatedAt: branches.updatedAt,
+  };
+}
 
 import type {
   Staff,
@@ -1884,17 +1900,44 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createBranch(data: InsertBranch): Promise<Branch> {
-    const result = await db.insert(branches).values(data).returning();
-    return result[0];
+    const result = await db
+      .insert(branches)
+      .values(data)
+      .returning(branchCoreSelect());
+    return { ...result[0], verifiedByAdmin: false };
   }
 
   async updateBranch(id: string, data: UpdateBranch): Promise<Branch | undefined> {
-    const result = await db
-      .update(branches)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(branches.id, id))
-      .returning();
-    return result[0];
+    const patch = { ...data, updatedAt: new Date() };
+    if (!usePostgres && "verifiedByAdmin" in patch) {
+      // SQLite path may not have the column yet on older files.
+      delete (patch as { verifiedByAdmin?: boolean }).verifiedByAdmin;
+    }
+    try {
+      const result = await db
+        .update(branches)
+        .set(patch)
+        .where(eq(branches.id, id))
+        .returning(branchCoreSelect());
+      if (!result[0]) return undefined;
+      return {
+        ...result[0],
+        verifiedByAdmin: Boolean((data as { verifiedByAdmin?: boolean }).verifiedByAdmin ?? false),
+      };
+    } catch (error: unknown) {
+      const msg = String((error as Error)?.message ?? "");
+      if (!msg.includes("verified_by_admin")) throw error;
+      const { verifiedByAdmin: _ignored, ...safePatch } = patch as UpdateBranch & {
+        verifiedByAdmin?: boolean;
+      };
+      const result = await db
+        .update(branches)
+        .set(safePatch)
+        .where(eq(branches.id, id))
+        .returning(branchCoreSelect());
+      if (!result[0]) return undefined;
+      return { ...result[0], verifiedByAdmin: false };
+    }
   }
 
   async deleteBranch(id: string): Promise<boolean> {
