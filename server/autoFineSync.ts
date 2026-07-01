@@ -1,9 +1,10 @@
 import type { DatabaseStorage } from "./storage";
+import { ensureSalaryPeriodRecord, salaryPeriodForDate } from "./services/salaryService";
 
 /** Roles that conduct billable sessions — only they are subject to the “before noon” auto fine. */
 export function isAutoFineSessionRole(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
-  return r === "Physiotherapist" || r === "Staff" || r === "Manager";
+  return r === "Physiotherapist" || r === "Staff";
 }
 
 /**
@@ -31,5 +32,7 @@ export async function syncAutoFineForStaffDate(
     await storage.deleteAutoFineForStaffDate(staffId, fineDate);
     return;
   }
-  await storage.ensureAutoFineForStaffDate(staffId, staff.name, fineDate);
+  const { periodStart, periodEnd } = salaryPeriodForDate(fineDate);
+  const salary = await ensureSalaryPeriodRecord(storage, staffId, periodStart, periodEnd);
+  await storage.ensureAutoFineForStaffDate(staffId, staff.name, fineDate, salary.id);
 }

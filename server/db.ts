@@ -219,6 +219,12 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart23SessionBranchBackfill();
   const { runPart24AdmissionSource } = await import("./migrations/part24AdmissionSource");
   await runPart24AdmissionSource();
+  const { runPart25SalaryLineItems } = await import("./migrations/part25SalaryLineItems");
+  await runPart25SalaryLineItems();
+  const { runPart26BranchVerification } = await import("./migrations/part26BranchVerification");
+  await runPart26BranchVerification();
+  const { runPart27PatientDataVersion } = await import("./migrations/part27PatientDataVersion");
+  await runPart27PatientDataVersion();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -266,4 +272,10 @@ export async function ensurePostgresSchemaCompatibility() {
   await runPart23SessionBranchBackfill();
   const { runPart24AdmissionSource } = await import("./migrations/part24AdmissionSource");
   await runPart24AdmissionSource();
+  const { runPart25SalaryLineItems } = await import("./migrations/part25SalaryLineItems");
+  await runPart25SalaryLineItems();
+  const { runPart26BranchVerification } = await import("./migrations/part26BranchVerification");
+  await runPart26BranchVerification();
+  const { runPart27PatientDataVersion } = await import("./migrations/part27PatientDataVersion");
+  await runPart27PatientDataVersion();
 }

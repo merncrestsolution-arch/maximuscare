@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import { readFileSync } from "fs";
 
 // Use process.cwd() for build (reliable when run from project root); fallback for dev
 const projectRoot = process.cwd();
@@ -11,6 +12,11 @@ const distClient = path.join(projectRoot, "dist", "client");
 // Unique identifier for this build. Prefer the Vercel commit SHA so each
 // deployment produces a new value; fall back to a timestamp for local builds.
 const buildId = process.env.VERCEL_GIT_COMMIT_SHA || Date.now().toString();
+const packageJson = JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf-8")) as {
+  version?: string;
+};
+const displayVersion = process.env.APP_VERSION || packageJson.version || buildId;
+const buildTimestamp = new Date().toISOString();
 
 import { execSync } from "child_process";
 
@@ -45,7 +51,8 @@ function appVersionPlugin(): Plugin {
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(buildId),
-    __APP_BUILD_DATE__: JSON.stringify(new Date().toISOString().split('T')[0].replace(/-/g, '/')),
+    __APP_DISPLAY_VERSION__: JSON.stringify(displayVersion),
+    __APP_BUILD_DATE__: JSON.stringify(buildTimestamp),
   },
   plugins: [react(), tailwindcss(), appVersionPlugin()],
   resolve: {

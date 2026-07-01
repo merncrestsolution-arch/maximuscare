@@ -70,7 +70,9 @@ export function SalaryDetailSection({ staffId, staffName, canEdit }: Props) {
   };
 
   const otherDecrements =
-    (Number(s?.staffDeductionsTotal ?? 0)) + (Number(s?.otherAdjustments ?? 0) < 0 ? Math.abs(Number(s?.otherAdjustments)) : 0);
+    Number(s?.staffDeductionsTotal ?? 0) +
+    Number(s?.decrementsTotal ?? 0) +
+    (Number(s?.otherAdjustments ?? 0) < 0 ? Math.abs(Number(s?.otherAdjustments)) : 0);
   const otherCredits = Number(s?.otherAdjustments ?? 0) > 0 ? Number(s?.otherAdjustments) : 0;
 
   const rows = useMemo(() => {
@@ -100,6 +102,9 @@ export function SalaryDetailSection({ staffId, staffName, canEdit }: Props) {
       { label: "Fines", calc: "", amount: `-${formatLkr(s.finesTotal)}` },
       { label: "Other Decrements", calc: "", amount: `-${formatLkr(otherDecrements)}` },
     ];
+    if (Number(s?.additionsTotal ?? 0) > 0) {
+      out.push({ label: "Manual Additions", calc: "", amount: formatLkr(s.additionsTotal) });
+    }
     if (otherCredits > 0) out.push({ label: "Other Additions", calc: "", amount: formatLkr(otherCredits) });
     out.push({ label: "Final Salary", calc: "", amount: formatLkr(s.finalSalary) });
     return out;

@@ -15,6 +15,8 @@ import {
   useUnreadNotificationCount,
   useMarkNotificationRead,
   useMarkAllNotificationsRead,
+  useDeleteNotification,
+  useClearAllNotifications,
 } from "@/hooks/useData";
 
 type NotificationRow = {
@@ -39,10 +41,12 @@ function NotificationDetail({
   notification,
   onBack,
   onViewAll,
+  onClear,
 }: {
   notification: NotificationRow;
   onBack: () => void;
   onViewAll: () => void;
+  onClear: () => void;
 }) {
   return (
     <div className="flex flex-col gap-4 pt-2">
@@ -89,6 +93,14 @@ function NotificationDetail({
       >
         Open notifications page
       </Button>
+
+      <Button
+        variant="outline"
+        className="w-full border-[#F6C7C2] bg-white text-[#B42318]"
+        onClick={onClear}
+      >
+        Clear notification
+      </Button>
     </div>
   );
 }
@@ -101,7 +113,10 @@ export function NotificationBell() {
   const { data: unread } = useUnreadNotificationCount();
   const markRead = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
+  const clearOne = useDeleteNotification();
+  const clearAll = useClearAllNotifications();
   const count = unread?.count ?? 0;
+  const hasNotifications = notifications.length > 0;
 
   const selected = notifications.find((n: NotificationRow) => n.id === selectedId);
 
@@ -156,14 +171,28 @@ export function NotificationBell() {
               ) : (
                 <>
                   <span>{count > 0 ? `${count} unread` : "You're all caught up"}</span>
-                  {count > 0 && (
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-[#1873A8] hover:underline"
-                      onClick={() => markAll.mutate()}
-                    >
-                      Mark all read
-                    </button>
+                  {hasNotifications && (
+                    <div className="flex items-center gap-2">
+                      {count > 0 && (
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-[#1873A8] hover:underline"
+                          onClick={() => markAll.mutate()}
+                        >
+                          Mark all read
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-[#B42318] hover:underline"
+                        onClick={() => {
+                          if (!window.confirm("Clear all notifications?")) return;
+                          clearAll.mutate();
+                        }}
+                      >
+                        Clear all
+                      </button>
+                    </div>
                   )}
                 </>
               )}
@@ -179,6 +208,14 @@ export function NotificationBell() {
                   setOpen(false);
                   setSelectedId(null);
                   setLocation("/notifications");
+                }}
+                onClear={() => {
+                  if (!selected?.id) return;
+                  clearOne.mutate(selected.id, {
+                    onSuccess: () => {
+                      setSelectedId(null);
+                    },
+                  });
                 }}
               />
             ) : isLoading ? (

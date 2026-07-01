@@ -9,6 +9,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/auth-context";
 import { useExpense, useUpdateExpense } from "@/hooks/useData";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 
 const EXPENSE_CATEGORIES_ADMIN = ['Travel', 'Clinic things', 'Salary', 'Bill', 'Rent', 'Food', 'Patient expenses', 'Others'];
 const PAYMENT_MODES = ['Cash', 'Online'];
@@ -20,6 +22,7 @@ export default function EditExpensePage() {
   const { user } = useAuth();
   const { data: expense, isLoading } = useExpense(params.id || '', true);
   const updateExpense = useUpdateExpense();
+  const saved = useSavedIndicator(updateExpense.isSuccess);
 
   const isManagement = user ? ['Admin', 'MD'].includes(user.role) : false;
 
@@ -185,6 +188,7 @@ export default function EditExpensePage() {
       </div>
 
       <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 space-y-2 z-10">
+        <SaveStatus isSaving={updateExpense.isPending} saved={saved} />
         <Button
           onClick={handleSubmit}
           disabled={updateExpense.isPending}

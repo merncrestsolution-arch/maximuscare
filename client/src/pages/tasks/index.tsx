@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +37,8 @@ function TasksContent() {
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const createSaved = useSavedIndicator(createTask.isSuccess);
+  const completeSaved = useSavedIndicator(updateTask.isSuccess);
 
   const [open, setOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState<any>(null);
@@ -224,9 +228,13 @@ function TasksContent() {
               <Input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
             </div>
           </div>
-          <DialogFooter>
-            <Button onClick={submit} disabled={!form.title || (form.taskType === "Individual" && !form.assignedToStaffId)}>
-              Create
+          <DialogFooter className="gap-2 sm:gap-3">
+            <SaveStatus isSaving={createTask.isPending} saved={createSaved} />
+            <Button
+              onClick={submit}
+              disabled={createTask.isPending || !form.title || (form.taskType === "Individual" && !form.assignedToStaffId)}
+            >
+              {createTask.isPending ? "Saving..." : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -241,8 +249,11 @@ function TasksContent() {
             <Label>Completion notes</Label>
             <Textarea value={completionNotes} onChange={(e) => setCompletionNotes(e.target.value)} />
           </div>
-          <DialogFooter>
-            <Button onClick={completeTask}>Mark completed</Button>
+          <DialogFooter className="gap-2 sm:gap-3">
+            <SaveStatus isSaving={updateTask.isPending} saved={completeSaved} />
+            <Button onClick={completeTask} disabled={updateTask.isPending}>
+              {updateTask.isPending ? "Saving..." : "Mark completed"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -20,6 +20,8 @@ import {
 import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
 import { BranchSelectField } from "@/components/branch/branch-select-field";
@@ -36,6 +38,7 @@ export default function EditVisit() {
   const updateVisitMutation = useUpdateVisit();
   const deleteVisitMutation = useDeleteVisit();
   const { toast } = useToast();
+  const saved = useSavedIndicator(updateVisitMutation.isSuccess);
 
   const [formData, setFormData] = useState<any>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -414,6 +417,7 @@ export default function EditVisit() {
                 Delete
               </Button>
             )}
+            <SaveStatus isSaving={updateVisitMutation.isPending} saved={saved} />
             <Button
               type="button"
               variant="outline"

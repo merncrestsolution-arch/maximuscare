@@ -50,6 +50,42 @@ function salaryMonthKey(periodStart: string): string {
   return `${periodStart.slice(0, 7)}-01`;
 }
 
+export function salaryPeriodForDate(dateStr: string): { periodStart: string; periodEnd: string; salaryMonth: string } {
+  const [yearRaw, monthRaw] = String(dateStr).split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const safeYear = Number.isFinite(year) ? year : new Date().getFullYear();
+  const safeMonth = Number.isFinite(month) && month >= 1 && month <= 12 ? month : new Date().getMonth() + 1;
+  const mm = String(safeMonth).padStart(2, "0");
+  const lastDay = new Date(safeYear, safeMonth, 0).getDate();
+  const periodStart = `${safeYear}-${mm}-01`;
+  const periodEnd = `${safeYear}-${mm}-${String(lastDay).padStart(2, "0")}`;
+  return { periodStart, periodEnd, salaryMonth: salaryMonthKey(periodStart) };
+}
+
+export async function ensureSalaryPeriodRecord(
+  storage: IStorage,
+  staffId: string,
+  periodStart: string,
+  periodEnd: string
+): Promise<Salary> {
+  const salaryMonth = salaryMonthKey(periodStart);
+  const existing = await storage.getSalaryByStaffAndMonth(staffId, salaryMonth);
+  if (existing) return existing;
+  const staff = await storage.getStaff(staffId);
+  if (!staff) throw new Error("Staff not found");
+  const record = await storage.createSalaryRecord({
+    staffId,
+    staffName: staff.name,
+    salaryMonth,
+    periodStart,
+    periodEnd,
+    basicSalary: staff.basicSalary ?? "0",
+    status: "Draft",
+  } as any);
+  return record;
+}
+
 function activeFineAmount(fines: { amount: string; status?: string | null }[]): number {
   return fines
     .filter((f) => String(f.status ?? "active") !== "waived")
@@ -58,6 +94,12 @@ function activeFineAmount(fines: { amount: string; status?: string | null }[]): 
 
 function sumDeductions(rows: StaffDeduction[]): number {
   return rows.reduce((a, d) => a + Math.max(0, Number(d.amount) || 0), 0);
+}
+
+function sumAdjustments(rows: { type: string; amount: string }[], type: "addition" | "decrement" | "fine"): number {
+  return rows
+    .filter((a) => a.type === type)
+    .reduce((acc, a) => acc + Math.max(0, Number(a.amount) || 0), 0);
 }
 
 function sumOtEntries(rows: StaffOtEntry[], otPerHour: number): { hours: number; amount: number } {
@@ -78,25 +120,31 @@ export async function buildEnhancedPayrollSummary(
   const fines = await storage.getStaffFinesByStaffAndDateRange(staff.id, rangeFrom, rangeTo);
   const deductions = await storage.getStaffDeductionsByStaffAndRange(staff.id, rangeFrom, rangeTo);
   const otEntries = await storage.getStaffOtEntriesByStaffAndRange(staff.id, rangeFrom, rangeTo);
+  const adjustments = await storage.getStaffSalaryAdjustmentsByStaffAndRange(staff.id, rangeFrom, rangeTo);
 
   const base = computePayrollForStaff(staff, visits, attendance, ipSessions, fines, rangeFrom, rangeTo, settings);
   const staffDeductionsTotal = sumDeductions(deductions);
   const otExtra = sumOtEntries(otEntries, settings.otPerHour);
+  const additionsTotal = sumAdjustments(adjustments, "addition");
+  const decrementsTotal = sumAdjustments(adjustments, "decrement");
+  const fineAdjustmentsTotal = sumAdjustments(adjustments, "fine");
 
   const otherAdjustments = Number(staff.otherAdjustments || 0);
   const otherDeductions =
-    staffDeductionsTotal + (otherAdjustments < 0 ? Math.abs(otherAdjustments) : 0);
+    staffDeductionsTotal + decrementsTotal + (otherAdjustments < 0 ? Math.abs(otherAdjustments) : 0);
   const otherCredits = otherAdjustments > 0 ? otherAdjustments : 0;
 
   const totalOt = base.totalOt + otExtra.hours;
   const otIncome = base.otIncome + otExtra.amount;
+  const finesTotal = base.finesTotal + fineAdjustmentsTotal;
   const finalSalary = Math.max(
     0,
     base.basicSalary +
       base.incentiveTotal +
       base.homeIncome +
-      otIncome -
-      base.finesTotal -
+      otIncome +
+      additionsTotal -
+      finesTotal -
       base.extraHolidayDeduction -
       otherDeductions +
       otherCredits
@@ -106,8 +154,11 @@ export async function buildEnhancedPayrollSummary(
     ...base,
     totalOt,
     otIncome,
+    finesTotal,
     staffDeductionsTotal,
     otEntriesAmount: otExtra.amount,
+    additionsTotal,
+    decrementsTotal,
     otherAdjustments,
     finalSalary,
   } as PayrollSummary & { staffDeductionsTotal: number; otEntriesAmount: number };
@@ -161,7 +212,7 @@ export async function assertNoDuplicateSalary(
 ): Promise<void> {
   const month = salaryMonthKey(periodStart);
   const existing = await storage.getSalaryByStaffAndMonth(staffId, month);
-  if (existing && existing.status !== "Cancelled") {
+  if (existing && !["Cancelled", "Draft"].includes(existing.status ?? "")) {
     throw new Error(`Salary already generated for ${month.slice(0, 7)} (status: ${existing.status})`);
   }
 }
@@ -182,12 +233,17 @@ export async function generateSalaryRecord(
   if (summary.finalSalary < 0) throw new Error("Final salary cannot be negative");
 
   const deductionsTotal =
-    summary.finesTotal + summary.extraHolidayDeduction + (summary as any).staffDeductionsTotal;
+    summary.finesTotal +
+    summary.extraHolidayDeduction +
+    (summary as any).staffDeductionsTotal +
+    (summary as any).decrementsTotal;
 
-  const record = await storage.createSalaryRecord({
+  const month = salaryMonthKey(periodStart);
+  const existing = await storage.getSalaryByStaffAndMonth(staffId, month);
+  const payload = {
     staffId,
     staffName: staff.name,
-    salaryMonth: salaryMonthKey(periodStart),
+    salaryMonth: month,
     periodStart,
     periodEnd,
     basicSalary: String(summary.basicSalary),
@@ -196,14 +252,20 @@ export async function generateSalaryRecord(
     otAmount: String(summary.otIncome),
     finesTotal: String(summary.finesTotal),
     extraHolidayDeduction: String(summary.extraHolidayDeduction),
-    otherDeductions: String((summary as any).staffDeductionsTotal ?? 0),
+    otherDeductions: String(
+      Number((summary as any).staffDeductionsTotal ?? 0) + Number((summary as any).decrementsTotal ?? 0)
+    ),
     deductionsTotal: String(deductionsTotal),
     finalSalary: String(summary.finalSalary),
     status: "Generated",
     breakdown: JSON.stringify(summary),
     generatedByStaffId,
     generatedByName,
-  } as any);
+  } as any;
+  const record = existing?.status === "Draft"
+    ? await storage.updateSalary(existing.id, payload)
+    : await storage.createSalaryRecord(payload);
+  if (!record) throw new Error("Failed to generate salary");
 
   for (const day of summary.incentiveDays) {
     await storage.upsertStaffIncentiveRecord({
@@ -455,6 +517,7 @@ export interface SalaryReportLine {
   date: string;
   reason: string;
   amount: number;
+  source?: "adjustment" | "deduction" | "fine";
 }
 
 export interface SalaryReportHomeVisit {
@@ -539,20 +602,43 @@ export async function buildSalaryReport(
   const otTotal = Number(summary.otIncome || 0);
 
   const adjustments = await storage.getStaffSalaryAdjustmentsByStaffAndRange(staffId, startDate, endDate);
+  const staffFines = await storage.getStaffFinesByStaffAndDateRange(staffId, startDate, endDate);
+  const staffDeductions = await storage.getStaffDeductionsByStaffAndRange(staffId, startDate, endDate);
   const toLine = (a: { id: string; adjustmentDate: string; reason: string; amount: string }): SalaryReportLine => ({
     id: a.id,
     date: a.adjustmentDate,
     reason: a.reason,
     amount: Number(a.amount) || 0,
+    source: "adjustment",
   });
   const additions = adjustments.filter((a) => a.type === "addition").map(toLine);
-  const fines = adjustments.filter((a) => a.type === "fine").map(toLine);
   const decrements = adjustments.filter((a) => a.type === "decrement").map(toLine);
+  const fineAdjustments = adjustments
+    .filter((a) => a.type === "fine")
+    .map((a) => ({ ...toLine(a), source: "fine" as const }));
+  const fines = staffFines
+    .filter((f) => String(f.status ?? "active") !== "waived")
+    .map((f) => ({
+      id: f.id,
+      date: f.fineDate,
+      reason: f.reason,
+      amount: Number(f.amount) || 0,
+      source: "fine",
+    }))
+    .concat(fineAdjustments);
+  const deductionLines = staffDeductions.map((d) => ({
+    id: d.id,
+    date: d.deductionDate,
+    reason: d.remarks ? `${d.category} - ${d.remarks}` : d.category,
+    amount: Number(d.amount) || 0,
+    source: "deduction" as const,
+  }));
+  const allDecrements = [...decrements, ...deductionLines];
 
   const sumLines = (rows: SalaryReportLine[]) => rows.reduce((acc, r) => acc + r.amount, 0);
   const additionsTotal = sumLines(additions);
   const finesTotal = sumLines(fines);
-  const decrementsTotal = sumLines(decrements);
+  const decrementsTotal = sumLines(allDecrements);
 
   const basicSalary = Number(staff.basicSalary || 0);
   const finalSalary =
@@ -573,7 +659,7 @@ export async function buildSalaryReport(
     additionsTotal,
     fines,
     finesTotal,
-    decrements,
+    decrements: allDecrements,
     decrementsTotal,
     finalSalary,
   };

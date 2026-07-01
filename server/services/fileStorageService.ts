@@ -77,6 +77,29 @@ export async function uploadPatientDocument(
   return { storageKey, fileSize: buffer.length };
 }
 
+export async function storeGeneratedFile(
+  storageKey: string,
+  buffer: Buffer,
+  mimeType: string,
+): Promise<void> {
+  if (isS3Enabled()) {
+    await s3Client().send(
+      new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET!,
+        Key: storageKey,
+        Body: buffer,
+        ContentType: mimeType,
+      }),
+    );
+    return;
+  }
+
+  const localPath = path.join(UPLOAD_ROOT, storageKey);
+  const dir = path.dirname(localPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(localPath, buffer);
+}
+
 export async function getDocumentReadStream(
   storageKey: string,
 ): Promise<{ body: Buffer; mimeType: string }> {

@@ -2,15 +2,20 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { Building2, Loader2, Sparkles, Receipt } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import { reportsApiExtended } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { branchesApi, reportsApiExtended } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { StatCard, KpiGrid } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/layout/page-shell";
 import { OrganizationOverviewToggle } from "@/components/overview/organization-overview-toggle";
 import { useBranch } from "@/context/branch-context";
+import { useAuth } from "@/context/auth-context";
+import { useBranches } from "@/hooks/useData";
+import { useToast } from "@/hooks/use-toast";
 import type { OverviewContext } from "@shared/branchAccess";
+import { isAdminRole } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 function formatCurrency(amount: number): string {
@@ -180,6 +185,9 @@ const ORG_CONFIG = {
 } as const;
 
 export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { selectedContext, selectContext } = useBranch();
   const config = ORG_CONFIG[org];
   const Icon = config.icon;
@@ -187,6 +195,8 @@ export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
   const [startDate, setStartDate] = useState(format(startOfMonth(today), "yyyy-MM-dd"));
   const [endDate, setEndDate] = useState(format(endOfMonth(today), "yyyy-MM-dd"));
   const syncRef = useRef<string | null>(null);
+  const [updatingBranchId, setUpdatingBranchId] = useState<string | null>(null);
+  const isAdmin = isAdminRole(user?.role);
 
   useEffect(() => {
     if (selectedContext === org) return;
@@ -217,6 +227,25 @@ export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
   const chartData = buildChartData(org, comparison, kpis);
   const incomeColor = isMaximus ? "#1873A8" : "#F45627";
   const patientsColor = isMaximus ? "#105691" : "#EE862D";
+  const { data: branches = [], isLoading: branchesLoading } = useBranches();
+  const sortedBranches = useMemo(
+    () =>
+      [...branches].sort((a: any, b: any) =>
+        String(a.branchName ?? a.name).localeCompare(String(b.branchName ?? b.name))
+      ),
+    [branches]
+  );
+  const updateBranch = useMutation({
+    mutationFn: ({ id, verifiedByAdmin }: { id: string; verifiedByAdmin: boolean }) =>
+      branchesApi.update(id, { verifiedByAdmin }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["branches"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update branch status", description: error.message, variant: "destructive" });
+    },
+    onSettled: () => setUpdatingBranchId(null),
+  });
 
   return (
     <PageShell
@@ -276,6 +305,55 @@ export function OrganizationOverviewPage({ org }: { org: OverviewContext }) {
         </p>
       ) : (
         <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Branch Verification Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {branchesLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading branches...
+                </div>
+              ) : sortedBranches.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No active branches found.</p>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {sortedBranches.map((branch: any) => {
+                    const displayName = branch.branchName ?? branch.name;
+                    const code = branch.code ? `(${branch.code})` : "";
+                    const verified = Boolean(branch.verifiedByAdmin);
+                    const isUpdating = updatingBranchId === branch.id && updateBranch.isPending;
+                    return (
+                      <div
+                        key={branch.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{displayName} <span className="text-muted-foreground">{code}</span></div>
+                          <div className="text-xs text-muted-foreground">
+                            {verified ? "Verified by Admin" : "Awaiting verification"}
+                          </div>
+                        </div>
+                        <Checkbox
+                          checked={verified}
+                          disabled={!isAdmin || isUpdating}
+                          onCheckedChange={(value) => {
+                            if (!isAdmin) return;
+                            const checked = value === true;
+                            setUpdatingBranchId(branch.id);
+                            updateBranch.mutate({ id: branch.id, verifiedByAdmin: checked });
+                          }}
+                          aria-label={`Mark ${displayName} as verified`}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <KpiGrid>
             <StatCard title="Total Patients" value={String(kpis?.totalPatients ?? 0)} />
             <StatCard title="Total Income" value={formatCurrency(kpis?.totalIncome ?? 0)} />

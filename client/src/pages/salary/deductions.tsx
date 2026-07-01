@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import { ArrowLeft } from "lucide-react";
 
 const CATEGORIES = ["Food Charges", "Accommodation Charges", "Transport Charges", "Advance Payments", "Other Deductions"];
@@ -23,6 +25,7 @@ function SalaryDeductionsContent() {
   const { data: rows = [], isLoading, error } = useStaffDeductions();
   const { data: staffList } = useStaff();
   const create = useCreateStaffDeduction();
+  const saved = useSavedIndicator(create.isSuccess);
 
   return (
     <ReportPageShell
@@ -73,13 +76,19 @@ function SalaryDeductionsContent() {
             <div><Label>Date</Label><Input type="date" value={form.deductionDate} onChange={(e) => setForm({ ...form, deductionDate: e.target.value })} /></div>
             <div><Label>Remarks</Label><Input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></div>
           </div>
-          <DialogFooter>
-            <Button onClick={() => {
-              create.mutate(form, {
-                onSuccess: () => { setOpen(false); toast({ title: "Deduction added" }); },
-                onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
-              });
-            }}>Save</Button>
+          <DialogFooter className="gap-2 sm:gap-3">
+            <SaveStatus isSaving={create.isPending} saved={saved} />
+            <Button
+              onClick={() => {
+                create.mutate(form, {
+                  onSuccess: () => { setOpen(false); toast({ title: "Deduction added" }); },
+                  onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
+                });
+              }}
+              disabled={create.isPending}
+            >
+              {create.isPending ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

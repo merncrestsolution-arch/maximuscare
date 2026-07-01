@@ -16,13 +16,25 @@ function versionTag(deployId: string): string {
   return `v${deployId}`;
 }
 
+function stripCoAuthorLines(message: string): string {
+  return message
+    .split(/\r?\n/)
+    .filter((line) => !line.trim().toLowerCase().startsWith("co-authored-by:"))
+    .join("\n")
+    .trim();
+}
+
 function buildDeployMessage(): string {
   const commitMsg = process.env.VERCEL_GIT_COMMIT_MESSAGE?.trim();
   if (commitMsg) {
+    const cleaned = stripCoAuthorLines(commitMsg);
+    if (!cleaned) {
+      return buildReleaseMessage();
+    }
     return [
       `We just deployed an update (${getDeployId()}).`,
       "",
-      commitMsg,
+      cleaned,
       "",
       "Tip: refresh your browser to load the latest version.",
     ].join("\n");

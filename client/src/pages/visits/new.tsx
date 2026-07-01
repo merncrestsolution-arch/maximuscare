@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Camera, UploadCloud, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { BranchSelectField } from "@/components/branch/branch-select-field";
 import { TreatingStaffCombobox, getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -29,6 +31,7 @@ export default function NewVisit() {
   const { data: staff = [], isLoading: loadingStaff } = useTreatingStaff();
   const createVisit = useCreateVisit();
   const { toast } = useToast();
+  const saved = useSavedIndicator(createVisit.isSuccess);
 
   const preselectedPatient = patients.find((p) => p.id === preselectedPatientId);
 
@@ -451,8 +454,15 @@ export default function NewVisit() {
 
         <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200 bg-white safe-area-bottom shadow-[0_-2px_12px_rgba(0,0,0,0.06)] md:static md:z-auto md:border-0 md:bg-transparent md:shadow-none">
            <div className="mx-auto flex max-w-[720px] p-4 md:px-6 md:pt-6 md:pb-0 md:justify-end">
-             <Button type="submit" className="h-12 w-full text-base font-semibold shadow-md md:h-10 md:w-auto md:min-w-[10rem] md:text-sm" onClick={handleSubmit} data-testid="button-save-visit">
-               Save Visit Record
+             <SaveStatus isSaving={createVisit.isPending} saved={saved} />
+             <Button
+               type="submit"
+               className="h-12 w-full text-base font-semibold shadow-md md:h-10 md:w-auto md:min-w-[10rem] md:text-sm"
+               onClick={handleSubmit}
+               disabled={createVisit.isPending}
+               data-testid="button-save-visit"
+             >
+               {createVisit.isPending ? "Saving..." : "Save Visit Record"}
              </Button>
            </div>
         </div>

@@ -161,7 +161,7 @@ export default function BottomNav() {
                   {item.icon}
                 </div>
                 <span
-                  className={`flex w-full min-h-[2.1rem] items-start justify-center text-center text-[0.7rem] font-semibold leading-tight line-clamp-2 ${
+                  className={`flex w-full min-h-[2.1rem] items-start justify-center px-0.5 text-center text-[0.7rem] font-semibold leading-tight line-clamp-2 ${
                     item.active ? "text-[#F45627]" : "text-[#334155]"
                   }`}
                 >

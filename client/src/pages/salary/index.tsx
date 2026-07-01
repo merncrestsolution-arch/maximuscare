@@ -1,7 +1,7 @@
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canManageSalary, canViewSalary } from "@/lib/permissions";
+import { canManageFines, canManageSalary, canViewSalary } from "@/lib/permissions";
 import { useAuth } from "@/context/auth-context";
 import { useSalaryDashboard } from "@/hooks/useData";
 import { formatLkr } from "@/lib/reportDatePresets";
@@ -20,6 +20,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, L
 function SalaryHubContent() {
   const { user } = useAuth();
   const isMgmt = canManageSalary(user?.role);
+  const canManageFinesRole = canManageFines(user?.role);
   const { data: dashboard } = useSalaryDashboard(isMgmt);
 
   const links = [
@@ -31,10 +32,10 @@ function SalaryHubContent() {
     { href: "/salary/history", title: "Salary History", desc: "All salary records with filters", icon: History, mgmt: false },
     { href: "/salary/generate", title: "Generate Salary", desc: "Preview and generate monthly payroll", icon: Calculator, mgmt: true },
     { href: "/salary/approval", title: "Salary Approval", desc: "Approve, reject, or mark paid", icon: FileCheck, mgmt: true },
-    { href: "/salary/fines", title: "Fine Management", desc: "Create, edit, waive fines", icon: AlertTriangle, mgmt: true },
+    { href: "/salary/fines", title: "Fine Management", desc: "Create, edit, waive fines", icon: AlertTriangle, mgmt: true, adminOnly: true },
     { href: "/salary/deductions", title: "Deductions", desc: "Food, transport, advance deductions", icon: MinusCircle, mgmt: true },
     { href: "/salary/ot", title: "OT Management", desc: "Overtime entries (Rs.250/hr)", icon: Clock, mgmt: true },
-  ].filter((l) => !l.mgmt || isMgmt);
+  ].filter((l) => (!l.mgmt || isMgmt) && (!l.adminOnly || canManageFinesRole));
 
   return (
     <div className="space-y-6 p-4 md:p-0">

@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/auth-context";
 import { useCreateExpense } from "@/hooks/useData";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 
 const EXPENSE_CATEGORIES_ADMIN = ['Travel', 'Clinic things', 'Salary', 'Bill', 'Rent', 'Food', 'Patient expenses', 'Others'];
 const EXPENSE_CATEGORIES_STAFF = ['Travel', 'Clinic things', 'Bill', 'Food', 'Patient expenses', 'Others'];
@@ -18,6 +20,7 @@ export default function AddExpensePage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const createExpense = useCreateExpense();
+  const saved = useSavedIndicator(createExpense.isSuccess);
 
   const isManagement = user ? ['Admin', 'MD'].includes(user.role) : false;
   const categories = isManagement ? EXPENSE_CATEGORIES_ADMIN : EXPENSE_CATEGORIES_STAFF;
@@ -137,6 +140,7 @@ export default function AddExpensePage() {
         </div>
 
         <div className="pt-4 space-y-3">
+          <SaveStatus isSaving={createExpense.isPending} saved={saved} />
           <Button
             onClick={handleSubmit}
             disabled={createExpense.isPending}

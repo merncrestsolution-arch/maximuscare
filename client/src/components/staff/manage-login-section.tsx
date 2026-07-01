@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { User } from "@/lib/types";
 import { staffApi } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
 
 function generateTemporaryPassword() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -27,6 +28,7 @@ export function ManageLoginSection({
   onSave: (updatedUser: User) => void;
 }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const canManage = useMemo(
     () => ["Admin", "MD"].includes(currentUser.role),
     [currentUser.role]
@@ -82,6 +84,8 @@ export function ManageLoginSection({
       await staffApi.updatePassword(targetUser.id, updateData);
 
       onSave({ ...targetUser, email: nextEmail });
+      queryClient.invalidateQueries({ queryKey: ["staff"] });
+      queryClient.invalidateQueries({ queryKey: ["staff-directory"] });
 
       toast({ title: "Success", description: "Login credentials updated successfully" });
       setPassword("");

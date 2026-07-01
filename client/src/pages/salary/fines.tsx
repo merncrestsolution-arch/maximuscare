@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canManageSalary } from "@/lib/permissions";
+import { canManageFines } from "@/lib/permissions";
 import { useStaffFines, useStaff, useCreateStaffFine, useUpdateStaffFine, useDeleteStaffFine } from "@/hooks/useData";
 import { salaryApi } from "@/lib/api";
 import { ReportPageShell } from "@/components/reports/report-page-shell";
@@ -14,6 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 
@@ -42,6 +44,8 @@ function SalaryFinesContent() {
   const createFine = useCreateStaffFine();
   const updateFine = useUpdateStaffFine();
   const deleteFine = useDeleteStaffFine();
+  const isSaving = createFine.isPending || updateFine.isPending;
+  const saved = useSavedIndicator(createFine.isSuccess || updateFine.isSuccess);
 
   const openCreate = () => {
     setEditingId(null);
@@ -184,12 +188,10 @@ function SalaryFinesContent() {
             <div><Label>Reason</Label><Input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></div>
             <div><Label>Remarks</Label><Input value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></div>
           </div>
-          <DialogFooter>
-            <Button
-              onClick={saveFine}
-              disabled={createFine.isPending || updateFine.isPending}
-            >
-              Save
+          <DialogFooter className="gap-2 sm:gap-3">
+            <SaveStatus isSaving={isSaving} saved={saved} />
+            <Button onClick={saveFine} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -200,7 +202,7 @@ function SalaryFinesContent() {
 
 export default function SalaryFinesPage() {
   return (
-    <RoleProtectedRoute allowed={canManageSalary}>
+    <RoleProtectedRoute allowed={canManageFines}>
       <SalaryFinesContent />
     </RoleProtectedRoute>
   );

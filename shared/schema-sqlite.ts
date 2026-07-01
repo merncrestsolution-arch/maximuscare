@@ -53,6 +53,13 @@ export const patients = sqliteTable("patients", {
   defaultVisitType: text("default_visit_type").notNull(),
   condition: text("condition").notNull(),
   patientCode: text("patient_code"),
+  dataVersion: integer("data_version").notNull().default(2),
+  dataMigratedAt: integer("data_migrated_at", { mode: "timestamp" }),
+  qrToken: text("qr_token"),
+  qrTokenExpiresAt: integer("qr_token_expires_at", { mode: "timestamp" }),
+  idCardPdfKey: text("id_card_pdf_key"),
+  idCardQrToken: text("id_card_qr_token"),
+  idCardGeneratedAt: integer("id_card_generated_at", { mode: "timestamp" }),
   fullName: text("full_name"),
   therapistFirstVisitId: text("therapist_first_visit_id"),
   firstVisitDate: text("first_visit_date"),
@@ -70,7 +77,19 @@ export const patients = sqliteTable("patients", {
 
 export const PATIENT_STATUSES = ["Active", "Inactive", "Completed", "Discharged", "Transferred"] as const;
 
-export const insertPatientSchema = createInsertSchema(patients).omit({ id: true, patientCode: true, createdAt: true, updatedAt: true }).extend({
+export const insertPatientSchema = createInsertSchema(patients).omit({
+  id: true,
+  patientCode: true,
+  dataVersion: true,
+  dataMigratedAt: true,
+  qrToken: true,
+  qrTokenExpiresAt: true,
+  idCardPdfKey: true,
+  idCardQrToken: true,
+  idCardGeneratedAt: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
   age: z.union([z.number().int().min(1, "Age must be at least 1").max(130), z.null()]).optional(),
 });
 export const updatePatientSchema = insertPatientSchema.partial();
@@ -249,6 +268,11 @@ export const inPatientAdmissions = sqliteTable("in_patient_admissions", {
   // same human-facing Patient ID (patientCode) instead of generating a new one.
   patientId: text("patient_id"),
   patientCode: text("patient_code"),
+  qrToken: text("qr_token"),
+  qrTokenExpiresAt: integer("qr_token_expires_at", { mode: "timestamp" }),
+  idCardPdfKey: text("id_card_pdf_key"),
+  idCardQrToken: text("id_card_qr_token"),
+  idCardGeneratedAt: integer("id_card_generated_at", { mode: "timestamp" }),
   packageType: text("package_type").notNull(),
   admitDate: text("admit_date").notNull(),
   amountPerDay: text("amount_per_day").notNull(),
@@ -477,6 +501,7 @@ export type Appointment = typeof appointments.$inferSelect;
 export const staffFines = sqliteTable("staff_fines", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   staffId: text("staff_id").notNull().references(() => staff.id),
+  salaryId: text("salary_id").references(() => salaries.id),
   staffName: text("staff_name").notNull(),
   fineDate: text("fine_date").notNull(),
   amount: text("amount").notNull().default("500"),
@@ -517,6 +542,7 @@ export const branches = sqliteTable("branches", {
   code: text("code"),
   address: text("address"),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  verifiedByAdmin: integer("verified_by_admin", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
@@ -851,8 +877,9 @@ export type StaffOtEntry = typeof staffOtEntries.$inferSelect;
 export const staffSalaryAdjustments = sqliteTable("staff_salary_adjustments", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   staffId: text("staff_id").notNull().references(() => staff.id),
+  salaryId: text("salary_id").references(() => salaries.id),
   staffName: text("staff_name").notNull(),
-  type: text("type").notNull(), // 'addition' | 'decrement'
+  type: text("type").notNull(), // 'addition' | 'decrement' | 'fine' (legacy)
   amount: text("amount").notNull(),
   adjustmentDate: text("adjustment_date").notNull(),
   reason: text("reason").notNull(),

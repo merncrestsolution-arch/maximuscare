@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import { ArrowLeft } from "lucide-react";
 
 function SalaryOtContent() {
@@ -21,6 +23,7 @@ function SalaryOtContent() {
   const { data: rows = [], isLoading, error } = useStaffOtEntries();
   const { data: staffList } = useStaff();
   const create = useCreateStaffOt();
+  const saved = useSavedIndicator(create.isSuccess);
 
   return (
     <ReportPageShell
@@ -66,13 +69,19 @@ function SalaryOtContent() {
             <div><Label>Reason</Label><Input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></div>
             {form.hours && <p className="text-sm text-muted-foreground">Amount: {formatLkr(Number(form.hours) * 250)}</p>}
           </div>
-          <DialogFooter>
-            <Button onClick={() => {
-              create.mutate(form, {
-                onSuccess: () => { setOpen(false); toast({ title: "OT entry added" }); },
-                onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
-              });
-            }}>Save</Button>
+          <DialogFooter className="gap-2 sm:gap-3">
+            <SaveStatus isSaving={create.isPending} saved={saved} />
+            <Button
+              onClick={() => {
+                create.mutate(form, {
+                  onSuccess: () => { setOpen(false); toast({ title: "OT entry added" }); },
+                  onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
+                });
+              }}
+              disabled={create.isPending}
+            >
+              {create.isPending ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

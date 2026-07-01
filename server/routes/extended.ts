@@ -417,6 +417,16 @@ export function registerExtendedRoutes(app: Express) {
     }
   });
 
+  app.post("/api/notifications/clear-all", requireAuth, async (req, res) => {
+    try {
+      const user = (req as any).user;
+      const count = await storage.softDeleteAllNotifications(user.staffId);
+      return successResponse(res, { count }, "Notifications cleared");
+    } catch (error: any) {
+      return errorResponse(res, error.message, 500);
+    }
+  });
+
   // ========== Tasks ==========
   app.get("/api/tasks", requireAuth, async (req, res) => {
     try {

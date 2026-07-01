@@ -10,6 +10,8 @@ import { Loader2, ScrollText, ChevronRight } from "lucide-react";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
 import { useAuth } from "@/context/auth-context";
 import { canManageSettings, canViewAuditLogs } from "@/lib/permissions";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 
 function SettingsContent() {
   const { toast } = useToast();
@@ -19,6 +21,8 @@ function SettingsContent() {
   const { data: incentive } = useIncentiveSettings();
   const updateClinic = useUpdateClinicSettings();
   const updateIncentive = useUpdateIncentiveSettings();
+  const clinicSaved = useSavedIndicator(updateClinic.isSuccess);
+  const incentiveSaved = useSavedIndicator(updateIncentive.isSuccess);
 
   const [clinicForm, setClinicForm] = useState({
     autoFineAmount: "500",
@@ -146,9 +150,12 @@ function SettingsContent() {
               />
             </div>
           ))}
-          <Button onClick={saveClinic} disabled={updateClinic.isPending}>
-            Save clinic rates
-          </Button>
+          <div className="flex items-center justify-between gap-3">
+            <SaveStatus isSaving={updateClinic.isPending} saved={clinicSaved} />
+            <Button onClick={saveClinic} disabled={updateClinic.isPending}>
+              {updateClinic.isPending ? "Saving..." : "Save clinic rates"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -185,9 +192,12 @@ function SettingsContent() {
               onChange={(e) => setIncForm({ ...incForm, clinicLocationScope: e.target.value })}
             />
           </div>
-          <Button onClick={saveIncentive} disabled={updateIncentive.isPending}>
-            Save incentive rules
-          </Button>
+          <div className="flex items-center justify-between gap-3">
+            <SaveStatus isSaving={updateIncentive.isPending} saved={incentiveSaved} />
+            <Button onClick={saveIncentive} disabled={updateIncentive.isPending}>
+              {updateIncentive.isPending ? "Saving..." : "Save incentive rules"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

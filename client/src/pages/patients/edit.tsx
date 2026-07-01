@@ -10,6 +10,8 @@ import { ArrowLeft, Loader2, BedDouble } from "lucide-react";
 import { Link } from "wouter";
 import type { Patient } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
+import { SaveStatus } from "@/components/ui/save-status";
+import { useSavedIndicator } from "@/hooks/useSavedIndicator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { format } from "date-fns";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
@@ -44,6 +46,8 @@ export default function PatientEditPage() {
   const { data: existingPatient, isLoading, error } = usePatient(patientId || "");
   const createPatient = useCreatePatient();
   const updatePatientMutation = useUpdatePatient();
+  const saved = useSavedIndicator(createPatient.isSuccess || updatePatientMutation.isSuccess);
+  const isSaving = createPatient.isPending || updatePatientMutation.isPending;
 
   const [formData, setFormData] = useState<Patient | Omit<Patient, "id">>(
     isEdit && existingPatient ? { ...existingPatient } : { ...DEFAULT_PATIENT }
@@ -404,6 +408,7 @@ export default function PatientEditPage() {
 
         <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white safe-area-bottom md:static md:z-auto md:mt-4 md:rounded-xl md:border md:shadow-sm">
           <div className="mx-auto flex max-w-[720px] gap-3 p-4 md:justify-end md:px-6 md:pt-6 md:pb-0">
+            <SaveStatus isSaving={isSaving} saved={saved} />
             <Button
               type="button"
               variant="outline"
@@ -417,10 +422,10 @@ export default function PatientEditPage() {
               type="button"
               className="h-12 flex-1 text-base font-semibold bg-primary hover:bg-primary/90 md:h-10 md:flex-none md:min-w-[9rem] md:text-sm"
               onClick={handleSave}
-              disabled={createPatient.isPending || updatePatientMutation.isPending}
+              disabled={isSaving}
               data-testid="button-save-patient-edit"
             >
-              {(createPatient.isPending || updatePatientMutation.isPending) && (
+              {isSaving && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               {isEdit ? "Save Changes" : "Register Patient"}

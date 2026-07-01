@@ -17,6 +17,7 @@ import { AttendanceEditDateTime } from "@/components/attendance/attendance-edit-
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { SaveStatus } from "@/components/ui/save-status";
 import { StructuredReportActions } from "@/components/reports/structured-report-actions";
 import { canManageAttendance, canViewAttendanceLocation } from "@/lib/permissions";
 import { ViewLocationButton } from "@/components/attendance/view-location-button";
@@ -341,6 +342,7 @@ export default function AttendancePage() {
   const [editOt, setEditOt] = useState("");
   const [editReason, setEditReason] = useState("");
   const [editSaving, setEditSaving] = useState(false);
+  const [editSaved, setEditSaved] = useState(false);
 
   useEffect(() => {
     if (userId && !selectedStaffId) setSelectedStaffId(userId);
@@ -587,7 +589,14 @@ export default function AttendancePage() {
     const o = formatOt(editRecord.overtimeHours);
     setEditOt(o !== null ? String(o) : "");
     setEditReason("");
+    setEditSaved(false);
   }, [editRecord]);
+
+  useEffect(() => {
+    if (!editSaved) return;
+    const timeout = setTimeout(() => setEditSaved(false), 2000);
+    return () => clearTimeout(timeout);
+  }, [editSaved]);
 
   useEffect(() => {
     if (!isManagement || staffOptions.length === 0) return;
@@ -631,6 +640,7 @@ export default function AttendancePage() {
 
       await updateAttendanceMutation.mutateAsync({ id: editRecord.id, data });
       toast({ title: "Attendance updated", description: `${editRecord.staffName} — ${format(new Date(editRecord.date), "dd MMM yyyy")}` });
+      setEditSaved(true);
       setEditRecord(null);
     } catch (error: any) {
       toast({
@@ -1245,6 +1255,7 @@ export default function AttendancePage() {
               </div>
 
               <div className="flex gap-3 justify-end pt-2">
+                <SaveStatus isSaving={editSaving} saved={editSaved} />
                 <Button variant="outline" onClick={() => setEditRecord(null)} className="h-11 px-5" disabled={editSaving} data-testid="button-cancel-edit-attendance">
                   Cancel
                 </Button>

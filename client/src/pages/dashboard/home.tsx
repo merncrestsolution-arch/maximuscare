@@ -11,7 +11,7 @@ import { Bar, BarChart, Line, LineChart, ResponsiveContainer, XAxis, YAxis, Tool
 import { ReportDateFilters } from "@/components/reports/report-date-filters";
 import { getDateRangeForPreset, type DatePreset } from "@/lib/reportDatePresets";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { addDays, format, parseISO, subDays, startOfMonth, addMonths, subMonths, getDaysInMonth } from "date-fns";
+import { addDays, format, parseISO, subDays, startOfMonth, endOfMonth, addMonths, subMonths, getDaysInMonth } from "date-fns";
 import { useInPatientSessionsForStaffRange, useAllInPatientSessionsInRange } from "@/hooks/useData";
 
 import { isVisitForStaff } from "@/lib/visitAccess";
@@ -83,8 +83,8 @@ export default function Dashboard() {
   const isStaff = role === "physiotherapist" || role === "receptionist" || role === "staff" || role === "manager";
 
   const selectedDate = new Date(selectedYear, selectedMonth, 1);
-  const monthStart = format(selectedDate, 'yyyy-MM-dd');
-  const monthEnd = format(addMonths(selectedDate, 1), 'yyyy-MM-dd');
+  const monthStart = format(startOfMonth(selectedDate), 'yyyy-MM-dd');
+  const monthEnd = format(endOfMonth(selectedDate), 'yyyy-MM-dd');
   const dateParams = isManagement
     ? { startDate: filterStart, endDate: filterEnd }
     : { startDate: monthStart, endDate: monthEnd };
@@ -199,7 +199,7 @@ export default function Dashboard() {
   const allMyVisits = visits.filter((v) =>
     canViewAllVisitsClient ? true : isVisitForStaff(v, user, { includeCreator: true })
   );
-  const myVisits = allMyVisits.filter(v => v.visitDate >= monthStart && v.visitDate < monthEnd);
+  const myVisits = allMyVisits.filter(v => v.visitDate >= monthStart && v.visitDate <= monthEnd);
   const visitsForStats =
     selectedBranchName && !selectedContext
       ? myVisits.filter(
@@ -245,6 +245,10 @@ export default function Dashboard() {
               const [m, y] = val.split('-').map(Number);
               setSelectedMonth(m);
               setSelectedYear(y);
+              const selected = new Date(y, m, 1);
+              setFilterStart(format(startOfMonth(selected), "yyyy-MM-dd"));
+              setFilterEnd(format(endOfMonth(selected), "yyyy-MM-dd"));
+              setDatePreset("custom");
             }}
           >
             <SelectTrigger className="w-full sm:w-[180px]" data-testid="select-month">

@@ -51,12 +51,9 @@ import { registerExtendedRoutes } from "./routes/extended";
 import { registerSalaryRoutes } from "./routes/salary";
 import { registerPatientRoutes } from "./routes/patients";
 import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
-import { signPatientQrToken, verifyPatientQrToken } from "./services/qrTokenService";
-import {
-  generateCardId,
-  generatePatientCardPdf,
-  resolvePatientQrTokenForCard,
-} from "./services/patientIdCardService";
+import { verifyPatientQrToken } from "./services/qrTokenService";
+import { ensureAdmissionQrToken, ensurePatientDataVersion } from "./services/patientDataVersionService";
+import { getOrCreateAdmissionCardPdf, getOrCreatePatientCardPdf } from "./services/patientIdCardCacheService";
 import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
 import { logAudit } from "./services/auditService";
@@ -1211,12 +1208,9 @@ export async function registerRoutes(
             return res.status(403).json({ message: "Forbidden" });
           }
         }
-        const organizationId = organizationForBranch(patient.branch);
-        const token = signPatientQrToken({
-          patientId: patient.id,
-          organizationId,
-        });
-        return res.json({ token, patientCode: patient.patientCode ?? null, organizationId });
+        const { patient: upgraded, qrToken } = await ensurePatientDataVersion(storage, patient);
+        const organizationId = organizationForBranch(upgraded.branch);
+        return res.json({ token: qrToken, patientCode: upgraded.patientCode ?? null, organizationId });
       } catch (error: any) {
         return res.status(500).json({ message: error.message });
       }
@@ -1241,21 +1235,16 @@ export async function registerRoutes(
             return res.status(403).json({ message: "Forbidden" });
           }
         }
-        const organizationId = organizationForBranch(patient.branch);
-        const patientCode = patient.patientCode ?? id;
-        const token = resolvePatientQrTokenForCard(
-          String(req.query.token ?? ""),
-          patient.id,
-          organizationId
-        );
-        const pdf = await generatePatientCardPdf({
-          id: patientCode,
-          name: patient.name ?? "—",
-          phone: patient.phone ?? "",
-          address: patient.address ?? "",
-          cardId: generateCardId(patientCode),
-          qrToken: token,
+        const { patient: upgraded, qrToken } = await ensurePatientDataVersion(storage, patient);
+        const organizationId = organizationForBranch(upgraded.branch);
+        const pdf = await getOrCreatePatientCardPdf({
+          storage,
+          patient: upgraded,
+          organizationId,
+          qrToken,
+          providedToken: String(req.query.token ?? ""),
         });
+        const patientCode = upgraded.patientCode ?? id;
         const safeName = patientCode.replace(/[^a-z0-9._-]+/gi, "-");
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.pdf"`);
@@ -1322,7 +1311,8 @@ export async function registerRoutes(
           return res.status(403).json({ message: "Forbidden" });
         }
       }
-      return res.json(patient);
+      const { patient: upgraded } = await ensurePatientDataVersion(storage, patient);
+      return res.json(upgraded);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -1359,15 +1349,16 @@ export async function registerRoutes(
       );
       const patientCode = await generateUniquePatientCode(storage, validatedData.branch, validatedData.registeredDate);
       const patient = await storage.createPatient({ ...validatedData, patientCode, fullName: validatedData.name } as any);
+      const { patient: upgraded } = await ensurePatientDataVersion(storage, patient);
       const actor = await auditActor(req);
       await logAudit(storage, {
         ...actor,
         module: "patient",
         action: "create",
-        recordId: patient.id,
-        newValue: patient,
+        recordId: upgraded.id,
+        newValue: upgraded,
       });
-      return res.status(201).json(patient);
+      return res.status(201).json(upgraded);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Validation error", errors: error.errors });
@@ -2569,13 +2560,14 @@ export async function registerRoutes(
           return res.status(404).json({ message: "Admission not found" });
         }
         const organizationId = resolveSessionOrganization(req) ?? "maximus";
-        const token = signPatientQrToken({
-          patientId: admission.patientId ?? admission.id,
+        const { admission: upgraded, qrToken } = await ensureAdmissionQrToken(
+          storage,
+          admission,
           organizationId,
-        });
+        );
         return res.json({
-          token,
-          patientCode: admission.patientCode ?? admission.patientIdNo ?? null,
+          token: qrToken,
+          patientCode: upgraded.patientCode ?? upgraded.patientIdNo ?? null,
           organizationId,
         });
       } catch (error: any) {
@@ -2596,21 +2588,19 @@ export async function registerRoutes(
           return res.status(404).json({ message: "Admission not found" });
         }
         const organizationId = resolveSessionOrganization(req) ?? "maximus";
-        const patientCode = admission.patientCode ?? admission.patientIdNo ?? admission.id;
-        const masterPatientId = admission.patientId ?? admission.id;
-        const token = resolvePatientQrTokenForCard(
-          String(req.query.token ?? ""),
-          masterPatientId,
-          organizationId
+        const { admission: upgraded, qrToken } = await ensureAdmissionQrToken(
+          storage,
+          admission,
+          organizationId,
         );
-        const pdf = await generatePatientCardPdf({
-          id: patientCode,
-          name: admission.patientName ?? "—",
-          phone: admission.phone ?? "",
-          address: admission.address ?? "",
-          cardId: generateCardId(patientCode),
-          qrToken: token,
+        const pdf = await getOrCreateAdmissionCardPdf({
+          storage,
+          admission: upgraded,
+          organizationId,
+          qrToken,
+          providedToken: String(req.query.token ?? ""),
         });
+        const patientCode = upgraded.patientCode ?? upgraded.patientIdNo ?? upgraded.id;
         const safeName = patientCode.replace(/[^a-z0-9._-]+/gi, "-");
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="${safeName}-card.pdf"`);
@@ -3864,13 +3854,14 @@ export async function registerRoutes(
   app.get("/api/staff-fines", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
+      const { isManagementRole } = await import("./permissions");
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
       const queryStaffId = req.query.staffId as string | undefined;
       if (!startDate || !endDate) {
         return res.status(400).json({ message: "startDate and endDate are required (YYYY-MM-DD)" });
       }
-      if (["Admin", "MD", "Manager", "Branch Manager", "Nexus MD"].includes(user.role)) {
+      if (isManagementRole(user.role)) {
         if (queryStaffId) {
           const rows = await storage.getStaffFinesByStaffAndDateRange(queryStaffId, startDate, endDate);
           return res.json(rows);
@@ -3888,8 +3879,8 @@ export async function registerRoutes(
   app.post("/api/staff-fines", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { isManagementRole, isOperationalLead } = await import("./permissions");
-      if (!isManagementRole(user.role) && !isOperationalLead(user.role)) {
+      const { isAdminRole } = await import("./permissions");
+      if (!isAdminRole(user.role)) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const editor = await storage.getStaff(user.staffId);
@@ -3914,8 +3905,12 @@ export async function registerRoutes(
       if (!parsed.success) {
         return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
       }
+      const { salaryPeriodForDate, ensureSalaryPeriodRecord } = await import("./services/salaryService");
+      const { periodStart, periodEnd } = salaryPeriodForDate(parsed.data.fineDate);
+      const salary = await ensureSalaryPeriodRecord(storage, parsed.data.staffId, periodStart, periodEnd);
       const fine = await storage.createStaffFine({
         ...(parsed.data as any),
+        salaryId: salary.id,
         createdByStaffId: user.staffId,
         createdByName: editor?.name ?? "",
       } as any);
@@ -3938,8 +3933,8 @@ export async function registerRoutes(
   app.patch("/api/staff-fines/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { isManagementRole, isOperationalLead } = await import("./permissions");
-      if (!isManagementRole(user.role) && !isOperationalLead(user.role)) {
+      const { isAdminRole } = await import("./permissions");
+      if (!isAdminRole(user.role)) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const existingFine = await storage.getStaffFine(param(req, "id"));
@@ -3952,9 +3947,17 @@ export async function registerRoutes(
       if (!parsed.success) {
         return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten() });
       }
+      const nextStaffId = (parsed.data as any).staffId ?? existingFine.staffId;
+      const nextDate = (parsed.data as any).fineDate ?? existingFine.fineDate;
+      const { salaryPeriodForDate, ensureSalaryPeriodRecord } = await import("./services/salaryService");
+      const targetStaff = await storage.getStaff(nextStaffId);
+      if (!targetStaff) return res.status(404).json({ message: "Staff not found" });
+      const { periodStart, periodEnd } = salaryPeriodForDate(nextDate);
+      const salary = await ensureSalaryPeriodRecord(storage, nextStaffId, periodStart, periodEnd);
       const fineId = param(req, "id");
       const fine = await storage.updateStaffFine(fineId, {
         ...parsed.data,
+        salaryId: salary.id,
         updatedByStaffId: (req as any).user?.staffId,
       } as any);
       if (!fine) return res.status(404).json({ message: "Fine not found" });
@@ -3977,8 +3980,8 @@ export async function registerRoutes(
   app.delete("/api/staff-fines/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      const { isManagementRole, isOperationalLead } = await import("./permissions");
-      if (!isManagementRole(user.role) && !isOperationalLead(user.role)) {
+      const { isAdminRole } = await import("./permissions");
+      if (!isAdminRole(user.role)) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const fineId = param(req, "id");

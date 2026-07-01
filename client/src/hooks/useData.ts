@@ -32,6 +32,7 @@ export function useCreatePatient() {
     mutationFn: patientApi.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['patients'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
     },
   });
 }
@@ -40,8 +41,11 @@ export function useUpdatePatient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => patientApi.update(id, data),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['patients'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-stats', variables.id] });
+      queryClient.invalidateQueries({ queryKey: ['patient-history', variables.id] });
     },
   });
 }
@@ -117,8 +121,11 @@ export function useCreateVisit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: visitApi.create,
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['visits'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-stats', variables.patientId] });
+      queryClient.invalidateQueries({ queryKey: ['patient-history', variables.patientId] });
+      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
       queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
@@ -131,6 +138,9 @@ export function useUpdateVisit() {
     mutationFn: ({ id, data }: { id: string; data: any }) => visitApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['visits'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-history'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
       queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
@@ -143,6 +153,9 @@ export function useDeleteVisit() {
     mutationFn: (id: string) => visitApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['visits'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-history'] });
+      queryClient.invalidateQueries({ queryKey: ['patient-dashboard'] });
       queryClient.invalidateQueries({ queryKey: ['reports'] });
       queryClient.invalidateQueries({ queryKey: ['staff-fines'] });
     },
@@ -927,6 +940,17 @@ export function useMarkAllNotificationsRead() {
   });
 }
 
+export function useClearAllNotifications() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => notificationsApi.clearAll(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      queryClient.invalidateQueries({ queryKey: ['notifications-unread-count'] });
+    },
+  });
+}
+
 export function useTasks(params?: { status?: string; all?: boolean }, enabled = true) {
   return useQuery({
     queryKey: ['tasks', params],
@@ -950,7 +974,10 @@ export function useUpdateTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => tasksApi.update(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['task-dashboard'] });
+    },
   });
 }
 
@@ -958,7 +985,10 @@ export function useDeleteTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: tasksApi.delete,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
+      queryClient.invalidateQueries({ queryKey: ['task-dashboard'] });
+    },
   });
 }
 
@@ -1145,6 +1175,22 @@ export function useAddSalaryAddition() {
 
 export function useAddSalaryDecrement() {
   return useSalaryAdjustmentMutation(salaryApi.addDecrement);
+}
+
+export function useUpdateSalaryDecrement() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { staffId: string; adjustmentId: string; date?: string; reason?: string; amount?: number }) =>
+      salaryApi.updateDecrement(data.staffId, data.adjustmentId, {
+        date: data.date,
+        reason: data.reason,
+        amount: data.amount,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["salary-report"] });
+      queryClient.invalidateQueries({ queryKey: ["salary-report-history"] });
+    },
+  });
 }
 
 export function useAddSalaryFine() {

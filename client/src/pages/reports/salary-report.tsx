@@ -11,6 +11,7 @@ import {
   useAddSalaryAddition,
   useAddSalaryDecrement,
   useAddSalaryFine,
+  useUpdateSalaryDecrement,
 } from "@/hooks/useData";
 import { useToast } from "@/hooks/use-toast";
 import { ReportPageShell } from "@/components/reports/report-page-shell";
@@ -34,13 +35,19 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { getDateRangeForPreset, formatMoney, type DatePreset } from "@/lib/reportDatePresets";
-import { Plus, Loader2 } from "lucide-react";
+import { Plus, Loader2, Pencil } from "lucide-react";
 
 const lkr = (n: number) => `LKR ${formatMoney(Number(n) || 0)}`;
 
 type AdjustmentType = "addition" | "decrement" | "fine";
 
-type ReportLine = { id: string; date: string; reason: string; amount: number };
+type ReportLine = {
+  id: string;
+  date: string;
+  reason: string;
+  amount: number;
+  source?: "adjustment" | "deduction" | "fine";
+};
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -149,6 +156,107 @@ function AdjustmentDialog({
   );
 }
 
+function EditDecrementDialog({
+  open,
+  staffId,
+  line,
+  onClose,
+}: {
+  open: boolean;
+  staffId: string;
+  line: ReportLine | null;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+  const update = useUpdateSalaryDecrement();
+  const [date, setDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [amount, setAmount] = useState("");
+
+  useEffect(() => {
+    if (open && line) {
+      setDate(line.date);
+      setReason(line.reason);
+      setAmount(String(line.amount ?? ""));
+    }
+  }, [open, line]);
+
+  const submit = async () => {
+    const numeric = Number(amount);
+    if (!line) return;
+    if (!date || !reason.trim() || !Number.isFinite(numeric) || numeric <= 0) {
+      toast({
+        title: "Missing details",
+        description: "Date, reason and a positive amount are all required.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      await update.mutateAsync({
+        staffId,
+        adjustmentId: line.id,
+        date,
+        reason: reason.trim(),
+        amount: numeric,
+      });
+      toast({ title: "Decrement updated" });
+      onClose();
+    } catch (e) {
+      toast({
+        title: "Error",
+        description: e instanceof Error ? e.message : "Failed to update",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Decrement</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="edit-dec-date">Date</Label>
+            <Input id="edit-dec-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="edit-dec-reason">Reason</Label>
+            <Input
+              id="edit-dec-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Advance deduction"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="edit-dec-amount">Amount (LKR)</Label>
+            <Input
+              id="edit-dec-amount"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={update.isPending}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={update.isPending}>
+            {update.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function LineSection({
   title,
   sign,
@@ -157,6 +265,7 @@ function LineSection({
   canManage,
   onAdd,
   addLabel,
+  onEdit,
 }: {
   title: string;
   sign: "+" | "-";
@@ -165,6 +274,7 @@ function LineSection({
   canManage: boolean;
   onAdd: () => void;
   addLabel: string;
+  onEdit?: (line: ReportLine) => void;
 }) {
   return (
     <>
@@ -185,11 +295,18 @@ function LineSection({
             <td className="py-1 text-left text-muted-foreground">
               {l.date} · {l.reason}
             </td>
-            <td
-              className={`py-1 text-right whitespace-nowrap ${sign === "-" ? "text-red-600" : ""}`}
-            >
-              {sign === "-" ? "-" : ""}
-              {lkr(l.amount)}
+            <td className={`py-1 text-right whitespace-nowrap ${sign === "-" ? "text-red-600" : ""}`}>
+              <div className="flex items-center justify-end gap-2">
+                <span>
+                  {sign === "-" ? "-" : ""}
+                  {lkr(l.amount)}
+                </span>
+                {onEdit && canManage && l.source === "adjustment" ? (
+                  <Button variant="ghost" size="icon" onClick={() => onEdit(l)} aria-label="Edit decrement">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
             </td>
           </tr>
         ))
@@ -238,6 +355,7 @@ function SalaryReportContent() {
   const [endDate, setEndDate] = useState("");
   const [submitted, setSubmitted] = useState<{ staffId: string; startDate: string; endDate: string } | null>(null);
   const [dialog, setDialog] = useState<AdjustmentType | null>(null);
+  const [editLine, setEditLine] = useState<ReportLine | null>(null);
 
   useEffect(() => {
     const r = getDateRangeForPreset(preset, startDate, endDate);
@@ -440,6 +558,7 @@ function SalaryReportContent() {
                   canManage={canManageAdjustments}
                   onAdd={() => setDialog("decrement")}
                   addLabel="Add Decrement"
+                  onEdit={(line) => setEditLine(line)}
                 />
 
                 <tr className="border-t-2 border-[#105691]">
@@ -496,6 +615,14 @@ function SalaryReportContent() {
           type={dialog ?? "addition"}
           staffId={submitted.staffId}
           onClose={() => setDialog(null)}
+        />
+      )}
+      {submitted?.staffId && (
+        <EditDecrementDialog
+          open={!!editLine}
+          staffId={submitted.staffId}
+          line={editLine}
+          onClose={() => setEditLine(null)}
         />
       )}
     </ReportPageShell>

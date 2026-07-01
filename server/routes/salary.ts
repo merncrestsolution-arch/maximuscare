@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { storage } from "../storage";
 import { schema } from "../db";
-import { requireAuth } from "../auth";
+import { requireAuth, requireRole } from "../auth";
 import { requireSalaryManage, requireSalaryApprove } from "../middleware/secureApi";
 import { successResponse, errorResponse } from "../response";
 import { isManagementRole, isOperationalLead } from "../permissions";
@@ -19,6 +19,8 @@ import {
   getSalaryExportRows,
   buildSalaryReport,
   getSalaryReportHistory,
+  ensureSalaryPeriodRecord,
+  salaryPeriodForDate,
 } from "../services/salaryService";
 import { loadPayrollSettings } from "../services/payrollService";
 import { loadBranchContext } from "../middleware/branchContext";
@@ -152,8 +154,39 @@ async function createSalaryAdjustment(
   if (!staff) return errorResponse(res, "Staff not found", 404);
 
   const editor = await editorName(user.staffId);
+  const { periodStart, periodEnd } = salaryPeriodForDate(date);
+  const salary = await ensureSalaryPeriodRecord(storage, targetId, periodStart, periodEnd);
+  if (type === "fine") {
+    const record = await storage.createStaffFine({
+      staffId: targetId,
+      salaryId: salary.id,
+      staffName: staff.name,
+      fineDate: date,
+      amount: String(numericAmount),
+      reason,
+      source: "manual",
+      fineType: "Manual Fine",
+      status: "active",
+      branchId: staff.branch ?? null,
+      createdByStaffId: user.staffId,
+      createdByName: editor,
+    } as any);
+    await logAudit(storage, {
+      userId: user.staffId,
+      userName: editor,
+      module: "fine",
+      action: "create",
+      recordId: record.id,
+      newValue: record,
+    });
+    const { invalidateOperationalCaches } = await import("../services/cacheService");
+    await invalidateOperationalCaches();
+    return successResponse(res, record, "Fine recorded", 201);
+  }
+
   const record = await storage.createStaffSalaryAdjustment({
     staffId: targetId,
+    salaryId: salary.id,
     staffName: staff.name,
     type,
     amount: String(numericAmount),
@@ -180,6 +213,54 @@ async function createSalaryAdjustment(
   });
 
   return successResponse(res, record, "Adjustment recorded", 201);
+}
+
+async function updateSalaryDecrement(req: Request, res: Response) {
+  const user = (req as any).user;
+  const targetId = param(req, "id");
+  const adjustmentId = param(req, "adjustmentId");
+  const existing = await storage.getStaffSalaryAdjustment(adjustmentId);
+  if (!existing || existing.staffId !== targetId || existing.type !== "decrement") {
+    return errorResponse(res, "Decrement not found", 404);
+  }
+
+  const { date, reason, amount } = req.body ?? {};
+  if (date == null && reason == null && amount == null) {
+    return errorResponse(res, "date, reason, or amount required", 400);
+  }
+  if (date != null && !String(date).trim()) {
+    return errorResponse(res, "date cannot be empty", 400);
+  }
+  if (reason != null && !String(reason).trim()) {
+    return errorResponse(res, "reason cannot be empty", 400);
+  }
+  if (amount != null && (!Number.isFinite(Number(amount)) || Number(amount) <= 0)) {
+    return errorResponse(res, "amount must be a positive number", 400);
+  }
+
+  const effectiveDate = date ?? existing.adjustmentDate;
+  const { periodStart, periodEnd } = salaryPeriodForDate(effectiveDate);
+  const salary = await ensureSalaryPeriodRecord(storage, targetId, periodStart, periodEnd);
+  const updated = await storage.updateStaffSalaryAdjustment(adjustmentId, {
+    adjustmentDate: date ?? undefined,
+    reason: reason != null ? String(reason).trim() : undefined,
+    amount: amount != null ? String(Number(amount)) : undefined,
+    salaryId: salary.id,
+  } as any);
+  if (!updated) return errorResponse(res, "Decrement not found", 404);
+
+  const editor = await editorName(user.staffId);
+  await logAudit(storage, {
+    userId: user.staffId,
+    userName: editor,
+    module: "salary",
+    action: "decrement_update",
+    recordId: updated.id,
+    oldValue: existing,
+    newValue: updated,
+  });
+
+  return successResponse(res, updated);
 }
 
 export function registerSalaryRoutes(app: Express) {
@@ -258,9 +339,13 @@ export function registerSalaryRoutes(app: Express) {
       const colomboRegularCount = Number(s.colomboHome || 0);
       const otherHomeCount = Number(s.bandaragamaHome || 0);
       const otherAdjustments = Number(s.otherAdjustments || 0);
-      const additionsAmount = Number(s.incentiveTotal || 0) + (otherAdjustments > 0 ? otherAdjustments : 0);
+      const additionsTotal = Number(s.additionsTotal || 0);
+      const decrementsTotal = Number(s.decrementsTotal || 0);
+      const additionsAmount =
+        Number(s.incentiveTotal || 0) + additionsTotal + (otherAdjustments > 0 ? otherAdjustments : 0);
       const staffDeductionsTotal = Number(s.staffDeductionsTotal || 0);
-      const otherDecrements = staffDeductionsTotal + (otherAdjustments < 0 ? Math.abs(otherAdjustments) : 0);
+      const otherDecrements =
+        staffDeductionsTotal + decrementsTotal + (otherAdjustments < 0 ? Math.abs(otherAdjustments) : 0);
 
       const breakdown = {
         staff: {
@@ -292,6 +377,7 @@ export function registerSalaryRoutes(app: Express) {
         additions: {
           incentives: Number(s.incentiveTotal || 0),
           bonuses: otherAdjustments > 0 ? otherAdjustments : 0,
+          manual: additionsTotal,
           amount: additionsAmount,
         },
         deductions: {
@@ -358,7 +444,10 @@ export function registerSalaryRoutes(app: Express) {
   app.post("/api/staff/:id/salary/decrements", requireAuth, requireSalaryManage, (req, res) =>
     createSalaryAdjustment(req as Request, res as Response, "decrement")
   );
-  app.post("/api/staff/:id/salary/fines", requireAuth, requireSalaryManage, (req, res) =>
+  app.patch("/api/staff/:id/salary/decrements/:adjustmentId", requireAuth, requireSalaryManage, (req, res) =>
+    updateSalaryDecrement(req as Request, res as Response)
+  );
+  app.post("/api/staff/:id/salary/fines", requireAuth, requireRole("Admin"), (req, res) =>
     createSalaryAdjustment(req as Request, res as Response, "fine")
   );
 
@@ -817,7 +906,7 @@ export function registerSalaryRoutes(app: Express) {
   });
 
   // ── Fine waive ──
-  app.post("/api/salary/fines/:id/waive", requireAuth, requireSalaryManage, async (req, res) => {
+  app.post("/api/salary/fines/:id/waive", requireAuth, requireRole("Admin"), async (req, res) => {
     try {
       const user = (req as any).user;
       const before = await storage.getStaffFine(param(req, "id"));

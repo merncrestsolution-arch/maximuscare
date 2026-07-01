@@ -141,6 +141,7 @@ import type {
   UpdateStaffOtEntry,
   StaffSalaryAdjustment,
   InsertStaffSalaryAdjustment,
+  UpdateStaffSalaryAdjustment,
   VisitPayment,
   InsertVisitPayment,
   PatientDocument,
@@ -316,7 +317,12 @@ export interface IStorage {
   deleteStaffFine(id: string, deletedBy?: string): Promise<boolean>;
   staffHasVisitOrIpSessionBeforeNoon(staffId: string, day: string): Promise<boolean>;
   deleteAutoFineForStaffDate(staffId: string, fineDate: string): Promise<void>;
-  ensureAutoFineForStaffDate(staffId: string, staffName: string, fineDate: string): Promise<void>;
+  ensureAutoFineForStaffDate(
+    staffId: string,
+    staffName: string,
+    fineDate: string,
+    salaryId?: string | null
+  ): Promise<void>;
   getInPatientSessionsByStaffAndDateRange(staffId: string, startDate: string, endDate: string): Promise<InPatientSession[]>;
   getAllInPatientSessionsInDateRange(startDate: string, endDate: string): Promise<InPatientSession[]>;
   getVisitsForStaffMember(staffId: string): Promise<Visit[]>;
@@ -350,6 +356,7 @@ export interface IStorage {
   markAllNotificationsRead(staffId: string): Promise<void>;
   archiveNotification(id: string, staffId: string): Promise<Notification | undefined>;
   softDeleteNotification(id: string, staffId: string): Promise<boolean>;
+  softDeleteAllNotifications(staffId: string): Promise<number>;
 
   getAllTasks(status?: string): Promise<Task[]>;
   getTasksByAssignee(staffId: string, status?: string): Promise<Task[]>;
@@ -396,6 +403,7 @@ export interface IStorage {
   updateStaffDeduction(id: string, data: UpdateStaffDeduction): Promise<StaffDeduction | undefined>;
   deleteStaffDeduction(id: string, deletedBy?: string): Promise<boolean>;
   getStaffDeductionsByStaffAndRange(staffId: string, startDate: string, endDate: string): Promise<StaffDeduction[]>;
+  getStaffDeductionsByDateRange(startDate: string, endDate: string): Promise<StaffDeduction[]>;
   getAllStaffDeductions(): Promise<StaffDeduction[]>;
 
   createStaffOtEntry(data: InsertStaffOtEntry & { amount?: string }): Promise<StaffOtEntry>;
@@ -405,7 +413,10 @@ export interface IStorage {
   getAllStaffOtEntries(): Promise<StaffOtEntry[]>;
 
   createStaffSalaryAdjustment(data: InsertStaffSalaryAdjustment): Promise<StaffSalaryAdjustment>;
+  getStaffSalaryAdjustment(id: string): Promise<StaffSalaryAdjustment | undefined>;
+  updateStaffSalaryAdjustment(id: string, data: UpdateStaffSalaryAdjustment): Promise<StaffSalaryAdjustment | undefined>;
   deleteStaffSalaryAdjustment(id: string, deletedBy?: string): Promise<boolean>;
+  getStaffSalaryAdjustmentsByDateRange(startDate: string, endDate: string): Promise<StaffSalaryAdjustment[]>;
   getStaffSalaryAdjustmentsByStaffAndRange(
     staffId: string,
     startDate: string,
@@ -1605,7 +1616,12 @@ export class DatabaseStorage implements IStorage {
     return String(settings?.autoFineAmount ?? "500");
   }
 
-  async ensureAutoFineForStaffDate(staffId: string, staffName: string, fineDate: string): Promise<void> {
+  async ensureAutoFineForStaffDate(
+    staffId: string,
+    staffName: string,
+    fineDate: string,
+    salaryId?: string | null
+  ): Promise<void> {
     const existing = await db
       .select()
       .from(staffFines)
@@ -1617,6 +1633,7 @@ export class DatabaseStorage implements IStorage {
     const amount = await this.getAutoFineAmount();
     await this.createStaffFine({
       staffId,
+      salaryId: salaryId ?? null,
       staffName,
       fineDate,
       amount,
@@ -2045,6 +2062,15 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
+  async softDeleteAllNotifications(staffId: string): Promise<number> {
+    const result = await db
+      .update(notifications)
+      .set({ deletedAt: new Date(), deletedBy: staffId })
+      .where(and(eq(notifications.staffId, staffId), isNull(notifications.deletedAt)))
+      .returning({ id: notifications.id });
+    return result.length;
+  }
+
   async getAllTasks(status?: string): Promise<Task[]> {
     const base = isNull(tasks.deletedAt);
     if (status) {
@@ -2382,6 +2408,20 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(staffDeductions.deductionDate));
   }
 
+  async getStaffDeductionsByDateRange(startDate: string, endDate: string): Promise<StaffDeduction[]> {
+    return await db
+      .select()
+      .from(staffDeductions)
+      .where(
+        and(
+          gte(staffDeductions.deductionDate, startDate),
+          lte(staffDeductions.deductionDate, endDate),
+          isNull(staffDeductions.deletedAt)
+        )
+      )
+      .orderBy(desc(staffDeductions.deductionDate));
+  }
+
   async getAllStaffDeductions(): Promise<StaffDeduction[]> {
     return await db
       .select()
@@ -2467,6 +2507,27 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async getStaffSalaryAdjustment(id: string): Promise<StaffSalaryAdjustment | undefined> {
+    const result = await db
+      .select()
+      .from(staffSalaryAdjustments)
+      .where(eq(staffSalaryAdjustments.id, id))
+      .limit(1);
+    return result[0];
+  }
+
+  async updateStaffSalaryAdjustment(
+    id: string,
+    data: UpdateStaffSalaryAdjustment
+  ): Promise<StaffSalaryAdjustment | undefined> {
+    const result = await db
+      .update(staffSalaryAdjustments)
+      .set({ ...data, updatedAt: new Date() } as any)
+      .where(eq(staffSalaryAdjustments.id, id))
+      .returning();
+    return result[0];
+  }
+
   async deleteStaffSalaryAdjustment(id: string, deletedBy?: string): Promise<boolean> {
     const result = await db
       .update(staffSalaryAdjustments)
@@ -2474,6 +2535,23 @@ export class DatabaseStorage implements IStorage {
       .where(eq(staffSalaryAdjustments.id, id))
       .returning();
     return result.length > 0;
+  }
+
+  async getStaffSalaryAdjustmentsByDateRange(
+    startDate: string,
+    endDate: string
+  ): Promise<StaffSalaryAdjustment[]> {
+    return await db
+      .select()
+      .from(staffSalaryAdjustments)
+      .where(
+        and(
+          gte(staffSalaryAdjustments.adjustmentDate, startDate),
+          lte(staffSalaryAdjustments.adjustmentDate, endDate),
+          isNull(staffSalaryAdjustments.deletedAt)
+        )
+      )
+      .orderBy(desc(staffSalaryAdjustments.adjustmentDate));
   }
 
   async getStaffSalaryAdjustmentsByStaffAndRange(

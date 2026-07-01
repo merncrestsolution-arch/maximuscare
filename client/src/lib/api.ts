@@ -716,7 +716,7 @@ export const revenueApi = {
   },
 };
 
-// Staff fines (Admin/MD manage; staff see own via GET without staffId)
+// Staff fines (Admin manage; staff see own via GET without staffId)
 export const staffFinesApi = {
   getAll: (params: { startDate: string; endDate: string; staffId?: string }) => {
     const q = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate });
@@ -866,6 +866,11 @@ export const salaryApi = {
       method: "POST",
       body: JSON.stringify(data),
     }).then(unwrapApiData),
+  updateDecrement: (staffId: string, adjustmentId: string, data: { date?: string; reason?: string; amount?: number }) =>
+    apiRequest<any>(`/staff/${staffId}/salary/decrements/${adjustmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }).then(unwrapApiData),
   addFine: (staffId: string, data: { date: string; reason: string; amount: number }) =>
     apiRequest<any>(`/staff/${staffId}/salary/fines`, {
       method: "POST",
@@ -982,6 +987,8 @@ export const notificationsApi = {
     apiRequest<any>(`/notifications/${id}/read`, { method: "PATCH" }).then(unwrapApiData),
   markAllRead: () =>
     apiRequest<any>("/notifications/mark-all-read", { method: "POST" }).then(unwrapApiData),
+  clearAll: () =>
+    apiRequest<any>("/notifications/clear-all", { method: "POST" }).then(unwrapApiData),
   archive: (id: string) =>
     apiRequest<any>(`/notifications/${id}/archive`, { method: "PATCH" }).then(unwrapApiData),
   delete: (id: string) =>

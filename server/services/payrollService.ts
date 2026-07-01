@@ -1,5 +1,13 @@
 import type { IStorage } from "../storage";
-import type { Staff, Visit, Attendance, InPatientSession, StaffFine } from "@shared/schema";
+import type {
+  Staff,
+  Visit,
+  Attendance,
+  InPatientSession,
+  StaffFine,
+  StaffSalaryAdjustment,
+  StaffDeduction,
+} from "@shared/schema";
 import { normalizeBranchName } from "@shared/branches";
 import { isClinicalRole } from "@shared/roles";
 import {
@@ -67,6 +75,8 @@ export interface PayrollSummary {
   extraHolidays: number;
   extraHolidayDeduction: number;
   finesTotal: number;
+  additionsTotal?: number;
+  decrementsTotal?: number;
   inPatientSessionsCount: number;
   finalSalary: number;
   staffDeductionsTotal?: number;
@@ -245,6 +255,16 @@ export function computePayrollForStaff(
   };
 }
 
+function sumAdjustments(rows: StaffSalaryAdjustment[], type: "addition" | "decrement" | "fine"): number {
+  return rows
+    .filter((r) => r.type === type)
+    .reduce((acc, r) => acc + Math.max(0, Number(r.amount) || 0), 0);
+}
+
+function sumDeductions(rows: StaffDeduction[]): number {
+  return rows.reduce((acc, r) => acc + Math.max(0, Number(r.amount) || 0), 0);
+}
+
 export async function computePayrollReport(
   storage: IStorage,
   rangeFrom: string,
@@ -263,10 +283,55 @@ export async function computePayrollReport(
   const attendance = await storage.getAttendanceByDateRange(rangeFrom, rangeTo);
   const ipSessions = await storage.getAllInPatientSessionsInDateRange(rangeFrom, rangeTo);
   const fines = await storage.getStaffFinesByDateRange(rangeFrom, rangeTo);
+  const adjustments = await storage.getStaffSalaryAdjustmentsByDateRange(rangeFrom, rangeTo);
+  const deductions = await storage.getStaffDeductionsByDateRange(rangeFrom, rangeTo);
 
-  const summaries = targets.map((s) =>
-    computePayrollForStaff(s, visits, attendance, ipSessions, fines, rangeFrom, rangeTo, settings)
-  );
+  const adjustmentsByStaff = new Map<string, StaffSalaryAdjustment[]>();
+  for (const adj of adjustments) {
+    const list = adjustmentsByStaff.get(adj.staffId) ?? [];
+    list.push(adj);
+    adjustmentsByStaff.set(adj.staffId, list);
+  }
+  const deductionsByStaff = new Map<string, StaffDeduction[]>();
+  for (const row of deductions) {
+    const list = deductionsByStaff.get(row.staffId) ?? [];
+    list.push(row);
+    deductionsByStaff.set(row.staffId, list);
+  }
+
+  const summaries = targets.map((s) => {
+    const base = computePayrollForStaff(s, visits, attendance, ipSessions, fines, rangeFrom, rangeTo, settings);
+    const staffAdjustments = adjustmentsByStaff.get(s.id) ?? [];
+    const staffDeductions = deductionsByStaff.get(s.id) ?? [];
+    const additionsTotal = sumAdjustments(staffAdjustments, "addition");
+    const decrementsTotal = sumAdjustments(staffAdjustments, "decrement");
+    const fineAdjustmentsTotal = sumAdjustments(staffAdjustments, "fine");
+    const staffDeductionsTotal = sumDeductions(staffDeductions);
+    const otherAdjustments = Number(base.otherAdjustments || 0);
+    const otherCredits = otherAdjustments > 0 ? otherAdjustments : 0;
+    const otherDeductions = (otherAdjustments < 0 ? Math.abs(otherAdjustments) : 0) + staffDeductionsTotal + decrementsTotal;
+    const finesTotal = base.finesTotal + fineAdjustmentsTotal;
+    const finalSalary = Math.max(
+      0,
+      base.basicSalary +
+        base.incentiveTotal +
+        base.homeIncome +
+        base.otIncome +
+        additionsTotal +
+        otherCredits -
+        finesTotal -
+        base.extraHolidayDeduction -
+        otherDeductions
+    );
+    return {
+      ...base,
+      additionsTotal,
+      decrementsTotal,
+      staffDeductionsTotal,
+      finesTotal,
+      finalSalary,
+    };
+  });
 
   return { settings, summaries };
 }
@@ -278,7 +343,11 @@ export async function persistPayrollSnapshotRecords(
   periodStart: string
 ): Promise<void> {
   const deductionsTotal =
-    summary.finesTotal + summary.extraHolidayDeduction + Math.max(0, -summary.otherAdjustments);
+    summary.finesTotal +
+    summary.extraHolidayDeduction +
+    Math.max(0, -summary.otherAdjustments) +
+    Number(summary.staffDeductionsTotal ?? 0) +
+    Number(summary.decrementsTotal ?? 0);
 
   await storage.createSalaryRecord({
     staffId: summary.staffId,

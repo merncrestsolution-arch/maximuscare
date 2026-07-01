@@ -6,6 +6,7 @@ import {
   useMarkAllNotificationsRead,
   useArchiveNotification,
   useDeleteNotification,
+  useClearAllNotifications,
 } from "@/hooks/useData";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ export default function NotificationsPage() {
   const { data: notifications = [], isLoading } = useNotifications(opts);
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
+  const clearAll = useClearAllNotifications();
   const archive = useArchiveNotification();
   const remove = useDeleteNotification();
 
@@ -49,13 +51,30 @@ export default function NotificationsPage() {
     <div className="space-y-4 p-4 max-w-2xl mx-auto">
       <div className="flex items-center justify-between gap-2">
         <h1 className="text-2xl font-bold">Notifications</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => markAllRead.mutate(undefined, { onSuccess: () => toast({ title: "All marked read" }) })}
-        >
-          <CheckCheck className="h-4 w-4 mr-1" /> Mark all read
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              markAllRead.mutate(undefined, { onSuccess: () => toast({ title: "All marked read" }) })
+            }
+          >
+            <CheckCheck className="h-4 w-4 mr-1" /> Mark all read
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive"
+            onClick={() => {
+              if (!window.confirm("Clear all notifications?")) return;
+              clearAll.mutate(undefined, {
+                onSuccess: () => toast({ title: "Notifications cleared" }),
+              });
+            }}
+          >
+            <Trash2 className="h-4 w-4 mr-1" /> Clear all
+          </Button>
+        </div>
       </div>
 
       <Tabs
@@ -165,7 +184,8 @@ export default function NotificationsPage() {
                           remove.mutate(n.id, { onSuccess: () => toast({ title: "Deleted" }) });
                         }}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Clear
                       </Button>
                     </div>
                   </CardContent>

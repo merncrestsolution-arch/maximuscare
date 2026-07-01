@@ -51,6 +51,13 @@ export const patients = pgTable("patients", {
   defaultVisitType: text("default_visit_type").notNull(),
   condition: text("condition").notNull(),
   patientCode: text("patient_code"),
+  dataVersion: integer("data_version").notNull().default(2),
+  dataMigratedAt: timestamp("data_migrated_at"),
+  qrToken: text("qr_token"),
+  qrTokenExpiresAt: timestamp("qr_token_expires_at"),
+  idCardPdfKey: text("id_card_pdf_key"),
+  idCardQrToken: text("id_card_qr_token"),
+  idCardGeneratedAt: timestamp("id_card_generated_at"),
   fullName: text("full_name"),
   therapistFirstVisitId: varchar("therapist_first_visit_id"),
   firstVisitDate: date("first_visit_date"),
@@ -68,7 +75,19 @@ export const patients = pgTable("patients", {
 
 export const PATIENT_STATUSES = ["Active", "Inactive", "Completed", "Discharged", "Transferred"] as const;
 
-export const insertPatientSchema = createInsertSchema(patients).omit({ id: true, patientCode: true, createdAt: true, updatedAt: true }).extend({
+export const insertPatientSchema = createInsertSchema(patients).omit({
+  id: true,
+  patientCode: true,
+  dataVersion: true,
+  dataMigratedAt: true,
+  qrToken: true,
+  qrTokenExpiresAt: true,
+  idCardPdfKey: true,
+  idCardQrToken: true,
+  idCardGeneratedAt: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
   age: z.union([z.number().int().min(1, "Age must be at least 1").max(130), z.null()]).optional(),
 });
 export const updatePatientSchema = insertPatientSchema.partial();
@@ -241,6 +260,11 @@ export const inPatientAdmissions = pgTable("in_patient_admissions", {
   // same human-facing Patient ID (patientCode) instead of generating a new one.
   patientId: text("patient_id"),
   patientCode: text("patient_code"),
+  qrToken: text("qr_token"),
+  qrTokenExpiresAt: timestamp("qr_token_expires_at"),
+  idCardPdfKey: text("id_card_pdf_key"),
+  idCardQrToken: text("id_card_qr_token"),
+  idCardGeneratedAt: timestamp("id_card_generated_at"),
   packageType: text("package_type").notNull(),
   admitDate: date("admit_date").notNull(),
   amountPerDay: decimal("amount_per_day", { precision: 10, scale: 2 }).notNull(),
@@ -487,6 +511,7 @@ export type Appointment = typeof appointments.$inferSelect;
 export const staffFines = pgTable("staff_fines", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   staffId: varchar("staff_id").notNull().references(() => staff.id),
+  salaryId: varchar("salary_id").references(() => salaries.id),
   staffName: text("staff_name").notNull(),
   fineDate: date("fine_date").notNull(),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull().default("500"),
@@ -525,6 +550,7 @@ export const branches = pgTable("branches", {
   code: text("code"),
   address: text("address"),
   isActive: boolean("is_active").notNull().default(true),
+  verifiedByAdmin: boolean("verified_by_admin").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -842,8 +868,9 @@ export type StaffOtEntry = typeof staffOtEntries.$inferSelect;
 export const staffSalaryAdjustments = pgTable("staff_salary_adjustments", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   staffId: varchar("staff_id").notNull().references(() => staff.id),
+  salaryId: varchar("salary_id").references(() => salaries.id),
   staffName: text("staff_name").notNull(),
-  type: text("type").notNull(), // 'addition' | 'decrement'
+  type: text("type").notNull(), // 'addition' | 'decrement' | 'fine' (legacy)
   amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
   adjustmentDate: date("adjustment_date").notNull(),
   reason: text("reason").notNull(),

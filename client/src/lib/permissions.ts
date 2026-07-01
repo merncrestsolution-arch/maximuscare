@@ -171,6 +171,11 @@ export function canManageSalary(role: string | undefined): boolean {
   return isManagementRole(role);
 }
 
+/** Only Admin can add/edit fines. */
+export function canManageFines(role: string | undefined): boolean {
+  return isAdminRole(role);
+}
+
 export function canViewSalary(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
   return isManagementRole(r) || r === "Physiotherapist" || r === "Staff" || r === "Manager";
