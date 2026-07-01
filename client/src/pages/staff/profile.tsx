@@ -26,7 +26,7 @@ export default function StaffProfilePage() {
     { startDate: ipSessionDate, endDate: ipDayEnd, staffId },
     !!staffId
   );
-  const { data: profileUser, isLoading: staffLoading, error: staffError } = useStaffMember(staffId);
+  const { data: profileUser, isLoading: staffLoading, isPending: staffPending, error: staffError } = useStaffMember(staffId);
   const { data: allBranches = [] } = useBranches();
   const { data: allVisits = [] } = useVisits();
   const { data: patients = [] } = usePatients();
@@ -54,7 +54,7 @@ export default function StaffProfilePage() {
     return <div>Unauthorized</div>;
   }
 
-  if (staffLoading) {
+  if (staffPending || staffLoading || (staffId && !profileUser && !staffError)) {
     return (
       <div className="flex items-center justify-center py-12">
         <span className="text-muted-foreground">Loading…</span>
@@ -75,7 +75,7 @@ export default function StaffProfilePage() {
   }
 
   const staffRoleCaps =
-    (profileUser as any).roleCapabilities ??
+    profileUser.roleCapabilities ??
     (roleHasConfigurableCapabilities(profileUser.role)
       ? defaultCapabilitiesForRole(profileUser.role)
       : null);

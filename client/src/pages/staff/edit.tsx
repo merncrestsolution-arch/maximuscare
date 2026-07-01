@@ -87,8 +87,8 @@ export default function StaffEditPage() {
         ...existing,
         joinDate: toDateInputValue((existing as any).joiningDate || (existing as any).joinDate || existing.createdAt),
       });
-      if ((existing as any).roleCapabilities) {
-        setRoleCapabilities((existing as any).roleCapabilities);
+      if (existing?.roleCapabilities) {
+        setRoleCapabilities(existing.roleCapabilities);
       } else if (roleHasConfigurableCapabilities(existing.role)) {
         setRoleCapabilities(defaultCapabilitiesForRole(existing.role));
       }

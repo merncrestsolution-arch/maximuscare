@@ -311,8 +311,8 @@ function normalizeStaffBody(body: Record<string, unknown>): Record<string, unkno
   return normalized;
 }
 
-function extractRoleCapabilities(body: Record<string, unknown>) {
-  return parseRoleCapabilitiesInput(body.roleCapabilities);
+function extractRoleCapabilities(body: Record<string, unknown> | undefined) {
+  return parseRoleCapabilitiesInput(body?.roleCapabilities);
 }
 
 async function applyStaffRoleCapabilities(
