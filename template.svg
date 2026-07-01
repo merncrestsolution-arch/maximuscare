@@ -1,28 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
      width="1152" height="728" viewBox="0 0 1152 728.25">
-  <!-- Static card artwork -->
   <image id="card-background" x="0" y="0" width="1152" height="728.25"
          preserveAspectRatio="xMidYMid meet"
          xlink:href="{{BACKGROUND_IMAGE}}" href="{{BACKGROUND_IMAGE}}"/>
 
-  <!-- Dynamic fields — adjust x/y here if text needs nudging on your artwork -->
   <g id="patient-fields" font-family="Arial, Helvetica, sans-serif">
-    <rect x="108" y="184" width="540" height="46" fill="#ffffff"/>
-    <rect x="242" y="242" width="365" height="36" fill="#ffffff"/>
-    <rect x="242" y="292" width="365" height="36" fill="#ffffff"/>
-    <rect x="242" y="342" width="430" height="40" fill="#ffffff"/>
-    <rect x="918" y="678" width="215" height="34" fill="#1f5f9f"/>
+    <text x="138" y="235" font-size="22" font-weight="bold" fill="#1a3a6e">{patient.name}</text>
+    <text x="312" y="283" font-size="18" fill="#1a3a6e">{patient.id}</text>
+    <text x="312" y="333" font-size="18" fill="#1a3a6e">{patient.phone}</text>
+    <text x="312" y="383" font-size="18" fill="#1a3a6e">{patient.address}</text>
 
-    <text x="138" y="222" font-size="22" font-weight="bold" fill="#1a3a6e">{patient.name}</text>
-    <text x="312" y="270" font-size="18" fill="#1a3a6e">{patient.id}</text>
-    <text x="312" y="320" font-size="18" fill="#1a3a6e">{patient.phone}</text>
-    <text x="312" y="370" font-size="18" fill="#1a3a6e">{patient.address}</text>
-
-    <!-- QR sits in the empty frame on the far right of the card -->
-    <image id="patient-qr" x="905" y="142" width="188" height="188"
+    <image id="patient-qr" x="908" y="228" width="175" height="175"
            xlink:href="{{QR_PLACEHOLDER}}" href="{{QR_PLACEHOLDER}}"/>
 
-    <text x="1095" y="704" text-anchor="end" font-size="15" fill="#ffffff">{patient.cardId}</text>
+    <text x="1005" y="704" font-size="15" fill="#ffffff">{patient.cardId}</text>
   </g>
 </svg>
