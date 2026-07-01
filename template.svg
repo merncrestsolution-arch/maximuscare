@@ -5,15 +5,15 @@
          preserveAspectRatio="xMidYMid meet"
          xlink:href="{{BACKGROUND_IMAGE}}" href="{{BACKGROUND_IMAGE}}"/>
 
-  <g id="patient-fields" font-family="Arial, Helvetica, sans-serif">
-    <text x="138" y="268" font-size="22" font-weight="bold" fill="#1a3a6e">{patient.name}</text>
-    <text x="312" y="318" font-size="18" fill="#1a3a6e">{patient.id}</text>
-    <text x="312" y="368" font-size="18" fill="#1a3a6e">{patient.phone}</text>
-    <text x="312" y="418" font-size="18" fill="#1a3a6e">{patient.address}</text>
+  <g id="patient-fields" font-family="DejaVu Sans, Arial, Helvetica, sans-serif">
+    <text x="138" y="314" font-size="22" font-weight="bold" fill="#1a3a6e">{patient.name}</text>
+    <text x="312" y="358" font-size="18" fill="#1a3a6e">{patient.id}</text>
+    <text x="312" y="408" font-size="18" fill="#1a3a6e">{patient.phone}</text>
+    <text x="312" y="458" font-size="18" fill="#1a3a6e">{patient.address}</text>
 
-    <image id="patient-qr" x="908" y="228" width="175" height="175"
+    <image id="patient-qr" x="886" y="292" width="160" height="160"
            xlink:href="{{QR_PLACEHOLDER}}" href="{{QR_PLACEHOLDER}}"/>
 
-    <text x="1005" y="704" font-size="15" fill="#ffffff">{patient.cardId}</text>
+    <text x="988" y="698" font-size="14" fill="#ffffff">{patient.cardId}</text>
   </g>
 </svg>

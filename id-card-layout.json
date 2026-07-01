@@ -1,4 +1,3 @@
 {
-  "qr": { "x": 908, "y": 228, "size": 175 },
-  "comment": "QR box position for Canva exports (viewBox ~1152x728). Edit after re-export if QR is misaligned."
+  "qr": { "x": 886, "y": 292, "size": 160 }
 }

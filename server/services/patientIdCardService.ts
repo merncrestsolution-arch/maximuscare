@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import QRCode from "qrcode";
-import sharp from "sharp";
+import { Resvg } from "@resvg/resvg-js";
 
 export interface PatientCardInput {
   id: string;
@@ -19,7 +19,10 @@ export interface PatientCardFiles {
 
 type QrLayout = { x: number; y: number; size: number };
 
-const DEFAULT_QR: QrLayout = { x: 905, y: 142, size: 188 };
+const DEFAULT_QR: QrLayout = { x: 886, y: 292, size: 160 };
+
+/** ~300 DPI rasterization for a 1152px-wide card. */
+const PNG_OUTPUT_WIDTH = 4800;
 
 function escapeXml(value: string): string {
   return value
@@ -139,6 +142,14 @@ export function generateCardId(seed: string): string {
   return `MX-${base}-${hash}`;
 }
 
+function svgToPng(svgContent: string): Buffer {
+  const resvg = new Resvg(svgContent, {
+    fitTo: { mode: "width", value: PNG_OUTPUT_WIDTH },
+    font: { loadSystemFonts: true },
+  });
+  return Buffer.from(resvg.render().asPng());
+}
+
 export async function generatePatientCardBuffers(
   patient: PatientCardInput
 ): Promise<PatientCardFiles> {
@@ -160,6 +171,6 @@ export async function generatePatientCardBuffers(
   const qrDataUrl = await generateQrDataUrl(patient.qrToken);
   const svgContent = fillTemplate(svgTemplate, patient, qrDataUrl, backgroundDataUrl, qrLayout);
   const svg = Buffer.from(svgContent, "utf8");
-  const png = await sharp(svg, { density: 300 }).png().toBuffer();
+  const png = svgToPng(svgContent);
   return { svg, png };
 }
