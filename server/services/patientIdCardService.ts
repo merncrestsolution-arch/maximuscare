@@ -7,7 +7,12 @@ import { Resvg } from "@resvg/resvg-js";
 import type { OrganizationId } from "@shared/branchAccess";
 import { signPatientQrToken, verifyPatientQrToken } from "./qrTokenService";
 
-const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+let moduleDir = process.cwd();
+try {
+  moduleDir = path.dirname(fileURLToPath(import.meta.url));
+} catch {
+  moduleDir = process.cwd();
+}
 
 export interface PatientCardInput {
   id: string;
