@@ -48,14 +48,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <SidebarProvider defaultOpen={!isTablet} className="min-h-svh w-full">
+    <SidebarProvider defaultOpen={!isTablet} className="h-svh w-full overflow-hidden">
       <Sidebar
         collapsible="icon"
         className="[&_[data-sidebar=sidebar]]:border-[var(--sidebar-border)] [&_[data-sidebar=sidebar]]:bg-[var(--sidebar-bg)] [&_[data-sidebar=sidebar]]:text-[var(--sidebar-text)] [&_svg]:text-white/80"
       >
         <AppSidebarNav />
       </Sidebar>
-      <SidebarInset className="flex min-h-svh min-w-0 w-full flex-1 flex-col overflow-hidden">
+      <SidebarInset className="flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
         <Header
           before={
             <div className="flex items-center shrink-0">
@@ -67,7 +67,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </div>
           }
         />
-        <div className={`flex-1 min-w-0 w-full overflow-x-hidden overflow-y-auto scrollbar-smooth p-3 md:p-6 ${showBottomNav ? 'pb-28' : 'pb-6'} md:pb-6 px-safe`}>
+        <div className={`flex-1 min-h-0 min-w-0 w-full overflow-x-hidden overflow-y-auto scrollbar-smooth p-3 md:p-6 ${showBottomNav ? 'pb-28' : 'pb-6'} md:pb-6 px-safe`}>
           <motion.div
             key={location}
             initial={{ opacity: 0, y: 10 }}

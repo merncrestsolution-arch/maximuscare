@@ -373,14 +373,17 @@
   --color-input: hsl(220 15% 22%);
 }
 
-/* Sidebar + main content — prevent overlap / clipped KPI cards */
+/* Sidebar + main content — lock shell height so the inner panel scrolls */
 [data-slot="sidebar-wrapper"] {
   display: flex;
   width: 100%;
-  min-height: 100svh;
+  height: 100svh;
+  max-height: 100svh;
+  overflow: hidden;
 }
 [data-slot="sidebar-inset"] {
   min-width: 0;
+  min-height: 0;
   flex: 1 1 0%;
 }
 
