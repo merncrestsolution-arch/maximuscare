@@ -1,4 +1,24 @@
 import type { InPatientAdmission } from "@shared/schema";
+import type { IStorage } from "../storage";
+
+/** Outstanding balance from a discharged admission (grand total minus all payments). */
+export function priorAdmissionBalanceFromDischarge(
+  grandTotal: number | string | null | undefined,
+  paymentTotal: number,
+): number {
+  const grand = parseFloat(String(grandTotal ?? 0)) || 0;
+  return Math.max(0, grand - paymentTotal);
+}
+
+export async function computePriorAdmissionBalance(
+  storage: IStorage,
+  admissionId: string,
+): Promise<number> {
+  const discharge = await storage.getInPatientDischargeByAdmission(admissionId);
+  if (!discharge) return 0;
+  const paymentTotal = await storage.getPaymentTotalByAdmission(admissionId);
+  return priorAdmissionBalanceFromDischarge(discharge.grandTotal, paymentTotal);
+}
 
 /** Stable grouping key for the same person across admission episodes. */
 export function resolveInPatientAdmissionKey(entry: {

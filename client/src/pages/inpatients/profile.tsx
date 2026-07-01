@@ -616,12 +616,15 @@ export default function InPatientProfilePage() {
         admissionId: patientId,
         admitDate: readmitDate || undefined,
       });
+      const carriedForward = Number(newAdmission?.carriedForwardBalance ?? 0);
       toast({
         title: "Success",
         description:
-          totalPastDue > 0
-            ? `Patient re-admitted. Past due balance: LKR ${formatMoney(totalPastDue)}`
-            : "Patient re-admitted",
+          carriedForward > 0
+            ? `Patient re-admitted. Previous admission balance LKR ${formatMoney(carriedForward)} added to billing.`
+            : totalPastDue > 0
+              ? `Patient re-admitted. Past due balance: LKR ${formatMoney(totalPastDue)}`
+              : "Patient re-admitted",
       });
       setReadmitDate("");
       setReadmitOpen(false);
@@ -1429,7 +1432,9 @@ export default function InPatientProfilePage() {
                     Total due: LKR {formatMoney(totalPastDue)}
                   </p>
                   <p className="text-xs text-amber-800/90 pt-1">
-                    Collect or record payment for the previous stay before or after re-admission.
+                    {pastDueAdmission > 0
+                      ? "The previous admission balance will be added to the new admission billing as a carried-forward charge."
+                      : "Outpatient visit balances remain on the patient visit records."}
                   </p>
                 </div>
               ) : (

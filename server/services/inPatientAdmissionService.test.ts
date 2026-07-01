@@ -3,9 +3,16 @@ import {
   compareAdmissionRecency,
   pickLatestAdmissionsPerPatient,
   filterInPatientsByListStatus,
+  priorAdmissionBalanceFromDischarge,
 } from "./inPatientAdmissionService";
 
 describe("inPatientAdmissionService", () => {
+  it("computes prior admission balance from discharge grand total minus payments", () => {
+    expect(priorAdmissionBalanceFromDischarge(10000, 3500)).toBe(6500);
+    expect(priorAdmissionBalanceFromDischarge(10000, 10000)).toBe(0);
+    expect(priorAdmissionBalanceFromDischarge(10000, 12000)).toBe(0);
+  });
+
   it("prefers newer createdAt over later admitDate when picking current episode", () => {
     const olderDischarged = {
       id: "a1",

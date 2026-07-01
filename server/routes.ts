@@ -55,6 +55,7 @@ import { registerPatientRoutes } from "./routes/patients";
 import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
 import { verifyPatientQrToken } from "./services/qrTokenService";
 import { ensureAdmissionQrToken, ensurePatientDataVersion, getPatientDataHealthSummary, runPatientDataBackfill, regenerateAllPatientCodes } from "./services/patientDataVersionService";
+import { computePriorAdmissionBalance } from "./services/inPatientAdmissionService";
 import { getOrCreateAdmissionCardPdf, getOrCreatePatientCardPdf, invalidatePatientIdCard, patientIdCardFieldsChanged, bulkPatientCardPdfs } from "./services/patientIdCardCacheService";
 import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
@@ -3098,6 +3099,27 @@ export async function registerRoutes(
 
       const newAdmission = await storage.createInPatientAdmission(newAdmissionData as any);
 
+      let carriedForwardBalance = 0;
+      let carriedForwardExpenseId: string | null = null;
+      const priorBalance = await computePriorAdmissionBalance(storage, admissionId);
+      if (priorBalance > 0) {
+        const staffInfo = await storage.getStaff(user.staffId);
+        const priorDischarge = await storage.getInPatientDischargeByAdmission(admissionId);
+        const expense = await storage.createInPatientExtraExpense({
+          admissionId: newAdmission.id,
+          expenseDate: requestedAdmit,
+          category: "Others",
+          amount: priorBalance.toFixed(2),
+          description: priorDischarge
+            ? `Previous admission balance carried forward (discharged ${priorDischarge.dischargeDate})`
+            : "Previous admission balance carried forward",
+          createdByStaffId: user.staffId,
+          createdByStaffName: staffInfo?.name || "System",
+        });
+        carriedForwardBalance = priorBalance;
+        carriedForwardExpenseId = expense.id;
+      }
+
       if (admission.patientId) {
         await storage.updatePatient(admission.patientId, { status: "Active" });
       }
@@ -3108,10 +3130,19 @@ export async function registerRoutes(
         module: "inpatient",
         action: "create",
         recordId: newAdmission.id,
-        newValue: { ...newAdmission, readmittedFromId: admissionId },
+        newValue: {
+          ...newAdmission,
+          readmittedFromId: admissionId,
+          carriedForwardBalance,
+          carriedForwardExpenseId,
+        },
       });
 
-      return res.status(201).json(newAdmission);
+      return res.status(201).json({
+        ...newAdmission,
+        carriedForwardBalance,
+        carriedForwardExpenseId,
+      });
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }

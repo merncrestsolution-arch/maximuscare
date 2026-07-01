@@ -198,107 +198,6 @@ function AttendanceReportTable({
   );
 }
 
-const ATTENDANCE_PAGE_SIZE = 50;
-
-function moduleFormatOt(val: any): number | null {
-  const num = Number(val);
-  return Number.isFinite(num) ? num : null;
-}
-
-/**
- * History list with client-side pagination so very large attendance datasets
- * (team history / intern history) render smoothly without breaking layout.
- */
-function PaginatedAttendanceList({
-  records,
-  showActions,
-  isManagement,
-  canViewLocation,
-  onEdit,
-  onDelete,
-}: {
-  records: Array<any>;
-  showActions?: boolean;
-  isManagement: boolean;
-  canViewLocation?: boolean;
-  onEdit: (record: any) => void;
-  onDelete: (id: string) => void;
-}) {
-  const [visible, setVisible] = useState(ATTENDANCE_PAGE_SIZE);
-  const shown = records.slice(0, visible);
-  const remaining = records.length - visible;
-
-  return (
-    <div className="space-y-3 pt-4">
-      {records.length === 0 ? (
-        <div className="text-center text-muted-foreground py-8">No records found.</div>
-      ) : (
-        <>
-          {shown.map((record) => (
-            <Card key={record.id} data-testid={`card-attendance-${record.id}`}>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-sm text-muted-foreground">{format(new Date(record.date), 'EEE, dd MMM yyyy')}</div>
-                    <div className="font-semibold text-base mt-0.5">{record.staffName}</div>
-                    {record.checkInTime && (
-                      <div className="text-xs text-muted-foreground mt-1 flex flex-col gap-1">
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          <span>
-                            In: {format(new Date(record.checkInTime), 'hh:mm a')}
-                            {record.checkOutTime && ` | Out: ${format(new Date(record.checkOutTime), 'hh:mm a')}`}
-                          </span>
-                        </div>
-                        {moduleFormatOt(record.overtimeHours) !== null && (
-                          <div className="text-xs text-muted-foreground" data-testid={`text-attendance-ot-${record.id}`}>
-                            OT: {moduleFormatOt(record.overtimeHours)} hours
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {canViewLocation && record.status === 'Present' && record.latitude != null && record.latitude !== "" && record.longitude != null && record.longitude !== "" && (
-                      <div className="mt-1 text-xs">
-                        <ViewLocationButton attendanceId={record.id} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className={`px-3 py-1.5 rounded-full text-sm font-semibold flex items-center gap-1.5 ${record.status === 'Present' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                      {record.status === 'Present' ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                      {record.status}
-                    </div>
-                  </div>
-                </div>
-                {showActions && isManagement && (
-                  <div className="flex justify-end flex-wrap gap-1 mt-2 border-t pt-2">
-                    <Button variant="ghost" size="sm" onClick={() => onEdit(record)} data-testid={`button-edit-attendance-${record.id}`}>
-                      <Pencil className="h-4 w-4 mr-1" /> Edit
-                    </Button>
-                    <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => onDelete(record.id)} data-testid={`button-delete-attendance-${record.id}`}>
-                      <Trash2 className="h-4 w-4 mr-1" /> Delete
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-          {remaining > 0 && (
-            <Button
-              variant="outline"
-              className="w-full h-11"
-              onClick={() => setVisible((v) => v + ATTENDANCE_PAGE_SIZE)}
-              data-testid="button-attendance-load-more"
-            >
-              Load more ({remaining} remaining)
-            </Button>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
 export default function AttendancePage() {
   const { user } = useAuth();
   const { logoUri } = useBranding();
@@ -1020,11 +919,10 @@ export default function AttendancePage() {
                 <div>Prepared by: {user.name}</div>
               </div>
             </div>
-            <AttendanceReportTable records={myHistory} title="My Attendance Records" scrollable canViewLocation={canViewLocation} />
-          </div>
-          <div className="max-h-[60vh] overflow-y-auto overscroll-contain rounded-xl border border-border/60 bg-white px-3 pb-3">
-            <PaginatedAttendanceList
+            <AttendanceReportTable
               records={myHistory}
+              title="My Attendance Records"
+              scrollable
               showActions={isManagement}
               isManagement={isManagement}
               canViewLocation={canViewLocation}
@@ -1069,16 +967,6 @@ export default function AttendancePage() {
                 scrollable
                 searchable
                 showActions
-                isManagement={isManagement}
-                canViewLocation={canViewLocation}
-                onEdit={setEditRecord}
-                onDelete={(id) => { setDeletingRecordId(id); setDeleteConfirmOpen(true); }}
-              />
-            </div>
-            <div className="max-h-[60vh] overflow-y-auto overscroll-contain rounded-xl border border-border/60 bg-white px-3 pb-3">
-              <PaginatedAttendanceList
-                records={allHistory}
-                showActions={true}
                 isManagement={isManagement}
                 canViewLocation={canViewLocation}
                 onEdit={setEditRecord}
