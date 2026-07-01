@@ -198,6 +198,111 @@ function branchCoreSelect() {
   };
 }
 
+function patientCoreSelect() {
+  return {
+    id: patients.id,
+    name: patients.name,
+    phone: patients.phone,
+    age: patients.age,
+    gender: patients.gender,
+    address: patients.address,
+    registeredDate: patients.registeredDate,
+    branch: patients.branch,
+    status: patients.status,
+    defaultVisitType: patients.defaultVisitType,
+    condition: patients.condition,
+    patientCode: patients.patientCode,
+    fullName: patients.fullName,
+    therapistFirstVisitId: patients.therapistFirstVisitId,
+    firstVisitDate: patients.firstVisitDate,
+    branchId: patients.branchId,
+    dateOfBirth: patients.dateOfBirth,
+    nicOrPassport: patients.nicOrPassport,
+    emergencyContact: patients.emergencyContact,
+    referralSource: patients.referralSource,
+    photoUri: patients.photoUri,
+    deletedAt: patients.deletedAt,
+    deletedBy: patients.deletedBy,
+    createdAt: patients.createdAt,
+    updatedAt: patients.updatedAt,
+  };
+}
+
+function withPatientExtensionDefaults(row: Record<string, unknown>): Patient {
+  return {
+    ...(row as object),
+    dataVersion: Number(row.dataVersion ?? row.data_version ?? 2),
+    dataMigratedAt: (row.dataMigratedAt ?? row.data_migrated_at ?? null) as Date | null,
+    qrToken: (row.qrToken ?? row.qr_token ?? null) as string | null,
+    qrTokenExpiresAt: (row.qrTokenExpiresAt ?? row.qr_token_expires_at ?? null) as Date | null,
+    idCardPdfKey: (row.idCardPdfKey ?? row.id_card_pdf_key ?? null) as string | null,
+    idCardQrToken: (row.idCardQrToken ?? row.id_card_qr_token ?? null) as string | null,
+    idCardGeneratedAt: (row.idCardGeneratedAt ?? row.id_card_generated_at ?? null) as Date | null,
+  } as Patient;
+}
+
+async function fetchPatientsRaw(whereDeletedOnly = true): Promise<Patient[]> {
+  const statement = whereDeletedOnly
+    ? `SELECT id, name, phone, age, gender, address, registered_date, branch, status,
+       default_visit_type, condition, patient_code, full_name, therapist_first_visit_id,
+       first_visit_date, branch_id, date_of_birth, nic_or_passport, emergency_contact,
+       referral_source, photo_uri, deleted_at, deleted_by, created_at, updated_at
+       FROM patients WHERE deleted_at IS NULL ORDER BY full_name, name`
+    : `SELECT id, name, phone, age, gender, address, registered_date, branch, status,
+       default_visit_type, condition, patient_code, full_name, therapist_first_visit_id,
+       first_visit_date, branch_id, date_of_birth, nic_or_passport, emergency_contact,
+       referral_source, photo_uri, deleted_at, deleted_by, created_at, updated_at
+       FROM patients ORDER BY full_name, name`;
+  const result = await runRaw(sql.raw(statement));
+  const rows = ((result as { rows?: Record<string, unknown>[] }).rows ?? []) as Record<string, unknown>[];
+  return rows.map((row) =>
+    withPatientExtensionDefaults({
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      age: row.age,
+      gender: row.gender,
+      address: row.address,
+      registeredDate: row.registered_date,
+      branch: row.branch,
+      status: row.status,
+      defaultVisitType: row.default_visit_type,
+      condition: row.condition,
+      patientCode: row.patient_code,
+      fullName: row.full_name,
+      therapistFirstVisitId: row.therapist_first_visit_id,
+      firstVisitDate: row.first_visit_date,
+      branchId: row.branch_id,
+      dateOfBirth: row.date_of_birth,
+      nicOrPassport: row.nic_or_passport,
+      emergencyContact: row.emergency_contact,
+      referralSource: row.referral_source,
+      photoUri: row.photo_uri,
+      deletedAt: row.deleted_at,
+      deletedBy: row.deleted_by,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }),
+  );
+}
+
+async function fetchPatients(where?: SQL): Promise<Patient[]> {
+  try {
+    let query = db
+      .select(patientCoreSelect())
+      .from(patients)
+      .orderBy(asc(patients.fullName), asc(patients.name));
+    if (where) {
+      query = query.where(where) as typeof query;
+    }
+    const rows = await query;
+    return rows.map((row) => withPatientExtensionDefaults(row));
+  } catch (error: unknown) {
+    console.warn("[storage] patient select fallback:", String((error as Error)?.message ?? error));
+    return fetchPatientsRaw(true);
+  }
+}
+
 import type {
   Staff,
   InsertStaff,
@@ -634,31 +739,28 @@ export class DatabaseStorage implements IStorage {
 
   // Patient methods
   async getPatient(id: string): Promise<Patient | undefined> {
-    const result = await db
-      .select()
-      .from(patients)
-      .where(and(eq(patients.id, id), isNull(patients.deletedAt)))
-      .limit(1);
-    return result[0];
+    try {
+      const result = await db
+        .select(patientCoreSelect())
+        .from(patients)
+        .where(and(eq(patients.id, id), isNull(patients.deletedAt)))
+        .limit(1);
+      return result[0] ? withPatientExtensionDefaults(result[0]) : undefined;
+    } catch (error: unknown) {
+      console.warn("[storage] patient detail fallback:", String((error as Error)?.message ?? error));
+      return (await fetchPatientsRaw(true)).find((p) => p.id === id);
+    }
   }
 
   async getAllPatients(): Promise<Patient[]> {
-    return await db
-      .select()
-      .from(patients)
-      .where(isNull(patients.deletedAt))
-      .orderBy(asc(patients.fullName), asc(patients.name));
+    return fetchPatients(isNull(patients.deletedAt));
   }
 
   async getPatientsByBranch(branch: string): Promise<Patient[]> {
     const { recordMatchesBranchScope, branchIdsForName } = await import("./utils/branchScope");
-    const branches = await this.getAllBranches();
-    const ids = branchIdsForName(branches, branch);
-    const all = await db
-      .select()
-      .from(patients)
-      .where(isNull(patients.deletedAt))
-      .orderBy(asc(patients.fullName), asc(patients.name));
+    const branchRows = await this.getAllBranches();
+    const ids = branchIdsForName(branchRows, branch);
+    const all = await fetchPatients(isNull(patients.deletedAt));
     return all.filter((p: Patient) => recordMatchesBranchScope(p, null, branch, ids));
   }
 
@@ -686,11 +788,35 @@ export class DatabaseStorage implements IStorage {
       );
     }
     const where = and(...conditions);
-    let allRows = await db
-      .select()
-      .from(patients)
-      .where(where)
-      .orderBy(asc(patients.fullName), asc(patients.name));
+    let allRows: Patient[];
+    try {
+      const rows = await db
+        .select(patientCoreSelect())
+        .from(patients)
+        .where(where)
+        .orderBy(asc(patients.fullName), asc(patients.name));
+      allRows = rows.map((row) => withPatientExtensionDefaults(row));
+    } catch (error: unknown) {
+      console.warn("[storage] patient paginated fallback:", String((error as Error)?.message ?? error));
+      allRows = await fetchPatientsRaw(true);
+      if (filters.status) {
+        allRows = allRows.filter((p) => p.status === filters.status);
+      }
+      if (filters.patientIds?.length) {
+        const allowed = new Set(filters.patientIds);
+        allRows = allRows.filter((p) => allowed.has(p.id));
+      }
+      if (filters.search?.trim()) {
+        const q = filters.search.trim().toLowerCase();
+        allRows = allRows.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            String(p.fullName ?? "").toLowerCase().includes(q) ||
+            String(p.phone ?? "").toLowerCase().includes(q) ||
+            String(p.patientCode ?? "").toLowerCase().includes(q),
+        );
+      }
+    }
 
     if (filters.branch) {
       const { recordMatchesBranchScope, branchIdsForName } = await import("./utils/branchScope");
@@ -877,8 +1003,8 @@ export class DatabaseStorage implements IStorage {
       ...data,
       fullName: (data as any).fullName ?? data.name,
     };
-    const result = await db.insert(patients).values(payload as any).returning();
-    return result[0];
+    const result = await db.insert(patients).values(payload as any).returning(patientCoreSelect());
+    return withPatientExtensionDefaults(result[0]);
   }
 
   async updatePatient(id: string, data: UpdatePatient): Promise<Patient | undefined> {
@@ -886,8 +1012,8 @@ export class DatabaseStorage implements IStorage {
       .update(patients)
       .set({ ...data, updatedAt: new Date() })
       .where(eq(patients.id, id))
-      .returning();
-    return result[0];
+      .returning(patientCoreSelect());
+    return result[0] ? withPatientExtensionDefaults(result[0]) : undefined;
   }
 
   /** Soft-delete patient — preserves visits and history per Part 2 policy. */

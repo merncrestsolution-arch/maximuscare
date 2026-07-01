@@ -41,15 +41,24 @@ export async function ensurePostgresColumn(
   }
 }
 
-/** Critical columns required by the current Drizzle schema before any branch query. */
+const BOOT_COLUMNS: Array<[string, string, string]> = [
+  ["branches", "verified_by_admin", "BOOLEAN NOT NULL DEFAULT FALSE"],
+  ["patients", "data_version", "INTEGER NOT NULL DEFAULT 2"],
+  ["patients", "data_migrated_at", "TIMESTAMP"],
+  ["patients", "qr_token", "TEXT"],
+  ["patients", "qr_token_expires_at", "TIMESTAMP"],
+  ["patients", "id_card_pdf_key", "TEXT"],
+  ["patients", "id_card_qr_token", "TEXT"],
+  ["patients", "id_card_generated_at", "TIMESTAMP"],
+];
+
+/** Critical columns required by the current Drizzle schema before broad table scans. */
 export async function ensurePostgresBootColumns(): Promise<void> {
-  try {
-    await ensurePostgresColumn(
-      "branches",
-      "verified_by_admin",
-      "BOOLEAN NOT NULL DEFAULT FALSE",
-    );
-  } catch (error) {
-    console.warn("[pg-bootstrap] non-fatal column ensure failed:", error);
+  for (const [table, column, definition] of BOOT_COLUMNS) {
+    try {
+      await ensurePostgresColumn(table, column, definition);
+    } catch (error) {
+      console.warn(`[pg-bootstrap] non-fatal ${table}.${column} ensure failed:`, error);
+    }
   }
 }

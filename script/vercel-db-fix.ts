@@ -32,6 +32,13 @@ const columns: Array<[string, string, "true" | "false"]> = [
 
 const newColumns: Array<[string, string, string]> = [
   ["branches", "verified_by_admin", "BOOLEAN NOT NULL DEFAULT FALSE"],
+  ["patients", "data_version", "INTEGER NOT NULL DEFAULT 2"],
+  ["patients", "data_migrated_at", "TIMESTAMP"],
+  ["patients", "qr_token", "TEXT"],
+  ["patients", "qr_token_expires_at", "TIMESTAMP"],
+  ["patients", "id_card_pdf_key", "TEXT"],
+  ["patients", "id_card_qr_token", "TEXT"],
+  ["patients", "id_card_generated_at", "TIMESTAMP"],
 ];
 
 async function run() {

@@ -56,6 +56,13 @@ export async function runPart2SchemaMigration() {
   await addColumn("patients", "branch_id", "TEXT");
   await addColumn("patients", "deleted_at", usePostgres ? "TIMESTAMP" : "INTEGER");
   await addColumn("patients", "deleted_by", "TEXT");
+  await addColumn("patients", "data_version", usePostgres ? "INTEGER NOT NULL DEFAULT 2" : "INTEGER NOT NULL DEFAULT 2");
+  await addColumn("patients", "data_migrated_at", usePostgres ? "TIMESTAMP" : "INTEGER");
+  await addColumn("patients", "qr_token", "TEXT");
+  await addColumn("patients", "qr_token_expires_at", usePostgres ? "TIMESTAMP" : "INTEGER");
+  await addColumn("patients", "id_card_pdf_key", "TEXT");
+  await addColumn("patients", "id_card_qr_token", "TEXT");
+  await addColumn("patients", "id_card_generated_at", usePostgres ? "TIMESTAMP" : "INTEGER");
 
   // ── visits (patient_visits) ──
   await addColumn("visits", "branch_id", "TEXT");
