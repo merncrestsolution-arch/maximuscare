@@ -5,7 +5,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
-      "includeFiles": "template.svg"
+      "includeFiles": "{template.svg,assets/id-card-background.png}"
     }
   },
   "headers": [
