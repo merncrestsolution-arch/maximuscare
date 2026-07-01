@@ -183,6 +183,23 @@ function renderSvgWidth(svg: string, width: number): Buffer {
   return Buffer.from(resvg.render().asPng());
 }
 
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const clean = (hex || "").replace("#", "");
+  if (clean.length === 3) {
+    const r = parseInt(clean[0] + clean[0], 16);
+    const g = parseInt(clean[1] + clean[1], 16);
+    const b = parseInt(clean[2] + clean[2], 16);
+    return { r, g, b };
+  }
+  if (clean.length === 6) {
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    return { r, g, b };
+  }
+  return { r: 0, g: 0, b: 0 };
+}
+
 /** Same QR settings as the in-app “Show QR Code” dialog, scaled to the card box. */
 async function generateQrPng(qrToken: string, pixelSize: number, margin: number): Promise<Buffer> {
   const raw = await QRCode.toBuffer(qrToken, {
@@ -231,16 +248,11 @@ export function generateCardId(seed: string): string {
   return `MX-${base}-${hash}`;
 }
 
-/**
- * Pillow-style compositing: background PNG + text overlay + patient QR stamped
- * at exact pixel coordinates so the code fills the Canva box.
- */
-export async function generatePatientCardBuffers(
-  patient: PatientCardInput
-): Promise<PatientCardFiles> {
-  const root = await resolveProjectRoot();
-  const layout = await loadLayout(root);
-  const bgPath = path.join(root, "assets", "id-card-background.png");
+async function buildCardBasePng(
+  patient: PatientCardInput,
+  layout: CardLayoutConfig
+): Promise<{ basePng: Buffer; outputWidth: number; outputHeight: number }> {
+  const bgPath = path.join(await resolveProjectRoot(), "assets", "id-card-background.png");
   const background = await fs.readFile(bgPath);
 
   const outputWidth = layout.outputWidth;
@@ -248,7 +260,6 @@ export async function generatePatientCardBuffers(
   const outputHeight = Math.round(outputWidth * ((bgMeta.height ?? 1) / (bgMeta.width ?? 1)));
 
   const basePng = await sharp(background).resize(outputWidth, outputHeight).png().toBuffer();
-  const textPng = renderSvgWidth(buildTextOverlaySvg(patient, layout), outputWidth);
 
   const scale = outputWidth / layout.viewBox.width;
   const qrRect = resolveQrRect(layout);
@@ -257,11 +268,27 @@ export async function generatePatientCardBuffers(
   const qrTop = Math.round(qrRect.y * scale);
   const qrPng = await generateQrPng(patient.qrToken, qrSize, qrRect.margin);
 
+  const composited = await sharp(basePng)
+    .composite([{ input: qrPng, top: qrTop, left: qrLeft }])
+    .png()
+    .toBuffer();
+
+  return { basePng: composited, outputWidth, outputHeight };
+}
+
+/**
+ * Pillow-style compositing: background PNG + text overlay + patient QR stamped
+ * at exact pixel coordinates so the code fills the Canva box.
+ */
+export async function generatePatientCardBuffers(
+  patient: PatientCardInput
+): Promise<PatientCardFiles> {
+  const layout = await loadLayout(await resolveProjectRoot());
+  const { basePng, outputWidth, outputHeight } = await buildCardBasePng(patient, layout);
+  const textPng = renderSvgWidth(buildTextOverlaySvg(patient, layout), outputWidth);
+
   const png = await sharp(basePng)
-    .composite([
-      { input: textPng, top: 0, left: 0 },
-      { input: qrPng, top: qrTop, left: qrLeft },
-    ])
+    .composite([{ input: textPng, top: 0, left: 0 }])
     .png()
     .toBuffer();
 
@@ -300,8 +327,49 @@ export async function pngToIdCardPdfBuffer(png: Buffer): Promise<Buffer> {
 
 /** Printable patient ID card as PDF only (used by the download API). */
 export async function generatePatientCardPdf(patient: PatientCardInput): Promise<Buffer> {
-  const { pdf } = await generatePatientCardBuffers(patient);
-  return pdf;
+  const layout = await loadLayout(await resolveProjectRoot());
+  const { basePng } = await buildCardBasePng(patient, layout);
+
+  const jpeg = await sharp(basePng)
+    .resize(PDF_RASTER_WIDTH)
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer();
+
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({
+    orientation: "landscape",
+    unit: "mm",
+    format: [CARD_WIDTH_MM, CARD_HEIGHT_MM],
+    compress: true,
+  });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const dataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+  doc.addImage(dataUrl, "JPEG", 0, 0, pageW, pageH, undefined, "FAST");
+
+  const scaleX = CARD_WIDTH_MM / layout.viewBox.width;
+  const scaleY = CARD_HEIGHT_MM / layout.viewBox.height;
+  const ptPerMm = 2.834645669;
+
+  const drawField = (field: FieldLayout, value: string) => {
+    const x = field.x * scaleX;
+    const y = field.y * scaleY;
+    const fontSizeMm = field.size * scaleY;
+    const fontSizePt = fontSizeMm * ptPerMm;
+    const { r, g, b } = hexToRgb(field.color);
+    doc.setTextColor(r, g, b);
+    doc.setFont("helvetica", field.bold ? "bold" : "normal");
+    doc.setFontSize(fontSizePt);
+    doc.text(value ?? "", x, y, { baseline: "alphabetic" });
+  };
+
+  drawField(layout.fields.name, patient.name);
+  drawField(layout.fields.id, patient.id);
+  drawField(layout.fields.phone, patient.phone);
+  drawField(layout.fields.address, patient.address);
+  drawField(layout.fields.cardId, patient.cardId);
+
+  return Buffer.from(doc.output("arraybuffer"));
 }
 
 /** @deprecated Canva cleanup helper — kept for prepare-canva-template.mjs */
