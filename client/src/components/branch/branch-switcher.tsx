@@ -7,6 +7,7 @@ import {
   Loader2,
   MapPin,
   Sparkles,
+  X,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { useGoToBranchSelect } from "@/hooks/use-go-to-branch-select";
@@ -15,6 +16,7 @@ import { BRANCH_SELECTION_CARDS } from "@shared/branchAccess";
 import type { OverviewContext } from "@shared/branchAccess";
 import {
   Drawer,
+  DrawerClose,
   DrawerContent,
   DrawerDescription,
   DrawerHeader,
@@ -125,8 +127,18 @@ export function BranchSwitcher() {
 
       <Drawer open={open} onOpenChange={setOpen}>
         <DrawerContent className="max-h-[92dvh] bg-[#EEF5FB]">
-          <DrawerHeader className="text-left border-b border-[#D6E8F5] pb-4">
-            <DrawerTitle className="text-[#105691] text-lg font-extrabold">
+          <DrawerHeader className="relative border-b border-[#D6E8F5] pb-4 text-left">
+            <DrawerClose asChild>
+              <button
+                type="button"
+                aria-label="Close branch selection"
+                className="absolute right-0 top-0 flex h-9 w-9 items-center justify-center rounded-full text-[#64748B] transition-colors hover:bg-white hover:text-[#105691]"
+                data-testid="branch-switcher-close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </DrawerClose>
+            <DrawerTitle className="pr-10 text-lg font-extrabold text-[#105691]">
               Choose workspace
             </DrawerTitle>
             <DrawerDescription className="text-[#64748B]">

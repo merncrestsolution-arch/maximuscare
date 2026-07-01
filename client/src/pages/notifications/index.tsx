@@ -67,7 +67,14 @@ export default function NotificationsPage() {
             <p className="text-sm text-muted-foreground text-center py-8">No notifications.</p>
           ) : (
             visible.map((n: any) => (
-              <Card key={n.id} className={!n.isRead ? "border-primary/40 bg-primary/5" : ""}>
+              <Card
+                key={n.id}
+                className={`cursor-pointer ${!n.isRead ? "border-primary/40 bg-primary/5" : ""}`}
+                onClick={() => {
+                  if (!n.isRead) markRead.mutate(n.id);
+                  if (n.type === "app_update") window.location.reload();
+                }}
+              >
                 <CardContent className="p-4 space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div>

@@ -12,13 +12,12 @@ export interface AppRelease {
 }
 
 export const APP_RELEASE: AppRelease = {
-  version: "1.5.1",
+  version: "1.5.2",
   title: "App Updated — What's New",
   highlights: [
-    "Dashboard fix: Home screen charts and cards (Revenue trend, Home visit revenue, Attendance, Visit analytics, Branch revenue, Revenue summary, Expenses, Today attendance) now load branch-scoped data correctly.",
-    "Attendance on the dashboard is scoped by staff in the selected branch instead of a missing branch column on attendance rows.",
-    "Visits and revenue match by branch name or branch ID, so legacy and newer records both count.",
-    "Nexus MD users now see the full financial dashboard like Admin and MD.",
+    "Branch picker: close (X) button added on the workspace drawer.",
+    "Notifications: new card-style drawer (replaces old dropdown); tapping an update notification refreshes the app.",
+    "Data fix: patients, visits, and expenses with branch ID or legacy records now show correctly on dashboard and lists.",
     "Please refresh your browser after this update to load the latest version.",
   ],
 };

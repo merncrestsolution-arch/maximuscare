@@ -24,6 +24,7 @@ import {
 } from "./middleware/secureApi";
 import { filterByBranchName, resolveBranchIdByName } from "./services/branchService";
 import { normalizeBranchName } from "@shared/branches";
+import { recordMatchesBranchScope, branchIdsForName } from "./utils/branchScope";
 import { hasFullBranchAccess, organizationForBranch, type OrganizationId } from "@shared/branchAccess";
 import { registerAutoFineJobs, startScheduledJobs } from "./jobs/scheduler";
 import { clinicDateString, clinicYesterdayString, clinicDateOffset } from "./clinicTime";
@@ -122,19 +123,10 @@ function resolveUserScope(req: Request): {
 function matchesBranchScope(
   record: { branch?: string | null; branchId?: string | null },
   branchId: string | null,
-  branchName: string | null
+  branchName: string | null,
+  branchIdsForName?: Set<string> | null
 ): boolean {
-  if (!branchId && !branchName) return true;
-  if (branchId && record.branchId && record.branchId === branchId) return true;
-  if (branchName && record.branch) {
-    return (
-      normalizeBranchName(record.branch).toLowerCase() ===
-      normalizeBranchName(branchName).toLowerCase()
-    );
-  }
-  // Legacy rows without branch metadata — keep them; list queries are already
-  // branch-scoped at the DB layer or via staff-id sets (attendance).
-  return !record.branchId && !record.branch;
+  return recordMatchesBranchScope(record, branchId, branchName, branchIdsForName);
 }
 
 function matchesOrganizationScope(
@@ -147,6 +139,11 @@ function matchesOrganizationScope(
   if (branchName) return true;
   if (!record.branch) return true;
   return organizationForBranch(record.branch) === organizationId;
+}
+
+async function resolveBranchScopeIds(branchName: string | null): Promise<Set<string> | null> {
+  if (!branchName) return null;
+  return branchIdsForName(await storage.getAllBranches(), branchName);
 }
 
 async function resolveBranchNameById(branchId: string | null | undefined): Promise<string | null> {
@@ -1015,6 +1012,7 @@ export async function registerRoutes(
     try {
       const currentUser = (req as any).user;
       const { branchId, branchName, organizationId } = resolveUserScope(req);
+      const branchIdsForName = await resolveBranchScopeIds(branchName);
       const search = req.query.search as string | undefined;
       const status = req.query.status as string | undefined;
       const page = req.query.page ? Number(req.query.page) : undefined;
@@ -1036,7 +1034,9 @@ export async function registerRoutes(
           limit: l,
         });
         const scoped = result.data.filter(
-          (p) => matchesBranchScope(p, branchId, branchName) && matchesOrganizationScope(p, organizationId, branchName)
+          (p) =>
+            matchesBranchScope(p, branchId, branchName, branchIdsForName) &&
+            matchesOrganizationScope(p, organizationId, branchName)
         );
         return res.json({
           data: scoped,
@@ -1051,19 +1051,15 @@ export async function registerRoutes(
 
       let patientList;
       if (canViewAllPatients(currentUser.role)) {
-        patientList = branchName
-          ? await storage.getPatientsByBranch(branchName)
-          : await storage.getAllPatients();
+        patientList = await storage.getAllPatients();
       } else {
         const all = await storage.getAllPatients();
         patientList = all.filter((p) => staffPatientIds!.includes(p.id));
-        if (branchName) {
-          const target = normalizeBranchName(branchName).toLowerCase();
-          patientList = patientList.filter((p) => normalizeBranchName(p.branch).toLowerCase() === target);
-        }
       }
       const scoped = patientList.filter(
-        (p) => matchesBranchScope(p, branchId, branchName) && matchesOrganizationScope(p, organizationId, branchName)
+        (p) =>
+          matchesBranchScope(p, branchId, branchName, branchIdsForName) &&
+          matchesOrganizationScope(p, organizationId, branchName)
       );
       return res.json(scoped);
     } catch (error: any) {
@@ -1407,11 +1403,13 @@ export async function registerRoutes(
     try {
       const currentUser = (req as any).user;
       const { branchId, branchName, organizationId } = resolveUserScope(req);
+      const branchIdsForName = await resolveBranchScopeIds(branchName);
       const staffId = canViewAllVisits(currentUser.role) ? undefined : currentUser.staffId;
-      let unpaid = await storage.getUnpaidVisits(staffId);
-      if (branchName) unpaid = filterByBranchName(unpaid, branchName);
+      const unpaid = await storage.getUnpaidVisits(staffId);
       const scoped = unpaid.filter(
-        (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId, branchName)
+        (v) =>
+          matchesBranchScope(v, branchId, branchName, branchIdsForName) &&
+          matchesOrganizationScope(v, organizationId, branchName)
       );
       return res.json(scoped);
     } catch (error: any) {
@@ -1424,6 +1422,7 @@ export async function registerRoutes(
     try {
       const currentUser = (req as any).user;
       const { branchId, branchName, organizationId } = resolveUserScope(req);
+      const branchIdsForName = await resolveBranchScopeIds(branchName);
       const patientId = req.query.patientId as string | undefined;
       const startDate = req.query.startDate as string | undefined;
       const endDate = req.query.endDate as string | undefined;
@@ -1438,13 +1437,14 @@ export async function registerRoutes(
           patientId,
           startDate,
           endDate,
-          branch: branchName ?? undefined,
           staffId,
           page: p,
           limit: l,
         });
         const scoped = result.data.filter(
-          (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId, branchName)
+          (v) =>
+            matchesBranchScope(v, branchId, branchName, branchIdsForName) &&
+            matchesOrganizationScope(v, organizationId, branchName)
         );
         return res.json({
           data: scoped,
@@ -1480,13 +1480,10 @@ export async function registerRoutes(
           }
         }
       }
-      if (branchName && !patientId) {
-        visitList = visitList.filter(
-          (v) => normalizeBranchName(v.branch).toLowerCase() === normalizeBranchName(branchName).toLowerCase()
-        );
-      }
       const scoped = visitList.filter(
-        (v) => matchesBranchScope(v, branchId, branchName) && matchesOrganizationScope(v, organizationId, branchName)
+        (v) =>
+          matchesBranchScope(v, branchId, branchName, branchIdsForName) &&
+          matchesOrganizationScope(v, organizationId, branchName)
       );
       return res.json(scoped);
     } catch (error: any) {
@@ -3372,6 +3369,7 @@ export async function registerRoutes(
     try {
       const { startDate, endDate } = req.query;
       const { branchId, branchName, organizationId } = resolveUserScope(req);
+      const branchIdsForName = await resolveBranchScopeIds(branchName);
       let expensesList;
       
       if (startDate && endDate) {
@@ -3380,11 +3378,10 @@ export async function registerRoutes(
         expensesList = await storage.getAllExpenses();
       }
 
-      if (branchName) {
-        expensesList = filterByBranchName(expensesList, branchName);
-      }
       const scoped = expensesList.filter(
-        (e: any) => matchesBranchScope(e, branchId, branchName) && matchesOrganizationScope(e, organizationId, branchName)
+        (e: any) =>
+          matchesBranchScope(e, branchId, branchName, branchIdsForName) &&
+          matchesOrganizationScope(e, organizationId, branchName)
       );
       return res.json(scoped);
     } catch (error: any) {

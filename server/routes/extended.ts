@@ -557,7 +557,7 @@ export function registerExtendedRoutes(app: Express) {
       const ctx = (req as any).branchContext;
       const explicitFilter = ctx?.selectedBranchName;
       const branchFilter = explicitFilter || (ctx?.allowedBranches ? ctx.allowedBranches.map((b: any) => b.branchName ?? b.name) : null);
-      const cacheKey = `dashboard:v2:${startDate}:${endDate}:${user.staffId}:${explicitFilter ?? "none"}`;
+      const cacheKey = `dashboard:v3:${startDate}:${endDate}:${user.staffId}:${explicitFilter ?? "none"}`;
       // Bug 8 diagnostics: trace who is calling, the resolved date range, and the
       // branch scope so an empty Revenue Trend can be pinpointed. Remove once verified.
       console.log("[RevenueTrend] dashboard-kpis called by:", {

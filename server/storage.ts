@@ -515,14 +515,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPatientsByBranch(branch: string): Promise<Patient[]> {
-    const { normalizeBranchName } = await import("@shared/branches");
-    const target = normalizeBranchName(branch).toLowerCase();
+    const { recordMatchesBranchScope, branchIdsForName } = await import("./utils/branchScope");
+    const branches = await this.getAllBranches();
+    const ids = branchIdsForName(branches, branch);
     const all = await db
       .select()
       .from(patients)
       .where(isNull(patients.deletedAt))
       .orderBy(asc(patients.fullName), asc(patients.name));
-    return all.filter((p: Patient) => normalizeBranchName(p.branch).toLowerCase() === target);
+    return all.filter((p: Patient) => recordMatchesBranchScope(p, null, branch, ids));
   }
 
   async getPatientsPaginated(filters: {
@@ -556,9 +557,11 @@ export class DatabaseStorage implements IStorage {
       .orderBy(asc(patients.fullName), asc(patients.name));
 
     if (filters.branch) {
-      const { normalizeBranchName } = await import("@shared/branches");
-      const target = normalizeBranchName(filters.branch).toLowerCase();
-      allRows = allRows.filter((p: Patient) => normalizeBranchName(p.branch).toLowerCase() === target);
+      const { recordMatchesBranchScope, branchIdsForName } = await import("./utils/branchScope");
+      const ids = branchIdsForName(await this.getAllBranches(), filters.branch);
+      allRows = allRows.filter((p: Patient) =>
+        recordMatchesBranchScope(p, null, filters.branch ?? null, ids)
+      );
     }
 
     const total = allRows.length;
@@ -578,7 +581,6 @@ export class DatabaseStorage implements IStorage {
   }): Promise<{ data: Visit[]; total: number }> {
     const conditions: SQL[] = [isNull(visits.deletedAt)];
     if (filters.patientId) conditions.push(eq(visits.patientId, filters.patientId));
-    if (filters.branch) conditions.push(eq(visits.branch, filters.branch));
     if (filters.startDate && filters.endDate) {
       conditions.push(gte(visits.visitDate, filters.startDate));
       conditions.push(lte(visits.visitDate, filters.endDate));
