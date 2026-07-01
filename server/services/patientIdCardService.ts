@@ -1,10 +1,14 @@
 import fs from "fs/promises";
 import path from "path";
+import { fileURLToPath } from "url";
 import QRCode from "qrcode";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
+import { jsPDF } from "jspdf";
 import type { OrganizationId } from "@shared/branchAccess";
 import { signPatientQrToken, verifyPatientQrToken } from "./qrTokenService";
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 export interface PatientCardInput {
   id: string;
@@ -25,6 +29,8 @@ export interface PatientCardFiles {
 /** ISO/IEC 7810 ID-1 (credit card) landscape — matches the Canva template aspect ratio. */
 const CARD_WIDTH_MM = 85.6;
 const CARD_HEIGHT_MM = 53.98;
+/** Raster width for PDF embedding — enough for print, small enough for serverless. */
+const PDF_RASTER_WIDTH = 1200;
 
 type FieldLayout = {
   x: number;
@@ -90,7 +96,14 @@ function escapeXml(value: string): string {
 }
 
 async function resolveProjectRoot(): Promise<string> {
-  for (const root of [process.cwd(), path.join(process.cwd(), "..")]) {
+  const candidates = [
+    process.cwd(),
+    path.join(process.cwd(), ".."),
+    path.resolve(process.cwd(), "..", ".."),
+    path.resolve(moduleDir, "..", ".."),
+    path.resolve(moduleDir, ".."),
+  ];
+  for (const root of candidates) {
     try {
       await fs.access(path.join(root, "assets", "id-card-background.png"));
       return root;
@@ -260,16 +273,20 @@ export async function generatePatientCardBuffers(
   return { svg, png, pdf: await pngToIdCardPdfBuffer(png) };
 }
 
-/** Embed the rendered card raster in a print-ready PDF (ID-1 landscape). */
+/** Embed a compressed JPEG raster in a print-ready PDF (ID-1 landscape). */
 export async function pngToIdCardPdfBuffer(png: Buffer): Promise<Buffer> {
-  const { jsPDF } = await import("jspdf");
+  const jpeg = await sharp(png)
+    .resize(PDF_RASTER_WIDTH)
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer();
+
   const doc = new jsPDF({
     unit: "mm",
     format: [CARD_WIDTH_MM, CARD_HEIGHT_MM],
     compress: true,
   });
-  const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
-  doc.addImage(dataUrl, "PNG", 0, 0, CARD_WIDTH_MM, CARD_HEIGHT_MM, undefined, "FAST");
+  const dataUrl = `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+  doc.addImage(dataUrl, "JPEG", 0, 0, CARD_WIDTH_MM, CARD_HEIGHT_MM, undefined, "FAST");
   return Buffer.from(doc.output("arraybuffer"));
 }
 

@@ -34,6 +34,7 @@ const allowlist = [
   "ws",
   "zod",
   "zod-validation-error",
+  "jspdf",
 ];
 
 async function run() {
