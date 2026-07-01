@@ -10,7 +10,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Archive, Trash2, CheckCheck } from "lucide-react";
+import { Loader2, Archive, Trash2, CheckCheck, RefreshCw, ChevronDown, ChevronUp } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -18,6 +18,7 @@ export default function NotificationsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [tab, setTab] = useState<"unread" | "read" | "archived">("unread");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const opts =
     tab === "unread"
@@ -39,6 +40,11 @@ export default function NotificationsPage() {
       ? notifications.filter((n: any) => n.isRead && !n.isArchived)
       : notifications;
 
+  const toggleOpen = (n: any) => {
+    if (!n.isRead) markRead.mutate(n.id);
+    setExpandedId((current) => (current === n.id ? null : n.id));
+  };
+
   return (
     <div className="space-y-4 p-4 max-w-2xl mx-auto">
       <div className="flex items-center justify-between gap-2">
@@ -52,7 +58,13 @@ export default function NotificationsPage() {
         </Button>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => {
+          setTab(v as typeof tab);
+          setExpandedId(null);
+        }}
+      >
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="unread">Unread</TabsTrigger>
           <TabsTrigger value="read">Read</TabsTrigger>
@@ -66,56 +78,100 @@ export default function NotificationsPage() {
           ) : visible.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">No notifications.</p>
           ) : (
-            visible.map((n: any) => (
-              <Card
-                key={n.id}
-                className={`cursor-pointer ${!n.isRead ? "border-primary/40 bg-primary/5" : ""}`}
-                onClick={() => {
-                  if (!n.isRead) markRead.mutate(n.id);
-                  if (n.type === "app_update") window.location.reload();
-                }}
-              >
-                <CardContent className="p-4 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="font-semibold">{n.title}</div>
-                      <p className="text-sm text-muted-foreground mt-1">{n.message}</p>
+            visible.map((n: any) => {
+              const isExpanded = expandedId === n.id;
+              return (
+                <Card
+                  key={n.id}
+                  className={!n.isRead ? "border-primary/40 bg-primary/5" : ""}
+                >
+                  <CardContent className="p-4 space-y-2">
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      onClick={() => toggleOpen(n)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="font-semibold">{n.title}</div>
+                            {isExpanded ? (
+                              <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                            )}
+                          </div>
+                          <p
+                            className={`text-sm text-muted-foreground mt-1 ${
+                              isExpanded ? "whitespace-pre-wrap" : "line-clamp-2"
+                            }`}
+                          >
+                            {n.message}
+                          </p>
+                        </div>
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground shrink-0">
+                          {n.type}
+                        </span>
+                      </div>
+                    </button>
+
+                    <div className="text-xs text-muted-foreground">
+                      {format(new Date(n.createdAt), "dd MMM yyyy, hh:mm a")}
+                      {n.readAt ? ` · Read ${format(new Date(n.readAt), "dd MMM")}` : ""}
                     </div>
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground shrink-0">
-                      {n.type}
-                    </span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {format(new Date(n.createdAt), "dd MMM yyyy, hh:mm a")}
-                    {n.readAt ? ` · Read ${format(new Date(n.readAt), "dd MMM")}` : ""}
-                  </div>
-                  <div className="flex gap-2 pt-1">
-                    {!n.isRead && (
-                      <Button size="sm" variant="outline" onClick={() => markRead.mutate(n.id)}>
-                        Mark read
+
+                    {isExpanded && n.type === "app_update" && (
+                      <Button
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        onClick={() => window.location.reload()}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        Refresh app
                       </Button>
                     )}
-                    {!n.isArchived && (
+
+                    <div className="flex gap-2 pt-1">
+                      {!n.isRead && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            markRead.mutate(n.id);
+                          }}
+                        >
+                          Mark read
+                        </Button>
+                      )}
+                      {!n.isArchived && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            archive.mutate(n.id, { onSuccess: () => toast({ title: "Archived" }) });
+                          }}
+                        >
+                          <Archive className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => archive.mutate(n.id, { onSuccess: () => toast({ title: "Archived" }) })}
+                        className="text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          remove.mutate(n.id, { onSuccess: () => toast({ title: "Deleted" }) });
+                        }}
                       >
-                        <Archive className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive"
-                      onClick={() => remove.mutate(n.id, { onSuccess: () => toast({ title: "Deleted" }) })}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })
           )}
         </TabsContent>
       </Tabs>
