@@ -24,7 +24,8 @@
     "db:push:ci": "drizzle-kit push --force",
     "db:fix:ci": "tsx script/vercel-db-fix.ts",
     "db:migrate": "drizzle-kit migrate",
-    "db:migrate-part2": "tsx script/migrate-part2.ts"
+    "db:migrate-part2": "tsx script/migrate-part2.ts",
+    "id-card:prepare": "node script/prepare-canva-template.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1065.0",
