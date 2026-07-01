@@ -22,6 +22,8 @@ async function getApp(): Promise<ExpressApp> {
   if (!appPromise) {
     appPromise = (async () => {
       // Idempotent: safe to re-run on every cold start.
+      const { ensurePostgresBootColumns } = await import("./pgBootstrap");
+      await ensurePostgresBootColumns();
       await ensureSqliteSchemaCompatibility();
       await ensurePostgresSchemaCompatibility();
       await seedDefaultUsers();

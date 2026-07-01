@@ -18,6 +18,7 @@ function parseJsonArrays<T extends Record<string, unknown>>(row: T, keys: (keyof
 }
 import { db, schema } from "./db";
 import { isStrictlyBeforeNoon } from "./clinicTime";
+import { ensurePostgresColumn } from "./pgBootstrap";
 
 /** Same check as server/db.ts — raw SQL below must run on the active driver. */
 const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
@@ -45,20 +46,20 @@ async function ensureBranchVerificationColumn() {
     return;
   }
   branchVerificationReady = (async () => {
+    if (usePostgres) {
+      await ensurePostgresColumn(
+        "branches",
+        "verified_by_admin",
+        "BOOLEAN NOT NULL DEFAULT FALSE",
+      );
+      return;
+    }
     try {
-      if (usePostgres) {
-        await runRaw(
-          sql.raw(
-            "ALTER TABLE branches ADD COLUMN IF NOT EXISTS verified_by_admin BOOLEAN NOT NULL DEFAULT FALSE",
-          ),
-        );
-      } else {
-        await runRaw(
-          sql.raw(
-            "ALTER TABLE branches ADD COLUMN verified_by_admin INTEGER NOT NULL DEFAULT 0",
-          ),
-        );
-      }
+      await runRaw(
+        sql.raw(
+          "ALTER TABLE branches ADD COLUMN verified_by_admin INTEGER NOT NULL DEFAULT 0",
+        ),
+      );
     } catch (error: unknown) {
       const msg = String((error as Error)?.message ?? "");
       if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
@@ -67,6 +68,83 @@ async function ensureBranchVerificationColumn() {
     }
   })();
   await branchVerificationReady;
+}
+
+function mapBranchRow(row: Record<string, unknown>): Branch {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    branchName:
+      row.branch_name != null
+        ? String(row.branch_name)
+        : row.branchName != null
+          ? String(row.branchName)
+          : null,
+    code: row.code != null ? String(row.code) : null,
+    address: row.address != null ? String(row.address) : null,
+    isActive:
+      row.is_active !== undefined
+        ? Boolean(row.is_active)
+        : Boolean(row.isActive ?? true),
+    verifiedByAdmin:
+      row.verified_by_admin !== undefined
+        ? Boolean(row.verified_by_admin)
+        : Boolean(row.verifiedByAdmin ?? false),
+    createdAt: new Date(
+      (row.created_at ?? row.createdAt ?? Date.now()) as string | number | Date,
+    ),
+    updatedAt: new Date(
+      (row.updated_at ?? row.updatedAt ?? Date.now()) as string | number | Date,
+    ),
+  } as Branch;
+}
+
+async function fetchBranchesRaw(opts: {
+  name?: string;
+  activeOnly?: boolean;
+}): Promise<Branch[]> {
+  let statement = `SELECT id, name, branch_name, code, address, is_active, created_at, updated_at FROM branches WHERE 1=1`;
+  if (opts.activeOnly) statement += " AND is_active = true";
+  if (opts.name) statement += ` AND name = '${opts.name.replace(/'/g, "''")}'`;
+  if (opts.activeOnly) statement += " ORDER BY name";
+  if (opts.name) statement += " LIMIT 1";
+
+  const result = await runRaw(sql.raw(statement));
+  const rows = ((result as { rows?: Record<string, unknown>[] }).rows ?? []) as Record<
+    string,
+    unknown
+  >[];
+  return rows.map((row) => mapBranchRow({ ...row, verifiedByAdmin: false }));
+}
+
+async function fetchBranches(opts: {
+  name?: string;
+  activeOnly?: boolean;
+} = {}): Promise<Branch[]> {
+  await ensureBranchVerificationColumn();
+  try {
+    const conditions = [];
+    if (opts.activeOnly) conditions.push(eq(branches.isActive, true));
+    if (opts.name) conditions.push(eq(branches.name, opts.name));
+
+    let query = db.select().from(branches);
+    if (conditions.length === 1) {
+      query = query.where(conditions[0]) as typeof query;
+    } else if (conditions.length > 1) {
+      query = query.where(and(...conditions)) as typeof query;
+    }
+    if (opts.activeOnly && !opts.name) {
+      query = query.orderBy(asc(branches.name)) as typeof query;
+    }
+    if (opts.name) {
+      query = query.limit(1) as typeof query;
+    }
+    return await query;
+  } catch (error: unknown) {
+    const msg = String((error as Error)?.message ?? "");
+    if (!msg.includes("verified_by_admin")) throw error;
+    return fetchBranchesRaw(opts);
+  }
 }
 
 const {
@@ -1802,8 +1880,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllBranches(): Promise<Branch[]> {
-    await ensureBranchVerificationColumn();
-    return await db.select().from(branches).where(eq(branches.isActive, true)).orderBy(asc(branches.name));
+    return fetchBranches({ activeOnly: true });
   }
 
   async createBranch(data: InsertBranch): Promise<Branch> {
@@ -1830,38 +1907,19 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seedEnterpriseBranches(): Promise<void> {
-    try {
-      if (usePostgres) {
-        await runRaw(
-          sql.raw(
-            "ALTER TABLE branches ADD COLUMN IF NOT EXISTS verified_by_admin BOOLEAN NOT NULL DEFAULT FALSE",
-          ),
-        );
-      } else {
-        await runRaw(
-          sql.raw(
-            "ALTER TABLE branches ADD COLUMN verified_by_admin INTEGER NOT NULL DEFAULT 0",
-          ),
-        );
-      }
-    } catch (error: unknown) {
-      const msg = String((error as Error)?.message ?? "");
-      if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
-        throw error;
-      }
-    }
+    await ensureBranchVerificationColumn();
 
     const { ENTERPRISE_BRANCHES, LEGACY_BRANCH_ALIASES, normalizeBranchName } = await import("@shared/branches");
 
     for (const b of ENTERPRISE_BRANCHES) {
-      const existing = await db.select().from(branches).where(eq(branches.name, b.name)).limit(1);
+      const existing = await fetchBranches({ name: b.name });
       if (existing.length > 0) {
         await db
           .update(branches)
           .set({ branchName: b.shortName, code: b.code, isActive: true, updatedAt: new Date() } as any)
           .where(eq(branches.id, existing[0].id));
       } else {
-        const colombo = await db.select().from(branches).where(eq(branches.name, "Colombo")).limit(1);
+        const colombo = await fetchBranches({ name: "Colombo" });
         if (colombo.length > 0 && b.code === "DEHIWALA") {
           await db
             .update(branches)
@@ -1878,7 +1936,7 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    const allBranches: Branch[] = await db.select().from(branches).where(eq(branches.isActive, true));
+    const allBranches: Branch[] = await fetchBranches({ activeOnly: true });
     const branchByShort = new Map<string, Branch>(
       allBranches.map((br: Branch) => [normalizeBranchName(br.branchName ?? br.name), br])
     );
