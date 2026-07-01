@@ -1317,8 +1317,8 @@ export async function registerRoutes(
 
   app.post("/api/admin/data-health/regenerate-ids", requireAuth, async (req: Request, res: Response) => {
     try {
-      if (!isAdminRole((req as any).user?.role)) {
-        return res.status(403).json({ message: "Admin only" });
+      if (!isManagementRole((req as any).user?.role)) {
+        return res.status(403).json({ message: "Admin or MD only" });
       }
       const confirm = String((req.body as { confirm?: string })?.confirm ?? "").trim();
       if (confirm !== "REGENERATE-ALL-IDS") {
@@ -1336,6 +1336,7 @@ export async function registerRoutes(
         newValue: {
           processed: result.processed,
           regenerated: result.regenerated,
+          admissionsProcessed: result.admissionsProcessed,
           admissionsUpdated: result.admissionsUpdated,
           errorCount: result.errors.length,
         },

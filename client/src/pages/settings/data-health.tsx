@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { RoleProtectedRoute } from "@/components/auth/role-protected-route";
-import { canViewAuditLogs, isAdminRole } from "@/lib/permissions";
+import { canViewAuditLogs, isManagementRole } from "@/lib/permissions";
 import { usePatientDataHealth, useRunPatientDataBackfill, useRegenerateAllPatientIds } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +24,7 @@ import {
 function DataHealthContent() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const isAdmin = isAdminRole(user?.role);
+  const isAdmin = isManagementRole(user?.role);
   const { data, isLoading, error, refetch } = usePatientDataHealth();
   const backfill = useRunPatientDataBackfill();
   const regenerateIds = useRegenerateAllPatientIds();
@@ -37,6 +37,7 @@ function DataHealthContent() {
   const [regenResult, setRegenResult] = useState<{
     processed: number;
     regenerated: number;
+    admissionsProcessed: number;
     admissionsUpdated: number;
     errors: string[];
     samples: Array<{ name: string; oldCode: string; newCode: string }>;
@@ -86,7 +87,7 @@ function DataHealthContent() {
       await refetch();
       toast({
         title: "Patient IDs regenerated",
-        description: `Replaced ${result.regenerated} of ${result.processed} patient IDs`,
+        description: `Out-patients: ${result.regenerated}/${result.processed} · In-patients: ${result.admissionsUpdated}/${result.admissionsProcessed}`,
       });
       if (result.errors?.length) {
         toast({
@@ -121,14 +122,20 @@ function DataHealthContent() {
   }
 
   const rows = [
-    { label: "Total patients", value: data?.totalPatients ?? 0 },
+    { label: "Out-patients (records)", value: data?.totalPatients ?? 0 },
+    { label: "In-patient admissions", value: data?.totalInPatientAdmissions ?? 0 },
     { label: "Current data version", value: data?.currentDataVersion ?? "—" },
     { label: "Outdated data version", value: data?.outdatedDataVersion ?? 0, warn: (data?.outdatedDataVersion ?? 0) > 0 },
-    { label: "Missing patient ID", value: data?.missingPatientCode ?? 0, warn: (data?.missingPatientCode ?? 0) > 0 },
+    { label: "Missing out-patient ID", value: data?.missingPatientCode ?? 0, warn: (data?.missingPatientCode ?? 0) > 0 },
     {
-      label: "Legacy / custom patient IDs",
+      label: "Legacy out-patient IDs",
       value: data?.nonStandardPatientCodes ?? 0,
       warn: (data?.nonStandardPatientCodes ?? 0) > 0,
+    },
+    {
+      label: "Legacy in-patient IDs",
+      value: data?.nonStandardInPatientCodes ?? 0,
+      warn: (data?.nonStandardInPatientCodes ?? 0) > 0,
     },
     { label: "Missing QR token", value: data?.missingQrToken ?? 0, warn: (data?.missingQrToken ?? 0) > 0 },
     { label: "No cached ID card PDF", value: data?.missingIdCardCache ?? 0 },
@@ -200,13 +207,13 @@ function DataHealthContent() {
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2 text-amber-900">
               <AlertTriangle className="h-4 w-4" />
-              Regenerate all patient IDs (Admin)
+              Regenerate all patient IDs (Admin / MD)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
               Removes every old, custom, or legacy patient ID and assigns a fresh system ID to{" "}
-              <strong>all patients</strong> using the format{" "}
+              <strong>all out-patients and in-patient admissions</strong> using the format{" "}
               <code className="text-xs bg-muted px-1 rounded">MC/BRANCH/DDMM/SEQ</code> based on each
               patient&apos;s branch and registration date. Linked in-patient records, QR codes, and ID
               cards are updated. This cannot be undone.
@@ -249,9 +256,10 @@ function DataHealthContent() {
             <CardTitle className="text-base">Last ID regeneration</CardTitle>
           </CardHeader>
           <CardContent className="text-sm space-y-2">
-            <p>Processed: {regenResult.processed}</p>
-            <p>IDs replaced: {regenResult.regenerated}</p>
-            <p>In-patient records updated: {regenResult.admissionsUpdated}</p>
+            <p>Out-patients processed: {regenResult.processed}</p>
+            <p>Out-patient IDs replaced: {regenResult.regenerated}</p>
+            <p>In-patient admissions processed: {regenResult.admissionsProcessed}</p>
+            <p>In-patient IDs replaced: {regenResult.admissionsUpdated}</p>
             {regenResult.errors.length > 0 && (
               <p className="text-destructive">Errors: {regenResult.errors.length}</p>
             )}
@@ -275,7 +283,8 @@ function DataHealthContent() {
             <AlertDialogTitle>Regenerate all patient IDs?</AlertDialogTitle>
             <AlertDialogDescription>
               This will delete every existing patient ID (old, custom, or manual) and issue new
-              system-generated IDs for all {data?.totalPatients ?? 0} patients. Type{" "}
+              system-generated IDs for all out-patients ({data?.totalPatients ?? 0}) and in-patient
+              admissions ({data?.totalInPatientAdmissions ?? 0}). Type{" "}
               <strong>REGENERATE-ALL-IDS</strong> below to confirm.
             </AlertDialogDescription>
           </AlertDialogHeader>
