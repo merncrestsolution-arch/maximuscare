@@ -55,7 +55,7 @@ import { registerPatientRoutes } from "./routes/patients";
 import { generateUniquePatientCode, generatePatientCode, assertNoDuplicatePatient, findPatientByPhoneOrNIC, getPatientHistory } from "./services/patientService";
 import { verifyPatientQrToken } from "./services/qrTokenService";
 import { ensureAdmissionQrToken, ensurePatientDataVersion, getPatientDataHealthSummary, runPatientDataBackfill, regenerateAllPatientCodes } from "./services/patientDataVersionService";
-import { computePriorAdmissionBalance } from "./services/inPatientAdmissionService";
+import { computePriorAdmissionBalance, formatReadmitAdmissionSource } from "./services/inPatientAdmissionService";
 import { getOrCreateAdmissionCardPdf, getOrCreatePatientCardPdf, invalidatePatientIdCard, patientIdCardFieldsChanged, bulkPatientCardPdfs } from "./services/patientIdCardCacheService";
 import { signAttendanceLocationToken, verifyAttendanceLocationToken } from "./services/attendanceLocationTokenService";
 import { syncHomeVisitFromVisit, detectHomeVisitType } from "./services/homeVisitService";
@@ -2878,6 +2878,28 @@ export async function registerRoutes(
 
   // ========== In-Patient Session Routes ==========
 
+  // Prior admission episodes (billing + session history for re-admitted patients).
+  app.get("/api/inpatients/:admissionId/prior-episodes", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { getPriorInPatientEpisodes } = await import("./services/inPatientAdmissionService");
+      const episodes = await getPriorInPatientEpisodes(storage, param(req, "admissionId"));
+      return res.json(episodes);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get sessions from prior admissions for the same patient (read-only history).
+  app.get("/api/inpatients/:admissionId/sessions/previous", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { getPreviousInPatientSessions } = await import("./services/inPatientAdmissionService");
+      const sessions = await getPreviousInPatientSessions(storage, param(req, "admissionId"));
+      return res.json(sessions);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get all sessions for an admission
   app.get("/api/inpatients/:admissionId/sessions", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -3156,7 +3178,8 @@ export async function registerRoutes(
         amountPerDay: admission.amountPerDay,
         branchId: admission.branchId,
         admitDate: requestedAdmit,
-        status: 'Admitted'
+        status: 'Admitted',
+        admissionSource: formatReadmitAdmissionSource(admissionId),
       };
 
       const newAdmission = await storage.createInPatientAdmission(newAdmissionData as any);

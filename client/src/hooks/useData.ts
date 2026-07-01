@@ -452,6 +452,22 @@ export function useInPatientSessions(admissionId: string) {
   });
 }
 
+export function useInPatientPreviousSessions(admissionId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['inpatients', admissionId, 'sessions', 'previous'],
+    queryFn: () => inPatientApi.getPreviousSessions(admissionId),
+    enabled: !!admissionId && enabled,
+  });
+}
+
+export function useInPatientPriorEpisodes(admissionId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['inpatients', admissionId, 'prior-episodes'],
+    queryFn: () => inPatientApi.getPriorEpisodes(admissionId),
+    enabled: !!admissionId && enabled,
+  });
+}
+
 export function useNextSessionNumber(admissionId: string, date: string) {
   return useQuery({
     queryKey: ['inpatients', admissionId, 'sessions', 'next-number', date],

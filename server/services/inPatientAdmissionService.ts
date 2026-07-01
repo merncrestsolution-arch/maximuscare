@@ -20,7 +20,19 @@ export async function computePriorAdmissionBalance(
   return priorAdmissionBalanceFromDischarge(discharge.grandTotal, paymentTotal);
 }
 
-/** Stable grouping key for the same person across admission episodes. */
+/** Prefix stored in `admissionSource` when an admission was created via re-admit. */
+export const READMIT_SOURCE_PREFIX = "readmit:";
+
+export function formatReadmitAdmissionSource(priorAdmissionId: string): string {
+  return `${READMIT_SOURCE_PREFIX}${priorAdmissionId}`;
+}
+
+export function parseReadmitAdmissionSource(admissionSource?: string | null): string | null {
+  if (!admissionSource?.startsWith(READMIT_SOURCE_PREFIX)) return null;
+  const id = admissionSource.slice(READMIT_SOURCE_PREFIX.length).trim();
+  return id || null;
+}
+
 export function resolveInPatientAdmissionKey(entry: {
   patientId?: string | null;
   patientCode?: string | null;
@@ -100,4 +112,133 @@ export function filterInPatientsByListStatus(
 export function isCurrentlyAdmitted(admission: InPatientAdmission): boolean {
   const st = normalizeAdmissionListStatus(admission.status);
   return st === "admitted" || st === "active";
+}
+
+/** All admissions for the same person as `admission` (linked patient or legacy match). */
+export async function getRelatedInPatientAdmissions(
+  storage: IStorage,
+  admission: InPatientAdmission,
+): Promise<InPatientAdmission[]> {
+  const matches = new Map<string, InPatientAdmission>();
+  const add = (entries: InPatientAdmission[]) => {
+    for (const entry of entries) matches.set(entry.id, entry);
+  };
+
+  if (admission.patientId) {
+    add(await storage.getInPatientAdmissionsForPatient(admission.patientId));
+  }
+
+  const all = await storage.getAllInPatientAdmissions();
+
+  if (admission.patientCode) {
+    for (const entry of all) {
+      if (entry.patientCode && entry.patientCode === admission.patientCode) {
+        matches.set(entry.id, entry);
+      }
+    }
+  }
+
+  const key = resolveInPatientAdmissionKey(admission);
+  for (const entry of all) {
+    if (resolveInPatientAdmissionKey(entry) === key) {
+      matches.set(entry.id, entry);
+    }
+  }
+
+  const readmitFromId = parseReadmitAdmissionSource((admission as any).admissionSource);
+  if (readmitFromId) {
+    const prior = await storage.getInPatientAdmission(readmitFromId);
+    if (prior) matches.set(prior.id, prior);
+  }
+
+  for (const entry of all) {
+    const fromId = parseReadmitAdmissionSource((entry as any).admissionSource);
+    if (fromId === admission.id) {
+      matches.set(entry.id, entry);
+    }
+  }
+
+  return Array.from(matches.values());
+}
+
+export interface PriorInPatientEpisode {
+  admissionId: string;
+  admitDate: string;
+  status: string;
+  dischargeDate: string | null;
+  grandTotal: number | null;
+  amountPaid: number;
+  pendingBalance: number;
+  sessionCount: number;
+}
+
+/** Prior admission episodes with billing + session counts (for history toggles). */
+export async function getPriorInPatientEpisodes(
+  storage: IStorage,
+  admissionId: string,
+): Promise<PriorInPatientEpisode[]> {
+  const admission = await storage.getInPatientAdmission(admissionId);
+  if (!admission) return [];
+
+  const related = await getRelatedInPatientAdmissions(storage, admission);
+  const priorAdmissions = related
+    .filter((entry) => entry.id !== admissionId)
+    .sort(compareAdmissionRecency);
+
+  const episodes: PriorInPatientEpisode[] = [];
+  for (const prior of priorAdmissions) {
+    const discharge = await storage.getInPatientDischargeByAdmission(prior.id);
+    const amountPaid = await storage.getPaymentTotalByAdmission(prior.id);
+    const sessions = await storage.getInPatientSessionsByAdmission(prior.id);
+    const grandTotal = discharge ? parseFloat(String(discharge.grandTotal)) || 0 : null;
+    episodes.push({
+      admissionId: prior.id,
+      admitDate: prior.admitDate,
+      status: prior.status,
+      dischargeDate: discharge?.dischargeDate ?? null,
+      grandTotal,
+      amountPaid,
+      pendingBalance: discharge ? priorAdmissionBalanceFromDischarge(grandTotal, amountPaid) : 0,
+      sessionCount: sessions.length,
+    });
+  }
+
+  return episodes;
+}
+
+/** Sessions from prior admission episodes for the same person (read-only history). */
+export async function getPreviousInPatientSessions(storage: IStorage, admissionId: string) {
+  const admission = await storage.getInPatientAdmission(admissionId);
+  if (!admission) return [];
+
+  const related = await getRelatedInPatientAdmissions(storage, admission);
+  const priorAdmissions = related
+    .filter((entry) => entry.id !== admissionId)
+    .sort(compareAdmissionRecency);
+
+  const results: Array<
+    Awaited<ReturnType<IStorage["getInPatientSessionsByAdmission"]>>[number] & {
+      admissionAdmitDate: string;
+      admissionStatus: string;
+      priorAdmissionId: string;
+    }
+  > = [];
+
+  for (const prior of priorAdmissions) {
+    const sessions = await storage.getInPatientSessionsByAdmission(prior.id);
+    for (const session of sessions) {
+      results.push({
+        ...session,
+        admissionAdmitDate: prior.admitDate,
+        admissionStatus: prior.status,
+        priorAdmissionId: prior.id,
+      });
+    }
+  }
+
+  return results.sort((left, right) => {
+    const dateCmp = right.sessionDate.localeCompare(left.sessionDate);
+    if (dateCmp !== 0) return dateCmp;
+    return left.sessionNumber - right.sessionNumber;
+  });
 }

@@ -38,6 +38,8 @@ export function invalidateInPatientQueries(queryClient: QueryClient, admissionId
     keys.push(
       ["inpatients", admissionId],
       ["inpatients", admissionId, "sessions"],
+      ["inpatients", admissionId, "sessions", "previous"],
+      ["inpatients", admissionId, "prior-episodes"],
       ["inpatients", admissionId, "discharge"],
       ["inpatients", admissionId, "payments"],
       ["inpatients", admissionId, "payments", "total"],

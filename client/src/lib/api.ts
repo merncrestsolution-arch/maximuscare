@@ -661,6 +661,10 @@ export const inPatientApi = {
   // Sessions
   getSessions: (admissionId: string) => 
     apiRequest<any[]>(`/inpatients/${admissionId}/sessions`),
+  getPreviousSessions: (admissionId: string) =>
+    apiRequest<any[]>(`/inpatients/${admissionId}/sessions/previous`),
+  getPriorEpisodes: (admissionId: string) =>
+    apiRequest<any[]>(`/inpatients/${admissionId}/prior-episodes`),
   getNextSessionNumber: (admissionId: string, date: string) =>
     apiRequest<{ nextSessionNumber: number }>(`/inpatients/${admissionId}/sessions/next-number?date=${date}`),
   createSession: (admissionId: string, data: any) => 

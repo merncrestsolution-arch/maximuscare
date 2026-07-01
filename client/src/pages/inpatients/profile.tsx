@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -13,8 +13,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Loader2, Phone, MapPin, Calendar, User, Clock, Trash2, Edit, Pencil, Plus, CreditCard, Receipt, AlertTriangle } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { formatMoney } from "@/lib/reportDatePresets";
+import {
+  computeDeductionAmount,
+  isCarriedForwardExpense,
+  splitReAdmissionPayments,
+  sumCarriedForwardAmounts,
+} from "@shared/inpatientBilling";
 import { useToast } from "@/hooks/use-toast";
-import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense } from "@/lib/types";
+import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense, InPatientPreviousSession, InPatientPriorEpisode } from "@/lib/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,6 +59,8 @@ export default function InPatientProfilePage() {
   const { data: patient, isLoading, error } = useInPatient(patientId);
   const { data: linkedPatientStats } = usePatientStats(patient?.patientId ?? "");
   const { data: sessions } = useInPatientSessions(patientId);
+  const { data: previousSessions = [] } = useInPatientPreviousSessions(patientId, !!patient);
+  const { data: priorEpisodes = [] } = useInPatientPriorEpisodes(patientId, !!patient);
   const { data: discharge } = useInPatientDischarge(patientId);
   const { data: payments } = useInPatientPayments(patientId);
   const { data: paymentTotalData } = useInPatientPaymentTotal(patientId);
@@ -145,6 +153,8 @@ export default function InPatientProfilePage() {
   const [transferBranchId, setTransferBranchId] = useState("");
   const [transferDate, setTransferDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [transferNote, setTransferNote] = useState("");
+  const [billingSummaryView, setBillingSummaryView] = useState<"current" | "previous">("current");
+  const [sessionsView, setSessionsView] = useState<"current" | "previous">("current");
 
   const isAdminMD = user?.role === "Admin" || user?.role === "MD";
   const isReceptionist = user?.role === "Receptionist";
@@ -172,6 +182,11 @@ export default function InPatientProfilePage() {
       setReadmitOpen(true);
     }
   }, [search, canReadmit]);
+
+  useEffect(() => {
+    setBillingSummaryView("current");
+    setSessionsView("current");
+  }, [patientId]);
 
   const paymentTotal = paymentTotalData?.total || 0;
   const extraExpenseTotal = extraExpenseTotalData?.total || 0;
@@ -577,6 +592,29 @@ export default function InPatientProfilePage() {
   }, {}) || {};
 
   const sortedDates = Object.keys(sessionsByDate).sort((a, b) => b.localeCompare(a));
+  const hasPriorEpisodes = priorEpisodes.length > 0;
+  const hasPreviousSessions = previousSessions.length > 0 || priorEpisodes.some((episode) => episode.sessionCount > 0);
+  const showSessionsHistoryToggle = hasPriorEpisodes || hasPreviousSessions;
+  const showingPreviousSessions = showSessionsHistoryToggle && sessionsView === "previous";
+  const displayedSessions = showingPreviousSessions ? previousSessions : (sessions || []);
+  const previousSessionsByAdmission = previousSessions.reduce<
+    Record<string, { admitDate: string; status: string; sessionsByDate: Record<string, InPatientPreviousSession[]> }>
+  >((acc, session) => {
+    if (!acc[session.priorAdmissionId]) {
+      acc[session.priorAdmissionId] = {
+        admitDate: session.admissionAdmitDate,
+        status: session.admissionStatus,
+        sessionsByDate: {},
+      };
+    }
+    const bucket = acc[session.priorAdmissionId].sessionsByDate;
+    if (!bucket[session.sessionDate]) bucket[session.sessionDate] = [];
+    bucket[session.sessionDate].push(session);
+    return acc;
+  }, {});
+  const previousAdmissionGroups = Object.entries(previousSessionsByAdmission).sort(([, left], [, right]) =>
+    right.admitDate.localeCompare(left.admitDate),
+  );
 
   const endDate = discharge ? new Date(discharge.dischargeDate) : new Date();
   const stayDays = Math.max(1, differenceInDays(endDate, new Date(patient.admitDate)) + 1);
@@ -585,23 +623,55 @@ export default function InPatientProfilePage() {
   const careTakerRate = parseFloat(patient.careTakerRatePerDay) || 0;
   const careTakerDays = patient.careTakerDaysOverride ? patient.careTakerDaysOverride : stayDays;
   const caretakerCharges = careTakerRate * careTakerDays;
+  const carriedForwardTotal = sumCarriedForwardAmounts(extraExpenses);
+  const hasCarriedForwardBalance = carriedForwardTotal > 0;
+  const showBillingHistoryToggle = hasPriorEpisodes || hasCarriedForwardBalance;
+  const currentExtraExpenseTotal = Math.max(0, extraExpenseTotal - carriedForwardTotal);
+  const carriedForwardExpenses = (extraExpenses || []).filter(isCarriedForwardExpense);
+  const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
   // Bug 3: subtotal is everything before the deduction; the deduction is applied against it.
   const subtotal = roomCharges + caretakerCharges + extraExpenseTotal;
+  const currentSubtotal = roomCharges + caretakerCharges + currentExtraExpenseTotal;
   const deductionType = (patient as any).deductionType as "fixed" | "percentage" | null;
   const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
-  const deductionAmount =
-    deductionType === "percentage"
-      ? Math.min(subtotal, subtotal * (deductionValue / 100))
-      : deductionType === "fixed"
-      ? Math.min(subtotal, deductionValue)
-      : 0;
+  const deductionAmount = computeDeductionAmount(subtotal, deductionType, deductionValue);
+  const currentDeductionAmount = computeDeductionAmount(currentSubtotal, deductionType, deductionValue);
   const hasDeduction = deductionAmount > 0;
+  const hasCurrentDeduction = currentDeductionAmount > 0;
   const deductionLabel =
     deductionType === "percentage"
       ? `Deduction (${deductionValue}%)`
       : "Deduction";
   const grandTotal = subtotal - deductionAmount;
+  const currentGrandTotal = currentSubtotal - currentDeductionAmount;
   const balanceDue = grandTotal - paymentTotal;
+  const {
+    currentEpisodePaid,
+    priorBalancePaid,
+    currentBalanceDue,
+    priorBalanceDue,
+  } = splitReAdmissionPayments(paymentTotal, currentGrandTotal, carriedForwardTotal);
+  const showingPreviousBilling = showBillingHistoryToggle && billingSummaryView === "previous";
+  const getPriorEpisodeBilling = (episode: InPatientPriorEpisode, index: number) => {
+    const isMostRecentPrior = index === 0;
+    if (isMostRecentPrior && hasCarriedForwardBalance) {
+      const pending = priorBalanceDue;
+      const paid = Math.max(0, carriedForwardTotal - pending);
+      return {
+        grandTotal: episode.grandTotal ?? carriedForwardTotal,
+        paid,
+        pending,
+      };
+    }
+    return {
+      grandTotal: episode.grandTotal ?? 0,
+      paid: episode.amountPaid,
+      pending: episode.pendingBalance,
+    };
+  };
+  const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode, index) => {
+    return sum + getPriorEpisodeBilling(episode, index).pending;
+  }, hasPriorEpisodes ? 0 : priorBalanceDue);
   // Discharge balance is recomputed from the snapshot grand total minus ALL recorded
   // payments so the Discharge Summary reconciles with the live Billing Summary even
   // when payments are added after the discharge was created.
@@ -646,18 +716,46 @@ export default function InPatientProfilePage() {
     { key: "rate", label: "Rate LKR" },
     { key: "amount", label: "Amount LKR" },
   ];
-  const billingRows = [
-    { item: "Room Charges", quantity: String(stayDays), rate: formatMoney(amountPerDay), amount: formatMoney(roomCharges) },
-    { item: "Caretaker Charges", quantity: String(careTakerDays), rate: formatMoney(careTakerRate), amount: formatMoney(caretakerCharges) },
-    { item: "Extra Expenses", quantity: "-", rate: "-", amount: formatMoney(extraExpenseTotal) },
-    { item: "Subtotal", quantity: "-", rate: "-", amount: formatMoney(subtotal) },
-    ...(hasDeduction
-      ? [{ item: deductionLabel, quantity: "-", rate: "-", amount: `-${formatMoney(deductionAmount)}` }]
-      : []),
-    { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(grandTotal) },
-    { item: "Total Paid", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
-    { item: "Balance Due", quantity: "-", rate: "-", amount: formatMoney(balanceDue) },
-  ];
+  const billingRows = showingPreviousBilling
+    ? priorEpisodes.length > 0
+      ? priorEpisodes.flatMap((episode, index) => {
+          const billing = getPriorEpisodeBilling(episode, index);
+          return [
+            {
+              item: `Admission ${format(new Date(episode.admitDate), "dd MMM yyyy")} (${episode.status})`,
+              quantity: "-",
+              rate: "-",
+              amount: episode.dischargeDate
+                ? `Discharged ${format(new Date(episode.dischargeDate), "dd MMM yyyy")}`
+                : "-",
+            },
+            { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(billing.grandTotal) },
+            { item: "Amount Paid", quantity: "-", rate: "-", amount: formatMoney(billing.paid) },
+            { item: "Pending Balance", quantity: "-", rate: "-", amount: formatMoney(billing.pending) },
+          ];
+        })
+      : [
+          {
+            item: "Previous Admission Balance",
+            quantity: "-",
+            rate: "-",
+            amount: formatMoney(carriedForwardTotal),
+          },
+          { item: "Amount Paid", quantity: "-", rate: "-", amount: formatMoney(priorBalancePaid) },
+          { item: "Pending Balance", quantity: "-", rate: "-", amount: formatMoney(priorBalanceDue) },
+        ]
+    : [
+        { item: "Room Charges", quantity: String(stayDays), rate: formatMoney(amountPerDay), amount: formatMoney(roomCharges) },
+        { item: "Caretaker Charges", quantity: String(careTakerDays), rate: formatMoney(careTakerRate), amount: formatMoney(caretakerCharges) },
+        { item: "Extra Expenses", quantity: "-", rate: "-", amount: formatMoney(currentExtraExpenseTotal) },
+        { item: "Subtotal", quantity: "-", rate: "-", amount: formatMoney(currentSubtotal) },
+        ...(hasCurrentDeduction
+          ? [{ item: deductionLabel, quantity: "-", rate: "-", amount: `-${formatMoney(currentDeductionAmount)}` }]
+          : []),
+        { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(currentGrandTotal) },
+        { item: "Total Paid", quantity: "-", rate: "-", amount: formatMoney(currentEpisodePaid) },
+        { item: "Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) },
+      ];
 
   return (
     <div className="min-h-screen bg-white pb-20">
@@ -877,8 +975,12 @@ export default function InPatientProfilePage() {
         {canViewBillingSummary && (
           <>
         <StructuredReportActions
-          reportTitle={`In-Patient Billing Report - ${patient.patientName}`}
-          fileBaseName={`inpatient-billing-${patientId}`}
+          reportTitle={
+            showingPreviousBilling
+              ? `Previous Billing Summary - ${patient.patientName}`
+              : `In-Patient Billing Report - ${patient.patientName}`
+          }
+          fileBaseName={`inpatient-billing-${patientId}${showingPreviousBilling ? "-previous" : ""}`}
           columns={billingColumns}
           rows={billingRows}
           logoUri={logoUri}
@@ -907,25 +1009,152 @@ export default function InPatientProfilePage() {
           </div>
 
           <div className="bg-[#EEF5FB] rounded-lg p-4" data-testid="billing-summary">
-            <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex flex-col gap-3 mb-3 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="font-semibold flex items-center gap-2">
                 <Receipt className="h-4 w-4" />
-                Billing Summary
+                {showingPreviousBilling ? "Previous Billing Summary" : "Billing Summary"}
               </h3>
-              {canApplyDeduction && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 print:hidden"
-                  onClick={openDeductionModal}
-                  data-testid="button-apply-deduction"
-                >
-                  {hasDeduction ? "Edit Deduction" : "Apply Deduction"}
-                </Button>
-              )}
+              <div className="flex flex-wrap items-center gap-2 print:hidden">
+                {showBillingHistoryToggle && (
+                  <div className="inline-flex rounded-md border border-border/60 bg-white p-0.5">
+                    <Button
+                      type="button"
+                      variant={billingSummaryView === "current" ? "default" : "ghost"}
+                      size="sm"
+                      className="h-8"
+                      onClick={() => setBillingSummaryView("current")}
+                      data-testid="button-current-billing-summary"
+                    >
+                      Current Billing
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={billingSummaryView === "previous" ? "default" : "ghost"}
+                      size="sm"
+                      className="h-8"
+                      onClick={() => setBillingSummaryView("previous")}
+                      data-testid="button-previous-billing-summary"
+                    >
+                      Previous Billing Summary
+                    </Button>
+                  </div>
+                )}
+                {canApplyDeduction && !showingPreviousBilling && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    onClick={openDeductionModal}
+                    data-testid="button-apply-deduction"
+                  >
+                    {hasDeduction ? "Edit Deduction" : "Apply Deduction"}
+                  </Button>
+                )}
+              </div>
             </div>
-            {/* Bug 3: use a real table so description (left) and LKR amounts (right) stay
-                aligned across screen sizes and in print, instead of collapsing flex rows. */}
+            {showingPreviousBilling ? (
+              priorEpisodes.length > 0 ? (
+                <div className="space-y-4">
+                  {priorEpisodes.map((episode, index) => {
+                    const billing = getPriorEpisodeBilling(episode, index);
+                    return (
+                      <div
+                        key={episode.admissionId}
+                        className="rounded-lg border border-amber-200/80 bg-white/60 p-3"
+                        data-testid={`prior-billing-${episode.admissionId}`}
+                      >
+                        <div className="mb-2 text-sm font-semibold text-foreground">
+                          Admission: {format(new Date(episode.admitDate), "dd MMM yyyy")}
+                          <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                            {episode.status}
+                          </span>
+                        </div>
+                        <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
+                          <colgroup>
+                            <col style={{ width: "65%" }} />
+                            <col style={{ width: "35%" }} />
+                          </colgroup>
+                          <tbody>
+                            {episode.dischargeDate && (
+                              <tr>
+                                <td className="py-1 text-left text-muted-foreground align-top">Discharge Date</td>
+                                <td className="py-1 text-right font-medium whitespace-nowrap">
+                                  {format(new Date(episode.dischargeDate), "dd MMM yyyy")}
+                                </td>
+                              </tr>
+                            )}
+                            <tr>
+                              <td className="py-1 text-left text-muted-foreground align-top">Grand Total</td>
+                              <td className="py-1 text-right font-medium whitespace-nowrap">
+                                LKR {formatMoney(billing.grandTotal)}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td className="py-1 text-left text-muted-foreground align-top">Amount Paid</td>
+                              <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap">
+                                LKR {formatMoney(billing.paid)}
+                              </td>
+                            </tr>
+                            <tr className="border-t border-border/60">
+                              <td className="pt-2 text-left font-semibold align-top">Pending Balance</td>
+                              <td
+                                className={`pt-2 text-right font-bold whitespace-nowrap ${billing.pending > 0 ? "text-red-600" : "text-green-700"}`}
+                              >
+                                LKR {formatMoney(billing.pending)}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })}
+                  {priorEpisodes.length > 1 && (
+                    <div className="flex items-center justify-between border-t border-border/60 pt-2 text-sm font-semibold">
+                      <span>Total pending from previous admissions</span>
+                      <span className={totalPriorPendingBalance > 0 ? "text-red-600" : "text-green-700"}>
+                        LKR {formatMoney(totalPriorPendingBalance)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+              <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
+                <colgroup>
+                  <col style={{ width: "65%" }} />
+                  <col style={{ width: "35%" }} />
+                </colgroup>
+                <tbody>
+                  {priorDischargeNote && (
+                    <tr>
+                      <td className="py-1 text-left text-muted-foreground align-top">Previous Discharge Date</td>
+                      <td className="py-1 text-right font-medium whitespace-nowrap">{priorDischargeNote}</td>
+                    </tr>
+                  )}
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Previous Admission Balance</td>
+                    <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-prior-balance">
+                      LKR {formatMoney(carriedForwardTotal)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-1 text-left text-muted-foreground align-top">Amount Paid</td>
+                    <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap" data-testid="text-prior-paid">
+                      LKR {formatMoney(priorBalancePaid)}
+                    </td>
+                  </tr>
+                  <tr className="border-t border-border/60">
+                    <td className="pt-2 text-left font-semibold align-top">Pending Balance</td>
+                    <td
+                      className={`pt-2 text-right font-bold whitespace-nowrap ${priorBalanceDue > 0 ? "text-red-600" : "text-green-700"}`}
+                      data-testid="text-prior-balance-due"
+                    >
+                      LKR {formatMoney(priorBalanceDue)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              )
+            ) : (
             <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: "65%" }} />
@@ -946,13 +1175,13 @@ export default function InPatientProfilePage() {
                 </tr>
                 <tr>
                   <td className="py-1 text-left text-muted-foreground align-top">Extra Expenses</td>
-                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-extra-expenses-total">LKR {formatMoney(extraExpenseTotal)}</td>
+                  <td className="py-1 text-right font-medium whitespace-nowrap" data-testid="text-extra-expenses-total">LKR {formatMoney(currentExtraExpenseTotal)}</td>
                 </tr>
                 <tr className="border-t border-border/60">
                   <td className="pt-2 text-left font-medium align-top">Subtotal</td>
-                  <td className="pt-2 text-right font-medium whitespace-nowrap" data-testid="text-subtotal">LKR {formatMoney(subtotal)}</td>
+                  <td className="pt-2 text-right font-medium whitespace-nowrap" data-testid="text-subtotal">LKR {formatMoney(currentSubtotal)}</td>
                 </tr>
-                {hasDeduction && (
+                {hasCurrentDeduction && (
                   <tr>
                     <td className="py-1 text-left text-muted-foreground align-top">
                       {deductionLabel}
@@ -960,26 +1189,33 @@ export default function InPatientProfilePage() {
                         <span className="block text-xs text-muted-foreground/80">{(patient as any).deductionReason}</span>
                       ) : null}
                     </td>
-                    <td className="py-1 text-right font-medium text-red-600 whitespace-nowrap" data-testid="text-deduction">- LKR {formatMoney(deductionAmount)}</td>
+                    <td className="py-1 text-right font-medium text-red-600 whitespace-nowrap" data-testid="text-deduction">- LKR {formatMoney(currentDeductionAmount)}</td>
                   </tr>
                 )}
                 <tr className="border-t border-border/60">
                   <td className="pt-2 text-left font-semibold align-top">Grand Total</td>
-                  <td className="pt-2 text-right font-bold whitespace-nowrap" data-testid="text-grand-total">LKR {formatMoney(grandTotal)}</td>
+                  <td className="pt-2 text-right font-bold whitespace-nowrap" data-testid="text-grand-total">LKR {formatMoney(currentGrandTotal)}</td>
                 </tr>
                 <tr>
                   <td className="py-1 text-left text-muted-foreground align-top">Total Paid</td>
-                  <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap" data-testid="text-total-paid">LKR {formatMoney(paymentTotal)}</td>
+                  <td className="py-1 text-right font-medium text-green-700 whitespace-nowrap" data-testid="text-total-paid">LKR {formatMoney(currentEpisodePaid)}</td>
                 </tr>
                 <tr className="border-t border-border/60">
                   <td className="pt-2 text-left font-semibold align-top">Balance Due</td>
-                  <td className={`pt-2 text-right font-bold whitespace-nowrap ${balanceDue > 0 ? "text-red-600" : "text-green-700"}`} data-testid="text-balance-due">LKR {formatMoney(balanceDue)}</td>
+                  <td className={`pt-2 text-right font-bold whitespace-nowrap ${currentBalanceDue > 0 ? "text-red-600" : "text-green-700"}`} data-testid="text-balance-due">LKR {formatMoney(currentBalanceDue)}</td>
                 </tr>
               </tbody>
             </table>
+            )}
+            {showBillingHistoryToggle && !showingPreviousBilling && totalPriorPendingBalance > 0 && (
+              <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prior-balance-note">
+                Previous admission pending balance: LKR {formatMoney(totalPriorPendingBalance)}.
+                Use &quot;Previous Billing Summary&quot; to view details.
+              </p>
+            )}
           </div>
 
-          {discharge && (
+          {discharge && !showingPreviousBilling && (
             <div className="bg-blue-50 rounded-lg p-4" data-testid="discharge-summary">
               <h3 className="font-semibold mb-3">Discharge Summary</h3>
               <table className="w-full text-sm border-collapse" style={{ tableLayout: "fixed" }}>
@@ -1121,13 +1357,43 @@ export default function InPatientProfilePage() {
           )}
         </div>
 
-        <div className="mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
-            <h2 className="text-lg font-semibold">Treatment Sessions</h2>
-            <div className="flex flex-wrap gap-2">
+        <div className="mb-6" data-testid="treatment-sessions-section">
+          <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-lg font-semibold">
+              {showingPreviousSessions ? "Previous Sessions" : "Treatment Sessions"}
+            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              {showSessionsHistoryToggle && (
+                <div className="inline-flex rounded-md border border-border/60 bg-muted/20 p-0.5">
+                  <Button
+                    type="button"
+                    variant={sessionsView === "current" ? "default" : "ghost"}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setSessionsView("current")}
+                    data-testid="button-current-sessions"
+                  >
+                    Current Sessions
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={sessionsView === "previous" ? "default" : "ghost"}
+                    size="sm"
+                    className="h-8"
+                    onClick={() => setSessionsView("previous")}
+                    data-testid="button-previous-sessions"
+                  >
+                    Previous Sessions
+                  </Button>
+                </div>
+              )}
               <StructuredReportActions
-                reportTitle={`In-Patient Sessions - ${patient?.patientName || 'Patient'}`}
-                fileBaseName={`inpatient-sessions-${patientId.substring(0, 8)}`}
+                reportTitle={
+                  showingPreviousSessions
+                    ? `Previous In-Patient Sessions - ${patient?.patientName || "Patient"}`
+                    : `In-Patient Sessions - ${patient?.patientName || "Patient"}`
+                }
+                fileBaseName={`inpatient-sessions-${patientId.substring(0, 8)}${showingPreviousSessions ? "-previous" : ""}`}
                 columns={[
                   { label: "Date", key: "date" },
                   { label: "Time", key: "time" },
@@ -1135,17 +1401,22 @@ export default function InPatientProfilePage() {
                   { label: "Treatment", key: "treatmentProvided" },
                   { label: "Therapist", key: "treatingStaffName" },
                   { label: "Improvements", key: "improvements" },
+                  ...(showingPreviousSessions
+                    ? [{ label: "Admission", key: "admissionLabel" }]
+                    : []),
                 ]}
-                rows={(sessions || []).map(s => ({
+                rows={displayedSessions.map((s) => ({
                   ...s,
                   date: format(new Date(s.sessionDate), "yyyy-MM-dd"),
-                  // Bug 2: show session time, surface Improvements, and drop the Notes field.
                   time: [s.startTime, s.endTime].filter(Boolean).join(" - ") || "-",
                   improvements: s.improvements || "-",
+                  admissionLabel: showingPreviousSessions
+                    ? `${format(new Date((s as InPatientPreviousSession).admissionAdmitDate), "dd MMM yyyy")} (${(s as InPatientPreviousSession).admissionStatus})`
+                    : "-",
                 }))}
                 logoUri={logoUri}
               />
-              {canAddSession && (
+              {canAddSession && !showingPreviousSessions && (
                 <Button 
                   size="compact"
                   onClick={() => setLocation(`/inpatients/${patientId}/session/new`)}
@@ -1158,7 +1429,77 @@ export default function InPatientProfilePage() {
             </div>
           </div>
 
-          {sortedDates.length === 0 ? (
+          {showingPreviousSessions ? (
+            previousAdmissionGroups.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground space-y-2" data-testid="text-no-previous-sessions">
+                <p>No treatment sessions on previous admissions.</p>
+                {priorEpisodes.length > 0 && (
+                  <p className="text-xs">
+                    {priorEpisodes.length} previous admission{priorEpisodes.length === 1 ? "" : "s"} on record.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {previousAdmissionGroups.map(([priorAdmissionId, group]) => {
+                  const dates = Object.keys(group.sessionsByDate).sort((a, b) => b.localeCompare(a));
+                  return (
+                    <div key={priorAdmissionId} className="space-y-3" data-testid={`previous-admission-${priorAdmissionId}`}>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm">
+                        <span className="font-medium text-amber-950">
+                          Admission: {format(new Date(group.admitDate), "dd MMM yyyy")}
+                        </span>
+                        <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-amber-900">
+                          {group.status}
+                        </span>
+                      </div>
+                      <div className="space-y-4">
+                        {dates.map((date) => (
+                          <div key={`${priorAdmissionId}-${date}`} className="border rounded-lg overflow-hidden">
+                            <div className="bg-gray-100 px-4 py-2 font-medium text-sm">
+                              {format(new Date(date), "EEEE, dd MMM yyyy")} ({group.sessionsByDate[date].length} session{group.sessionsByDate[date].length > 1 ? "s" : ""})
+                            </div>
+                            <div className="divide-y">
+                              <div className="hidden md:grid md:grid-cols-[1fr_1fr_2fr] gap-2 px-3 py-2 bg-muted/30 text-xs font-semibold text-muted-foreground">
+                                <span>Patient Name</span>
+                                <span>Physio</span>
+                                <span>Session</span>
+                              </div>
+                              {group.sessionsByDate[date]
+                                .sort((a, b) => a.sessionNumber - b.sessionNumber)
+                                .map((session) => (
+                                  <div
+                                    key={session.id}
+                                    className="p-3 md:grid md:grid-cols-[1fr_1fr_2fr] md:gap-2 md:items-start"
+                                    data-testid={`previous-session-${session.id}`}
+                                  >
+                                    <div className="font-medium text-sm md:font-normal">{session.patientName}</div>
+                                    <div className="text-sm text-muted-foreground md:text-foreground">
+                                      <span className="md:hidden font-medium text-foreground">Physio: </span>
+                                      {session.treatingStaffName}
+                                    </div>
+                                    <div className="text-sm min-w-0">
+                                      <div className="flex items-center gap-1 text-xs text-muted-foreground mb-0.5">
+                                        <Clock className="h-3 w-3 shrink-0" />
+                                        #{session.sessionNumber} · {session.startTime}–{session.endTime}
+                                      </div>
+                                      <div className="line-clamp-3">{session.treatmentProvided}</div>
+                                      {session.improvements ? (
+                                        <div className="text-xs text-green-700 mt-1 line-clamp-2">{session.improvements}</div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : sortedDates.length === 0 ? (
             <div className="text-center py-6 text-muted-foreground" data-testid="text-no-sessions">
               No sessions recorded yet
             </div>

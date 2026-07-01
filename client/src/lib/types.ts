@@ -149,6 +149,23 @@ export interface InPatientSession {
   updatedAt: string;
 }
 
+export interface InPatientPreviousSession extends InPatientSession {
+  admissionAdmitDate: string;
+  admissionStatus: string;
+  priorAdmissionId: string;
+}
+
+export interface InPatientPriorEpisode {
+  admissionId: string;
+  admitDate: string;
+  status: string;
+  dischargeDate: string | null;
+  grandTotal: number | null;
+  amountPaid: number;
+  pendingBalance: number;
+  sessionCount: number;
+}
+
 export interface OtherCharge {
   label: string;
   amount: number;

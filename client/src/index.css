@@ -143,6 +143,83 @@
   scrollbar-width: none;
 }
 
+/* Smooth, minimal scrollbar for the sidebar navigation */
+[data-sidebar="content"] {
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+[data-sidebar="content"]::-webkit-scrollbar {
+  width: 5px;
+}
+
+[data-sidebar="content"]::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 6px 0;
+}
+
+[data-sidebar="content"]::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.22s ease;
+}
+
+[data-sidebar="content"]:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+[data-sidebar="content"]::-webkit-scrollbar-thumb:active {
+  background-color: rgba(244, 86, 39, 0.7);
+}
+
+[data-sidebar="content"]::-webkit-scrollbar-button,
+[data-sidebar="content"]::-webkit-scrollbar-corner {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+/* Reusable smooth scrollbar for light panels (main content, modals, etc.) */
+.scrollbar-smooth {
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(16, 86, 145, 0.35) transparent;
+}
+
+.scrollbar-smooth::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-smooth::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.scrollbar-smooth::-webkit-scrollbar-thumb {
+  background-color: rgba(16, 86, 145, 0.22);
+  border-radius: 999px;
+  transition: background-color 0.22s ease;
+}
+
+.scrollbar-smooth:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(16, 86, 145, 0.42);
+}
+
+.scrollbar-smooth::-webkit-scrollbar-button,
+.scrollbar-smooth::-webkit-scrollbar-corner {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
 /* In-patient list: mobile cards vs desktop table */
 @media (max-width: 768px) {
   .inpatient-table-view {

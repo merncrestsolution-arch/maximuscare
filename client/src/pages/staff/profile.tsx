@@ -50,11 +50,6 @@ export default function StaffProfilePage() {
   // Edit/photo/financial affordances stay limited to roles that manage staff accounts.
   const isManagement = canManageStaff(currentUser.role);
   const isAdmin = isAdminRole(currentUser.role);
-  const staffRoleCaps =
-    (profileUser as any).roleCapabilities ??
-    (roleHasConfigurableCapabilities(profileUser.role)
-      ? defaultCapabilitiesForRole(profileUser.role)
-      : null);
   if (!canViewAnyStaff && currentUser.id !== params.id) {
     return <div>Unauthorized</div>;
   }
@@ -78,6 +73,12 @@ export default function StaffProfilePage() {
       </div>
     );
   }
+
+  const staffRoleCaps =
+    (profileUser as any).roleCapabilities ??
+    (roleHasConfigurableCapabilities(profileUser.role)
+      ? defaultCapabilitiesForRole(profileUser.role)
+      : null);
 
   // Bug 16: resolve the staff member's assigned branches to actual branch names instead
   // of the placeholder "Both"/"All". A staff record may store a single branch name, a
