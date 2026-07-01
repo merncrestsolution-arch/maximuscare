@@ -18,17 +18,76 @@ export interface PatientCardFiles {
   png: Buffer;
 }
 
-const QR_LABEL_X = 957;
-const QR_LABEL_Y = 434;
-const QR_IMAGE = { x: 843, y: 183, size: 228 };
+type MaskRect = { x: number; y: number; w: number; h: number; fill?: string };
 
-/** Layout for raster-only templates (viewBox 0 0 1152 728). */
-const OVERLAY_LAYOUT = {
-  name: { x: 46, y: 200, size: 36, weight: "bold", color: "#1a4d8f" },
-  patientId: { x: 46, y: 263, size: 20, color: "#6e747c", prefix: "Patient ID: " },
-  phone: { x: 46, y: 308, size: 20, color: "#6e747c", prefix: "Phone: " },
-  address: { x: 46, y: 354, size: 20, color: "#6e747c", prefix: "Address: " },
-  cardId: { x: 46, y: 399, size: 20, color: "#6e747c", prefix: "Card ID: " },
+type FieldSpec = {
+  key: keyof Pick<PatientCardInput, "name" | "id" | "phone" | "address" | "cardId">;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  weight?: string;
+  anchor?: "start" | "middle" | "end";
+  mask: MaskRect;
+};
+
+/**
+ * Coordinates for the Maximus patient ID card raster template
+ * (viewBox 0 0 1152 728). Masks cover baked-in placeholder pixels before
+ * drawing real values on top.
+ */
+const CARD_LAYOUT = {
+  fields: [
+    {
+      key: "name",
+      x: 138,
+      y: 217,
+      size: 22,
+      weight: "bold",
+      color: "#1a3a6e",
+      mask: { x: 115, y: 190, w: 450, h: 40, fill: "#ffffff" },
+    },
+    {
+      key: "id",
+      x: 310,
+      y: 267,
+      size: 18,
+      color: "#1a3a6e",
+      mask: { x: 250, y: 248, w: 360, h: 34, fill: "#ffffff" },
+    },
+    {
+      key: "phone",
+      x: 310,
+      y: 317,
+      size: 18,
+      color: "#1a3a6e",
+      mask: { x: 250, y: 298, w: 360, h: 34, fill: "#ffffff" },
+    },
+    {
+      key: "address",
+      x: 310,
+      y: 367,
+      size: 18,
+      color: "#1a3a6e",
+      mask: { x: 250, y: 348, w: 420, h: 38, fill: "#ffffff" },
+    },
+  ] satisfies FieldSpec[],
+  cardId: {
+    x: 872,
+    y: 704,
+    size: 15,
+    color: "#ffffff",
+    anchor: "start" as const,
+    mask: { x: 850, y: 684, w: 295, h: 32, fill: "#1f5f9f" },
+  },
+  qr: {
+    x: 790,
+    y: 155,
+    size: 200,
+    mask: { x: 780, y: 145, w: 220, h: 220, fill: "#ffffff" },
+  },
+  /** Covers baked-in mock XML text under the QR in some template exports. */
+  qrCaptionMask: { x: 748, y: 336, w: 310, h: 52, fill: "#ffffff" },
 };
 
 function escapeXml(value: string): string {
@@ -63,6 +122,14 @@ async function generateQrDataUrl(qrToken: string): Promise<string> {
   });
 }
 
+function hasRasterBackground(svgTemplate: string): boolean {
+  return /<image[^>]+(?:xlink:)?href="data:image\//i.test(svgTemplate);
+}
+
+function hasSvgPlaceholders(svgTemplate: string): boolean {
+  return /\{patient\.(?:name|id|phone|address|cardId)\}/.test(svgTemplate);
+}
+
 function fillPlaceholderTemplate(
   svgTemplate: string,
   patient: PatientCardInput,
@@ -70,55 +137,69 @@ function fillPlaceholderTemplate(
 ): string {
   return svgTemplate
     .replaceAll("{{QR_PLACEHOLDER}}", qrDataUrl)
-    .replaceAll("{patient.name}", escapeXml(patient.name))
-    .replaceAll("{patient.id}", escapeXml(patient.id))
-    .replaceAll("{patient.phone}", escapeXml(patient.phone))
-    .replaceAll("{patient.address}", escapeXml(patient.address))
-    .replaceAll("{patient.cardId}", escapeXml(patient.cardId));
+    .replace(/\{patient\.name\}/g, escapeXml(patient.name))
+    .replace(/\{patient\.id\}/g, escapeXml(patient.id))
+    .replace(/\{patient\.phone\}/g, escapeXml(patient.phone))
+    .replace(/\{patient\.address\}/g, escapeXml(patient.address))
+    .replace(/\{patient\.cardId\}/g, escapeXml(patient.cardId));
 }
 
-function addQrPatientIdLabel(svgContent: string, patientId: string): string {
-  const label = `<text x="${QR_LABEL_X}" y="${QR_LABEL_Y}" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#1a3a6e">${escapeXml(patientId)}</text>`;
-  const qrImagePattern = /(<image[^>]*id="patient-qr"[^>]*\/>)/;
-  if (!qrImagePattern.test(svgContent)) {
-    return svgContent;
-  }
-  return svgContent.replace(qrImagePattern, `$1\n  ${label}`);
+function maskRect(rect: MaskRect): string {
+  const fill = rect.fill ?? "#ffffff";
+  return `<rect x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${rect.h}" fill="${fill}"/>`;
 }
 
-function buildOverlayGroup(patient: PatientCardInput, qrDataUrl: string): string {
-  const rows = [
-    {
-      ...OVERLAY_LAYOUT.name,
-      text: patient.name,
-      weight: OVERLAY_LAYOUT.name.weight,
-    },
-    { ...OVERLAY_LAYOUT.patientId, text: `${OVERLAY_LAYOUT.patientId.prefix}${patient.id}` },
-    { ...OVERLAY_LAYOUT.phone, text: `${OVERLAY_LAYOUT.phone.prefix}${patient.phone}` },
-    { ...OVERLAY_LAYOUT.address, text: `${OVERLAY_LAYOUT.address.prefix}${patient.address}` },
-    { ...OVERLAY_LAYOUT.cardId, text: `${OVERLAY_LAYOUT.cardId.prefix}${patient.cardId}` },
-  ];
+function textNode(
+  x: number,
+  y: number,
+  value: string,
+  options: { size: number; color: string; weight?: string; anchor?: "start" | "middle" | "end" }
+): string {
+  const anchor = options.anchor ? ` text-anchor="${options.anchor}"` : "";
+  const weight = options.weight ? ` font-weight="${options.weight}"` : "";
+  return `<text x="${x}" y="${y}"${anchor} font-family="Arial, Helvetica, sans-serif" font-size="${options.size}"${weight} fill="${options.color}">${escapeXml(value)}</text>`;
+}
 
-  const textNodes = rows
-    .map((row) => {
-      const weight = "weight" in row && row.weight ? ` font-weight="${row.weight}"` : "";
-      return `<text x="${row.x}" y="${row.y}" font-family="Arial, sans-serif" font-size="${row.size}"${weight} fill="${row.color}">${escapeXml(row.text)}</text>`;
-    })
+function buildRasterOverlay(patient: PatientCardInput, qrDataUrl: string): string {
+  const masks = [
+    ...CARD_LAYOUT.fields.map((field) => maskRect(field.mask)),
+    maskRect(CARD_LAYOUT.cardId.mask),
+    maskRect(CARD_LAYOUT.qr.mask),
+    maskRect(CARD_LAYOUT.qrCaptionMask),
+  ].join("\n    ");
+
+  const labels = CARD_LAYOUT.fields
+    .map((field) =>
+      textNode(field.x, field.y, patient[field.key], {
+        size: field.size,
+        color: field.color,
+        weight: field.weight,
+        anchor: field.anchor,
+      })
+    )
     .join("\n    ");
 
+  const cardId = textNode(CARD_LAYOUT.cardId.x, CARD_LAYOUT.cardId.y, `CARD ID: ${patient.cardId}`, {
+    size: CARD_LAYOUT.cardId.size,
+    color: CARD_LAYOUT.cardId.color,
+    anchor: CARD_LAYOUT.cardId.anchor,
+  });
+
+  const qr = `<image id="patient-qr" x="${CARD_LAYOUT.qr.x}" y="${CARD_LAYOUT.qr.y}" width="${CARD_LAYOUT.qr.size}" height="${CARD_LAYOUT.qr.size}" xlink:href="${qrDataUrl}" href="${qrDataUrl}"/>`;
+
   return `<g id="patient-card-dynamic">
-    <image id="patient-qr" x="${QR_IMAGE.x}" y="${QR_IMAGE.y}" width="${QR_IMAGE.size}" height="${QR_IMAGE.size}" xlink:href="${qrDataUrl}" href="${qrDataUrl}"/>
-    <text x="${QR_LABEL_X}" y="${QR_LABEL_Y}" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#1a3a6e">${escapeXml(patient.id)}</text>
-    ${textNodes}
+    ${masks}
+    ${labels}
+    ${cardId}
+    ${qr}
   </g>`;
 }
 
-function injectOverlay(svgTemplate: string, patient: PatientCardInput, qrDataUrl: string): string {
-  const overlay = buildOverlayGroup(patient, qrDataUrl);
-  if (svgTemplate.includes("</svg>")) {
-    return svgTemplate.replace("</svg>", `  ${overlay}\n</svg>`);
+function injectBeforeClosingSvg(svgTemplate: string, fragment: string): string {
+  if (!svgTemplate.includes("</svg>")) {
+    throw new Error("Invalid template.svg: missing closing </svg> tag.");
   }
-  throw new Error("Invalid template.svg: missing closing </svg> tag.");
+  return svgTemplate.replace("</svg>", `  ${fragment}\n</svg>`);
 }
 
 /** Short unique card id printed on the card footer area. */
@@ -148,12 +229,13 @@ export async function generatePatientCardBuffers(
   const svgTemplate = await fs.readFile(templatePath, "utf8");
   const qrDataUrl = await generateQrDataUrl(patient.qrToken);
 
-  let svgContent: string;
-  if (svgTemplate.includes("{patient.name}")) {
-    svgContent = fillPlaceholderTemplate(svgTemplate, patient, qrDataUrl);
-    svgContent = addQrPatientIdLabel(svgContent, patient.id);
-  } else {
-    svgContent = injectOverlay(svgTemplate, patient, qrDataUrl);
+  let svgContent = fillPlaceholderTemplate(svgTemplate, patient, qrDataUrl);
+
+  if (hasRasterBackground(svgContent) || hasSvgPlaceholders(svgContent)) {
+    svgContent = injectBeforeClosingSvg(svgContent, buildRasterOverlay(patient, qrDataUrl));
+  } else if (!/id="patient-qr"/.test(svgContent)) {
+    const qrOnly = `<image id="patient-qr" x="${CARD_LAYOUT.qr.x}" y="${CARD_LAYOUT.qr.y}" width="${CARD_LAYOUT.qr.size}" height="${CARD_LAYOUT.qr.size}" xlink:href="${qrDataUrl}" href="${qrDataUrl}"/>`;
+    svgContent = injectBeforeClosingSvg(svgContent, qrOnly);
   }
 
   const svg = Buffer.from(svgContent, "utf8");
