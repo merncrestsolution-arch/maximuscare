@@ -261,6 +261,7 @@ export default function Dashboard() {
         </div>
       }
     >
+      {isStaff && <StaffHomeWidgets />}
 
       {showFinancialDashboard && (
         <>
@@ -550,8 +551,6 @@ export default function Dashboard() {
           </Card>
         </>
       )}
-
-      {isStaff && <StaffHomeWidgets />}
 
       {/* Staff Expense Entry - Physiotherapist/Receptionist Only */}
       {isStaff && (
