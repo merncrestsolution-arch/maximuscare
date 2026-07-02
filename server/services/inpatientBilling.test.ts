@@ -325,6 +325,30 @@ describe("inpatientBilling", () => {
     expect(formatInpatientPaymentTimestamp(payments[0])).toContain("2026");
   });
 
+  it("attributes same-day payments to current stay when transfer has no createdAt", () => {
+    const payments = [{ paymentDate: "2026-07-02", amount: "1000" }];
+    const transfers = [{ transferDate: "2026-07-02" }];
+    expect(getPaymentsForCurrentStay(payments, transfers)).toHaveLength(1);
+    expect(sumPaymentAmounts(getPaymentsForCurrentStay(payments, transfers))).toBe(1000);
+    expect(getPaymentsForPriorTransferStays(payments, transfers)).toHaveLength(0);
+  });
+
+  it("applies current-stay payments to carried-forward balance before current charges", () => {
+    const breakdown = computeAdmissionBillingBreakdown({
+      admitDate: "2026-07-03",
+      endDate: "2026-07-03",
+      amountPerDay: 7000,
+      careTakerRatePerDay: 0,
+      extraExpenses: [{ expenseDate: "2026-07-03", amount: "2000", description: "previous branch balance carried forward" }],
+    });
+    expect(breakdown.grandTotal).toBe(9000);
+    const summary = computeAdmissionBalanceSummary(breakdown, 1000);
+    expect(summary.priorBalancePaid).toBe(1000);
+    expect(summary.currentEpisodePaid).toBe(0);
+    expect(summary.netBalanceDue).toBe(8000);
+    expect(summary.overpaymentCredit).toBe(0);
+  });
+
   it("splits sessions by branch transfer using recorded timestamps", () => {
     const transferAt = "2026-07-02T10:00:00.000Z";
     const sessions = [

@@ -157,7 +157,8 @@ function transferInstant(transfer: TransferLogLike): number {
     return new Date(transfer.createdAt).getTime();
   }
   const day = dateOnly(transfer.transferDate);
-  return new Date(`${day}T23:59:59.999+05:30`).getTime();
+  // Current branch stay begins on the transfer date (matches billing segment start).
+  return new Date(`${day}T00:00:00+05:30`).getTime();
 }
 
 export type InpatientSessionLike = {
@@ -183,7 +184,7 @@ export function getSessionsForCurrentStay<T extends InpatientSessionLike>(
   const lastTransfer = transferLogsAsc[transferLogsAsc.length - 1];
   const transferAt = transferInstant(lastTransfer);
 
-  return sessions.filter((session) => sessionInstant(session) > transferAt);
+  return sessions.filter((session) => sessionInstant(session) >= transferAt);
 }
 
 /** Sessions recorded before or at the most recent branch transfer (prior stay). */
@@ -207,7 +208,7 @@ export function getPaymentsForCurrentStay<T extends InpatientPaymentLike>(
   const lastTransfer = transferLogsAsc[transferLogsAsc.length - 1];
   const transferAt = transferInstant(lastTransfer);
 
-  return payments.filter((payment) => paymentInstant(payment) > transferAt);
+  return payments.filter((payment) => paymentInstant(payment) >= transferAt);
 }
 
 /** Payments recorded before or at the most recent branch transfer (prior stay). */

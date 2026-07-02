@@ -22,7 +22,6 @@ import {
   computeBalanceDue,
   computeDeductionAmount,
   computeStayDays,
-  computeTransferStayPaymentAllocation,
   CARRIED_FORWARD_CREDIT_MARKER,
   formatInpatientPaymentTimestamp,
   getPaymentsForCurrentStay,
@@ -961,36 +960,10 @@ export default function InPatientProfilePage() {
   const targetHasDeduction =
     deductionTargetSegment === "current" ? hasCurrentDeduction : hasPriorSegmentDeduction;
 
-  const transferPaymentAllocation =
-    hasTransferHistory && priorTransferEpisodes.length > 0
-      ? computeTransferStayPaymentAllocation({
-          priorSegmentGrandTotals: priorTransferEpisodes.map((episode) => episode.grandTotal ?? 0),
-          currentSegmentGrandTotal: currentGrandTotal,
-          paymentTotal,
-        })
-      : null;
-
-  const balanceSummary =
-    hasTransferHistory && transferPaymentAllocation
-      ? (() => {
-          const netBalanceDue = computeBalanceDue(grandTotal, paymentTotal);
-          const livePriorDue = Math.max(0, liveTransferPendingBalance ?? 0);
-          return {
-            currentEpisodePaid: transferPaymentAllocation.currentSegmentPaid,
-            priorBalancePaid: transferPaymentAllocation.priorSegmentsPaid,
-            currentBalanceDue: currentGrandTotal - transferPaymentAllocation.currentSegmentPaid,
-            priorBalanceDue: livePriorDue,
-            netBalanceDue,
-            overpaymentCredit: Math.max(0, paymentTotal - grandTotal),
-            totalBalanceDue: netBalanceDue,
-            priorPendingForCurrentAdmission: livePriorDue,
-            hasPriorPendingInSummary: livePriorDue > 0,
-            carriedForwardCreditApplied: breakdown.carriedForwardCreditApplied,
-            hasCarriedForwardBalance: livePriorDue > 0,
-            hasCarriedForwardCredit: breakdown.carriedForwardCreditApplied > 0,
-          };
-        })()
-      : computeAdmissionBalanceSummary(breakdown, paymentTotal);
+  // After transfer, only payments on the current branch stay apply to this bill.
+  // Prior-branch payments are already reflected on Previous Billing.
+  const billPaymentTotal = hasTransferHistory ? currentStayPaymentTotal : paymentTotal;
+  const balanceSummary = computeAdmissionBalanceSummary(breakdown, billPaymentTotal);
   const effectivePaymentTotal = paymentTotal;
   const {
     currentEpisodePaid,
@@ -1830,6 +1803,22 @@ export default function InPatientProfilePage() {
                               tone="success"
                             />
                           )}
+                          {hasCarriedForwardBalance && currentStayPaymentTotal > 0 && (
+                            <>
+                              <BillingLine
+                                label="Paid toward previous admission"
+                                value={`LKR ${formatMoney(priorBalancePaid)}`}
+                                tone="success"
+                                testId="text-transfer-prior-paid"
+                              />
+                              <BillingLine
+                                label="Paid toward current stay"
+                                value={`LKR ${formatMoney(currentEpisodePaid)}`}
+                                tone="success"
+                                testId="text-transfer-current-paid"
+                              />
+                            </>
+                          )}
                           <BillingLine
                             label="Total paid (current stay)"
                             value={`LKR ${formatMoney(currentStayPaymentTotal)}`}
@@ -1949,7 +1938,9 @@ export default function InPatientProfilePage() {
                   >
                     {hasCarriedForwardCredit
                       ? `Previous overpayment credit of LKR ${formatMoney(carriedForwardCreditApplied)} has been auto-deducted from this bill.`
-                      : "Payments are applied to the previous admission balance first, then to the current stay."}{" "}
+                      : hasTransferHistory
+                        ? "Current stay payments are applied to the previous branch balance first, then to the current stay."
+                        : "Payments are applied to the previous admission balance first, then to the current stay."}{" "}
                     Switch to <span className="font-semibold">Previous</span> for the full discharge bill breakdown.
                   </p>
                 )}

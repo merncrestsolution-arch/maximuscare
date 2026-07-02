@@ -8,9 +8,10 @@ import {
   computeAdmissionBillingBreakdown,
   computeBalanceDue,
   computeStayDays,
-  computeTransferStayPaymentAllocation,
+  getPaymentsForCurrentStay,
   isCarriedForwardExpense,
   resolveSegmentDeductionFields,
+  sumPaymentAmounts,
   type DischargeBillLine,
 } from "@shared/inpatientBilling";
 import { getTransferPriorBillingEpisodes } from "./inPatientAdmissionService";
@@ -162,20 +163,15 @@ export async function buildInPatientDischargeSummary(
   });
 
   const paymentTotal = payments.reduce((sum, payment) => sum + (parseFloat(String(payment.amount)) || 0), 0);
-  const transferPaymentAllocation =
-    transferLogsAsc.length > 0 && priorTransferEpisodes.length > 0
-      ? computeTransferStayPaymentAllocation({
-          priorSegmentGrandTotals: priorTransferEpisodes.map((episode) => episode.grandTotal ?? 0),
-          currentSegmentGrandTotal: breakdown.currentGrandTotal,
-          paymentTotal,
-        })
-      : null;
+  const currentStayPaymentTotal =
+    transferLogsAsc.length > 0
+      ? sumPaymentAmounts(getPaymentsForCurrentStay(payments, transferLogsAsc))
+      : paymentTotal;
+  const billPaymentTotal = transferLogsAsc.length > 0 ? currentStayPaymentTotal : paymentTotal;
   const due =
-    transferLogsAsc.length > 0 && transferPaymentAllocation
-      ? computeBalanceDue(breakdown.grandTotal, paymentTotal)
-      : breakdown.carriedForwardDebt > 0 || breakdown.carriedForwardCreditApplied > 0
-        ? computeAdmissionBalanceSummary(breakdown, paymentTotal).totalBalanceDue
-        : computeBalanceDue(breakdown.grandTotal, paymentTotal);
+    breakdown.carriedForwardDebt > 0 || breakdown.carriedForwardCreditApplied > 0
+      ? computeAdmissionBalanceSummary(breakdown, billPaymentTotal).totalBalanceDue
+      : computeBalanceDue(breakdown.grandTotal, billPaymentTotal);
 
   const branchName = admission.branchId
     ? (branches.find((branch) => branch.id === admission.branchId)?.name ?? null)
