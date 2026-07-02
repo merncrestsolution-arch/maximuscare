@@ -222,7 +222,8 @@ export default function DischargeInPatientPage() {
             </table>
           </div>
           <p className="mt-2 text-xs text-slate-400" data-testid="text-stay-summary">
-            Stay: {format(new Date(patient.admitDate), "dd MMM yyyy")} → Today ({summary?.totalDays ?? 0} days)
+            Stay: {format(new Date(patient.admitDate), "dd MMM yyyy")} →{" "}
+            {format(new Date(dischargeDate), "dd MMM yyyy")} ({summary?.totalDays ?? 0} days)
           </p>
         </section>
 

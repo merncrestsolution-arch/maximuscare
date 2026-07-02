@@ -102,6 +102,15 @@ export function buildDischargeBillLines(
     });
   }
 
+  if (breakdown.carriedForwardTotal > 0) {
+    lines.push({
+      description: "Previous Admission Balance",
+      quantity: "-",
+      rate: null,
+      amount: breakdown.carriedForwardTotal,
+    });
+  }
+
   if (breakdown.extraExpenseTotal > 0) {
     lines.push({
       description: "Extra Expenses",
@@ -132,10 +141,20 @@ export type AdmissionBillingBreakdown = {
   roomCharges: number;
   careTakerDays: number;
   caretakerCharges: number;
+  /** Extra expenses for this stay only (excludes carried-forward prior balance). */
   extraExpenseTotal: number;
+  /** Prior admission balance brought forward on re-admit. */
+  carriedForwardTotal: number;
+  /** Room + caretaker + current extra expenses + carried forward, before deduction. */
   subtotal: number;
+  /** Room + caretaker + current extra expenses, before deduction. */
+  currentSubtotal: number;
+  /** Deduction applies to the current stay only — not carried-forward balance. */
   deductionAmount: number;
+  /** Total bill: current stay after deduction + any carried-forward balance. */
   grandTotal: number;
+  /** Current stay after deduction (excludes carried forward). */
+  currentGrandTotal: number;
 };
 
 export function computeAdmissionBillingBreakdown(input: AdmissionBillingInput): AdmissionBillingBreakdown {
@@ -145,14 +164,16 @@ export function computeAdmissionBillingBreakdown(input: AdmissionBillingInput): 
   const careTakerRate = parseFloat(String(input.careTakerRatePerDay ?? 0)) || 0;
   const careTakerDays = input.careTakerDaysOverride ?? stayDays;
   const caretakerCharges = careTakerRate * careTakerDays;
-  const extraExpenseTotal = (input.extraExpenses || []).reduce(
-    (sum, expense) => sum + (parseFloat(String(expense.amount)) || 0),
-    0,
-  );
-  const subtotal = roomCharges + caretakerCharges + extraExpenseTotal;
+  const carriedForwardTotal = sumCarriedForwardAmounts(input.extraExpenses);
+  const extraExpenseTotal = (input.extraExpenses || [])
+    .filter((expense) => !isCarriedForwardExpense(expense))
+    .reduce((sum, expense) => sum + (parseFloat(String(expense.amount)) || 0), 0);
+  const currentSubtotal = roomCharges + caretakerCharges + extraExpenseTotal;
+  const subtotal = currentSubtotal + carriedForwardTotal;
   const deductionValue = parseFloat(String(input.deductionValue ?? 0)) || 0;
-  const deductionAmount = computeDeductionAmount(subtotal, input.deductionType, deductionValue);
-  const grandTotal = Math.max(0, subtotal - deductionAmount);
+  const deductionAmount = computeDeductionAmount(currentSubtotal, input.deductionType, deductionValue);
+  const currentGrandTotal = Math.max(0, currentSubtotal - deductionAmount);
+  const grandTotal = currentGrandTotal + carriedForwardTotal;
 
   return {
     stayDays,
@@ -160,9 +181,40 @@ export function computeAdmissionBillingBreakdown(input: AdmissionBillingInput): 
     careTakerDays,
     caretakerCharges,
     extraExpenseTotal,
+    carriedForwardTotal,
     subtotal,
+    currentSubtotal,
     deductionAmount,
     grandTotal,
+    currentGrandTotal,
+  };
+}
+
+/** Payment allocation and balance due for a live admission bill. */
+export function computeAdmissionBalanceSummary(
+  breakdown: AdmissionBillingBreakdown,
+  paymentTotal: number,
+) {
+  const paymentSplit = splitReAdmissionPayments(
+    paymentTotal,
+    breakdown.currentGrandTotal,
+    breakdown.carriedForwardTotal,
+  );
+  const netBalanceDue = computeBalanceDue(breakdown.grandTotal, paymentTotal);
+  const priorPendingForCurrentAdmission =
+    breakdown.carriedForwardTotal > 0 ? paymentSplit.priorBalanceDue : 0;
+  const totalBalanceDue =
+    breakdown.carriedForwardTotal > 0
+      ? computeTotalPendingBalance(paymentSplit.currentBalanceDue, priorPendingForCurrentAdmission)
+      : netBalanceDue;
+
+  return {
+    ...paymentSplit,
+    netBalanceDue,
+    totalBalanceDue,
+    priorPendingForCurrentAdmission,
+    hasCarriedForwardBalance: breakdown.carriedForwardTotal > 0,
+    hasPriorPendingInSummary: priorPendingForCurrentAdmission > 0,
   };
 }
 

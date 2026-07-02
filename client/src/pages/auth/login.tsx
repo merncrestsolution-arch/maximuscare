@@ -95,7 +95,7 @@ export default function LoginPage() {
         </CardContent>
       </Card>
       </div>
-      <SiteCreditFooter />
+      <SiteCreditFooter variant="dark" />
     </div>
   );
 }

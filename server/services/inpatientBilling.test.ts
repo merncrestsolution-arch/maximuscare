@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   collectReadmitChainPriorAdmissionIds,
+  computeAdmissionBalanceSummary,
   computeAdmissionGrandTotal,
   computeAdmissionBalanceDue,
   computeBalanceDue,
@@ -74,6 +75,57 @@ describe("inpatientBilling", () => {
     expect(computeTotalPendingBalance(2000, 1000)).toBe(3000);
     expect(computeTotalPendingBalance(0, 0)).toBe(0);
     expect(computeTotalPendingBalance(-500, 0)).toBe(-500);
+  });
+
+  it("excludes carried-forward balance from deduction and extra expense total", () => {
+    const breakdown = computeAdmissionBillingBreakdown({
+      admitDate: "2026-07-01",
+      endDate: "2026-07-03",
+      amountPerDay: 1000,
+      careTakerRatePerDay: 0,
+      deductionType: "percentage",
+      deductionValue: 10,
+      extraExpenses: [
+        { description: "Previous admission balance carried forward", amount: "5000" },
+        { description: "Food", amount: "200" },
+      ],
+    });
+    expect(breakdown.extraExpenseTotal).toBe(200);
+    expect(breakdown.carriedForwardTotal).toBe(5000);
+    expect(breakdown.currentSubtotal).toBe(1000 * 3 + 200);
+    expect(breakdown.deductionAmount).toBe(320);
+    expect(breakdown.currentGrandTotal).toBe(2880);
+    expect(breakdown.grandTotal).toBe(7880);
+  });
+
+  it("computes admission balance summary with payment split", () => {
+    const breakdown = computeAdmissionBillingBreakdown({
+      admitDate: "2026-07-01",
+      endDate: "2026-07-03",
+      amountPerDay: 1000,
+      extraExpenses: [{ description: "Previous admission balance carried forward", amount: "10000" }],
+    });
+    const summary = computeAdmissionBalanceSummary(breakdown, 12000);
+    expect(summary.priorBalancePaid).toBe(10000);
+    expect(summary.currentEpisodePaid).toBe(2000);
+    expect(summary.totalBalanceDue).toBe(1000);
+    expect(summary.netBalanceDue).toBe(1000);
+  });
+
+  it("builds discharge bill lines with separate carried-forward row", () => {
+    const breakdown = computeAdmissionBillingBreakdown({
+      admitDate: "2026-07-01",
+      endDate: "2026-07-03",
+      amountPerDay: 1000,
+      extraExpenses: [
+        { description: "Previous admission balance carried forward", amount: "5000" },
+        { description: "Food", amount: "200" },
+      ],
+    });
+    const lines = buildDischargeBillLines(breakdown, { amountPerDay: 1000, careTakerRatePerDay: 0 });
+    expect(lines.some((line) => line.description === "Previous Admission Balance")).toBe(true);
+    expect(lines.some((line) => line.description === "Extra Expenses")).toBe(true);
+    expect(lines.reduce((sum, line) => sum + line.amount, 0)).toBe(breakdown.grandTotal);
   });
 
   it("computes live admission grand total", () => {

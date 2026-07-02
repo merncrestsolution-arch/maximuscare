@@ -18,7 +18,12 @@ import {
 } from "../middleware/secureApi";
 import { attachBranchContext, requireBranchContext, getBranchFilter, loadBranchContext } from "../middleware/branchContext";
 import { resolveBranchScopedStaffIds, isStaffInBranchScope } from "../services/staffService";
-import { assertOverviewAccess } from "../services/branchService";
+import {
+  assertOverviewAccess,
+  getAllowedBranchesForStaff,
+  getTransferDestinationBranches,
+} from "../services/branchService";
+import { hasFullBranchAccess } from "@shared/branchAccess";
 import { computeOverviewKpis, computeMaximusComparison, computeNexusComparison, computeOverviewExpenseBreakdown } from "../services/overviewService";
 import { successResponse, errorResponse } from "../response";
 import { isManagementRole, isOperationalLead } from "../permissions";
@@ -227,8 +232,6 @@ export function registerExtendedRoutes(app: Express) {
   app.get("/api/branches", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;
-      const { getAllowedBranchesForStaff, getTransferDestinationBranches } = await import("./services/branchService");
-      const { hasFullBranchAccess } = await import("@shared/branchAccess");
       const forTransfer = String(req.query.forTransfer ?? "").toLowerCase() === "true" || req.query.forTransfer === "1";
       const list = forTransfer
         ? await getTransferDestinationBranches(storage, user.staffId, user.role)

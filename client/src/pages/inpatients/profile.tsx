@@ -16,13 +16,12 @@ import { formatMoney } from "@/lib/reportDatePresets";
 import { clinicTodayString } from "@/lib/utils";
 import { getDueDisplay } from "@/lib/paymentStatus";
 import {
-  computeDeductionAmount,
+  computeAdmissionBalanceSummary,
+  computeAdmissionBillingBreakdown,
+  computeBalanceDue,
   computeStayDays,
-  computeTotalPendingBalance,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
-  splitReAdmissionPayments,
-  sumCarriedForwardAmounts,
 } from "@shared/inpatientBilling";
 import { useToast } from "@/hooks/use-toast";
 import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense, InPatientPreviousSession, InPatientPriorEpisode } from "@/lib/types";
@@ -233,9 +232,11 @@ export default function InPatientProfilePage() {
   const canDischarge = isAdminMD && patient?.status === "Admitted";
   const canReadmit = canReAdmitInPatient(user?.role) && patient?.status === "Discharged";
 
-  const { data: transferBranches = [], isLoading: transferBranchesLoading } = useTransferBranches(
-    transferOpen && canTransfer,
-  );
+  const {
+    data: transferBranches = [],
+    isLoading: transferBranchesLoading,
+    isError: transferBranchesError,
+  } = useTransferBranches(canTransfer);
   const transferBranchChoices = useMemo(() => {
     const rows = Array.isArray(transferBranches) ? transferBranches : [];
     return rows
@@ -697,43 +698,55 @@ export default function InPatientProfilePage() {
   const billingEndDate = discharge
     ? String(discharge.dischargeDate).split("T")[0]
     : clinicTodayString();
-  const stayDays = computeStayDays(patient.admitDate, billingEndDate);
+  const deductionType = (patient as any).deductionType as "fixed" | "percentage" | null;
+  const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
+  const deductionLabel =
+    deductionType === "percentage" ? `Deduction (${deductionValue}%)` : "Deduction";
+  const breakdown = computeAdmissionBillingBreakdown({
+    admitDate: patient.admitDate,
+    endDate: billingEndDate,
+    amountPerDay: patient.amountPerDay,
+    careTakerRatePerDay: patient.careTakerRatePerDay,
+    careTakerDaysOverride: patient.careTakerDaysOverride,
+    deductionType,
+    deductionValue,
+    extraExpenses,
+  });
+  const {
+    stayDays,
+    roomCharges,
+    careTakerDays,
+    caretakerCharges,
+    extraExpenseTotal: currentExtraExpenseTotal,
+    carriedForwardTotal,
+    currentSubtotal,
+    deductionAmount: currentDeductionAmount,
+    currentGrandTotal,
+    grandTotal,
+  } = breakdown;
   const amountPerDay = parseFloat(patient.amountPerDay) || 0;
-  const roomCharges = amountPerDay * stayDays;
   const careTakerRate = parseFloat(patient.careTakerRatePerDay) || 0;
-  const careTakerDays = patient.careTakerDaysOverride ? patient.careTakerDaysOverride : stayDays;
-  const caretakerCharges = careTakerRate * careTakerDays;
-  const carriedForwardTotal = sumCarriedForwardAmounts(extraExpenses);
   const hasCarriedForwardBalance = carriedForwardTotal > 0;
   const isReadmitAdmission =
     Boolean(parseReadmitAdmissionSource((patient as { admissionSource?: string | null }).admissionSource)) ||
     hasCarriedForwardBalance;
   const showBillingHistoryToggle =
     hasCarriedForwardBalance || (isReadmitAdmission && hasPriorEpisodes);
-  const currentExtraExpenseTotal = Math.max(0, extraExpenseTotal - carriedForwardTotal);
   const carriedForwardExpenses = (extraExpenses || []).filter(isCarriedForwardExpense);
   const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
-  // Bug 3: subtotal is everything before the deduction; the deduction is applied against it.
-  const subtotal = roomCharges + caretakerCharges + extraExpenseTotal;
-  const currentSubtotal = roomCharges + caretakerCharges + currentExtraExpenseTotal;
-  const deductionType = (patient as any).deductionType as "fixed" | "percentage" | null;
-  const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
-  const deductionAmount = computeDeductionAmount(subtotal, deductionType, deductionValue);
-  const currentDeductionAmount = computeDeductionAmount(currentSubtotal, deductionType, deductionValue);
-  const hasDeduction = deductionAmount > 0;
   const hasCurrentDeduction = currentDeductionAmount > 0;
-  const deductionLabel =
-    deductionType === "percentage"
-      ? `Deduction (${deductionValue}%)`
-      : "Deduction";
-  const grandTotal = subtotal - deductionAmount;
-  const currentGrandTotal = currentSubtotal - currentDeductionAmount;
+  const hasDeduction = currentDeductionAmount > 0;
+  const balanceSummary = computeAdmissionBalanceSummary(breakdown, paymentTotal);
   const {
     currentEpisodePaid,
     priorBalancePaid,
     currentBalanceDue,
     priorBalanceDue,
-  } = splitReAdmissionPayments(paymentTotal, currentGrandTotal, carriedForwardTotal);
+    netBalanceDue,
+    totalBalanceDue,
+    priorPendingForCurrentAdmission,
+    hasPriorPendingInSummary,
+  } = balanceSummary;
   const showingPreviousBilling = showBillingHistoryToggle && billingSummaryView === "previous";
   const getPriorEpisodeBilling = (episode: InPatientPriorEpisode, index: number) => {
     const isMostRecentPrior = index === 0;
@@ -755,17 +768,7 @@ export default function InPatientProfilePage() {
   const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode, index) => {
     return sum + getPriorEpisodeBilling(episode, index).pending;
   }, 0);
-  /** Only a carried-forward charge (created on re-admit) affects the current bill. */
-  const priorPendingForCurrentAdmission = hasCarriedForwardBalance ? priorBalanceDue : 0;
-  const hasPriorPendingInSummary = priorPendingForCurrentAdmission > 0;
-  const netBalanceDue = grandTotal - paymentTotal;
-  const totalBalanceDue = hasPriorPendingInSummary
-    ? computeTotalPendingBalance(currentBalanceDue, priorPendingForCurrentAdmission)
-    : netBalanceDue;
-  // Discharge balance is recomputed from the snapshot grand total minus ALL recorded
-  // payments so the Discharge Summary reconciles with the live Billing Summary even
-  // when payments are added after the discharge was created.
-  const dischargeBalance = discharge ? Number(discharge.grandTotal) - paymentTotal : 0;
+  const dischargeBalance = discharge ? computeBalanceDue(grandTotal, paymentTotal) : 0;
   const pastDueAdmission = dischargeBalance > 0 ? dischargeBalance : 0;
   const pastDueOutpatient = Math.max(0, Number(linkedPatientStats?.outstandingAmount ?? 0));
   const totalPastDue = pastDueAdmission + pastDueOutpatient;
@@ -842,11 +845,15 @@ export default function InPatientProfilePage() {
         { item: "Room Charges", quantity: String(stayDays), rate: formatMoney(amountPerDay), amount: formatMoney(roomCharges) },
         { item: "Caretaker Charges", quantity: String(careTakerDays), rate: formatMoney(careTakerRate), amount: formatMoney(caretakerCharges) },
         { item: "Extra Expenses", quantity: "-", rate: "-", amount: formatMoney(currentExtraExpenseTotal) },
-        { item: "Subtotal", quantity: "-", rate: "-", amount: formatMoney(currentSubtotal) },
+        { item: "Subtotal (current stay)", quantity: "-", rate: "-", amount: formatMoney(currentSubtotal) },
         ...(hasCurrentDeduction
           ? [{ item: deductionLabel, quantity: "-", rate: "-", amount: `-${formatMoney(currentDeductionAmount)}` }]
           : []),
-        { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(currentGrandTotal) },
+        { item: "Current Stay Total", quantity: "-", rate: "-", amount: formatMoney(currentGrandTotal) },
+        ...(hasCarriedForwardBalance
+          ? [{ item: "Previous Admission Balance", quantity: "-", rate: "-", amount: formatMoney(carriedForwardTotal) }]
+          : []),
+        { item: "Total Bill", quantity: "-", rate: "-", amount: formatMoney(grandTotal) },
         ...(hasCarriedForwardBalance
           ? [
               { item: "Paid toward previous due", quantity: "-", rate: "-", amount: formatMoney(priorBalancePaid) },
@@ -1348,7 +1355,7 @@ export default function InPatientProfilePage() {
                       testId="text-extra-expenses-total"
                     />
                     <BillingLine
-                      label="Subtotal"
+                      label="Subtotal (current stay)"
                       value={`LKR ${formatMoney(currentSubtotal)}`}
                       emphasized
                       testId="text-subtotal"
@@ -1363,8 +1370,21 @@ export default function InPatientProfilePage() {
                       />
                     )}
                     <BillingLine
-                      label="Grand Total"
+                      label="Current Stay Total"
                       value={`LKR ${formatMoney(currentGrandTotal)}`}
+                      emphasized
+                      testId="text-current-stay-total"
+                    />
+                    {hasCarriedForwardBalance && (
+                      <BillingLine
+                        label="Previous Admission Balance"
+                        value={`LKR ${formatMoney(carriedForwardTotal)}`}
+                        testId="text-carried-forward"
+                      />
+                    )}
+                    <BillingLine
+                      label="Total Bill"
+                      value={`LKR ${formatMoney(grandTotal)}`}
                       emphasized
                       testId="text-grand-total"
                     />
@@ -1469,20 +1489,31 @@ export default function InPatientProfilePage() {
                     label="Discharge Date"
                     value={format(new Date(discharge.dischargeDate), "dd MMM yyyy")}
                   />
-                  <BillingLine label="Days Stayed" value={`${discharge.daysCount} days`} />
-                  <BillingLine label="Stay Amount" value={`LKR ${formatMoney(Number(discharge.stayAmount))}`} />
-                  <BillingLine label="Other Charges" value={`LKR ${formatMoney(Number(discharge.otherTotal))}`} />
-                  {Number((discharge as any).deductionAmount) > 0 && (
+                  <BillingLine label="Days Stayed" value={`${breakdown.stayDays} days`} />
+                  <BillingLine label="Room Charges" value={`LKR ${formatMoney(breakdown.roomCharges)}`} />
+                  {breakdown.caretakerCharges > 0 && (
+                    <BillingLine label="Caretaker Charges" value={`LKR ${formatMoney(breakdown.caretakerCharges)}`} />
+                  )}
+                  {breakdown.extraExpenseTotal > 0 && (
+                    <BillingLine label="Extra Expenses" value={`LKR ${formatMoney(breakdown.extraExpenseTotal)}`} />
+                  )}
+                  {breakdown.carriedForwardTotal > 0 && (
                     <BillingLine
-                      label={`Deduction${(discharge as any).deductionType === "percentage" ? ` (${Number((discharge as any).deductionValue)}%)` : ""}`}
-                      value={`- LKR ${formatMoney(Number((discharge as any).deductionAmount))}`}
+                      label="Previous Admission Balance"
+                      value={`LKR ${formatMoney(breakdown.carriedForwardTotal)}`}
+                    />
+                  )}
+                  {breakdown.deductionAmount > 0 && (
+                    <BillingLine
+                      label={`${deductionLabel}${(patient as any).deductionReason ? "" : ""}`}
+                      value={`- LKR ${formatMoney(breakdown.deductionAmount)}`}
                       tone="danger"
-                      sublabel={(discharge as any).deductionReason || undefined}
+                      sublabel={(patient as any).deductionReason || undefined}
                     />
                   )}
                   <BillingLine
-                    label="Grand Total"
-                    value={`LKR ${formatMoney(Number(discharge.grandTotal))}`}
+                    label="Total Bill"
+                    value={`LKR ${formatMoney(grandTotal)}`}
                     emphasized
                   />
                   <BillingLine label="Amount Paid" value={`LKR ${formatMoney(paymentTotal)}`} tone="success" />
@@ -1914,7 +1945,12 @@ export default function InPatientProfilePage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {!transferBranchesLoading && destinationBranches.length === 0 && (
+                {!transferBranchesLoading && transferBranchesError && (
+                  <p className="text-xs text-destructive" data-testid="text-transfer-branches-error">
+                    Could not load branches. Please try again.
+                  </p>
+                )}
+                {!transferBranchesLoading && !transferBranchesError && destinationBranches.length === 0 && (
                   <p className="text-xs text-amber-700" data-testid="text-no-transfer-branches">
                     No other active branches are available for transfer.
                   </p>

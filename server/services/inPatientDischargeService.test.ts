@@ -61,4 +61,39 @@ describe("inPatientDischargeService", () => {
     expect(summary?.due).toBe((summary?.totalBill ?? 0) - 15000);
     expect(summary?.inpatient.branchName).toBe("Dehiwala");
   });
+
+  it("separates carried-forward balance on discharge bill lines", async () => {
+    const storage = {
+      getInPatientAdmission: async () => ({
+        id: "a2",
+        patientName: "Re-admit Patient",
+        patientCode: "P002",
+        admitDate: "2026-07-05",
+        branchId: "b1",
+        condition: "Stroke",
+        packageType: "Non-AC Room",
+        amountPerDay: "1000",
+        careTakerRatePerDay: "0",
+        careTakerDaysOverride: null,
+        deductionType: null,
+        deductionValue: "0",
+        deductionReason: null,
+      }),
+      getInPatientExtraExpensesByAdmission: async () => [
+        {
+          description: "Previous admission balance carried forward (discharged 2026-07-04)",
+          amount: "4000",
+        },
+      ],
+      getInPatientPaymentsByAdmission: async () => [
+        { id: "p1", paymentDate: "2026-07-06", amount: "5000", paymentMode: "Cash", notes: null },
+      ],
+      getAllBranches: async () => [{ id: "b1", name: "Dehiwala" }],
+    };
+
+    const summary = await buildInPatientDischargeSummary(storage as any, "a2", "2026-07-07");
+    expect(summary?.billLines.some((line) => line.description === "Previous Admission Balance")).toBe(true);
+    expect(summary?.totalBill).toBe(1000 * 3 + 4000);
+    expect(summary?.due).toBe(2000);
+  });
 });

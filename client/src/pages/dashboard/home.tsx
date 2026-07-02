@@ -966,7 +966,7 @@ export default function Dashboard() {
         </DialogContent>
       </Dialog>
 
-      <SiteCreditFooter />
+      <SiteCreditFooter className="mt-2" />
     </PageShell>
   );
 }
