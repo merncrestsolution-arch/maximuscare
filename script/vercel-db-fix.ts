@@ -13,8 +13,9 @@
 // - On an already-boolean DB the casts are no-ops.
 import "dotenv/config";
 import pg from "pg";
+import { migrationDatabaseUrl } from "./postgresUrl";
 
-const url = process.env.DATABASE_URL || "";
+const url = migrationDatabaseUrl();
 if (!/^postgres(ql)?:\/\//i.test(url)) {
   console.log("[db-fix] Non-Postgres DATABASE_URL; skipping boolean repair.");
   process.exit(0);

@@ -24,6 +24,9 @@ const current = process.env.DATABASE_URL;
 if (!looksLikePostgres(current) || isPlaceholder(current)) {
   // Prefer well-known connection-string env vars first.
   const preferredKeys = [
+    "DATABASE_URL",
+    "SUPABASE_DATABASE_URL",
+    "SUPABASE_DB_URL",
     "POSTGRES_URL",
     "POSTGRES_PRISMA_URL",
     "DATABASE_URL_POOLED",
