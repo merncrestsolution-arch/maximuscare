@@ -1,6 +1,6 @@
 import type { IStorage } from "../storage";
 import type { Branch } from "@shared/schema";
-import { normalizeBranchName } from "@shared/branches";
+import { normalizeBranchName, ENTERPRISE_BRANCHES } from "@shared/branches";
 import {
   hasFullBranchAccess,
   isNexusManagingDirector,
@@ -39,26 +39,24 @@ function activeBranches(branches: Branch[]): Branch[] {
   return branches.filter((b) => b.isActive !== false);
 }
 
-/** Branches an Admin/MD may transfer in-patients to — all active org branches. */
+const TRANSFER_BRANCH_CODES = new Set(ENTERPRISE_BRANCHES.map((b) => b.code));
+const TRANSFER_BRANCH_ORDER = ENTERPRISE_BRANCHES.map((b) => b.code);
+
+function transferBranchOrder(code: string | null | undefined): number {
+  const idx = TRANSFER_BRANCH_ORDER.indexOf(String(code ?? "").toUpperCase() as (typeof TRANSFER_BRANCH_ORDER)[number]);
+  return idx === -1 ? 999 : idx;
+}
+
+/** All enterprise branches for in-patient transfer (active and inactive). */
 export async function getTransferDestinationBranches(
   storage: IStorage,
-  staffId: string,
-  role: string,
+  _staffId: string,
+  _role: string,
 ): Promise<Branch[]> {
-  const all = activeBranches(await storage.getAllBranches());
-
-  // In-patient transfer is Admin/MD only — always list every active branch.
-  if (hasFullBranchAccess(role) || isManagingDirector(role)) {
-    return all.sort((a, b) =>
-      String(a.branchName ?? a.name).localeCompare(String(b.branchName ?? b.name)),
-    );
-  }
-
-  if (isNexusManagingDirector(role)) {
-    return all.filter((b) => String(b.code ?? "").toUpperCase() === NEXUS_BRANCH_CODE);
-  }
-
-  return activeBranches(await getAllowedBranchesForStaff(storage, staffId, role));
+  const all = await storage.getAllBranches();
+  return all
+    .filter((b) => TRANSFER_BRANCH_CODES.has(String(b.code ?? "").toUpperCase() as (typeof TRANSFER_BRANCH_ORDER)[number]))
+    .sort((a, b) => transferBranchOrder(a.code) - transferBranchOrder(b.code));
 }
 
 export async function getAllowedBranchesForStaff(

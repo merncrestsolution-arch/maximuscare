@@ -218,8 +218,8 @@ export default function InPatientProfilePage() {
   // Bug 10: Managers / Branch Managers / Nexus MD may VIEW in-patient bills (branch-scoped,
   // read-only — no amount edits). Editing of amounts/caretaker rate stays Admin/MD only.
   const isBranchLead = ["Manager", "Branch Manager", "Nexus MD"].includes(user?.role || "");
-  // Bug 4 (final spec): only Admin/MD may transfer an in-patient to another branch.
-  const canTransfer = isAdminMD;
+  // Bug 4 (final spec): any staff may transfer an admitted in-patient to another branch.
+  const canTransfer = !!user && patient?.status === "Admitted";
   const canViewPayments = isAdminMD || isReceptionist || isBranchLead;
   /** Billing summary + billing PDF — Admin, MD, and branch leads (view-only for leads). */
   const canViewBillingSummary = isAdminMD || isBranchLead;
@@ -241,15 +241,18 @@ export default function InPatientProfilePage() {
   const transferBranchChoices = useMemo(() => {
     const rows = Array.isArray(transferBranches) ? transferBranches : [];
     return rows
-      .filter((branch) => branch?.id && branch.isActive !== false && branch.isActive !== 0)
+      .filter((branch) => branch?.id)
       .map((branch) => {
         const shortName = branch.branchName ?? branch.name ?? "";
         const friendly =
           BRANCH_OPTIONS.find((option) => option.value === shortName)?.label ??
           (shortName || branch.name || "Branch");
-        return { id: String(branch.id), label: friendly };
-      })
-      .sort((a, b) => a.label.localeCompare(b.label));
+        const inactive = branch.isActive === false || branch.isActive === 0;
+        return {
+          id: String(branch.id),
+          label: inactive ? `${friendly} (Inactive)` : friendly,
+        };
+      });
   }, [transferBranches]);
 
   const destinationBranches = useMemo(() => {
@@ -1903,7 +1906,7 @@ export default function InPatientProfilePage() {
           </Button>
         )}
 
-        {/* Bug 4: transfer the in-patient to another branch (Admin/MD + branch leads). */}
+        {/* Bug 4: transfer the in-patient to another branch (all staff, admitted patients). */}
         {canTransfer && patient?.status === "Admitted" && (
           <Button
             className="w-full h-12"

@@ -3389,10 +3389,6 @@ export async function registerRoutes(
   app.post("/api/inpatients/:id/transfer", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
-      // Bug 4 (final spec): branch transfers are restricted to Admin/MD only.
-      if (!["Admin", "MD"].includes(user.role)) {
-        return res.status(403).json({ message: "You do not have permission to transfer patients." });
-      }
       const id = param(req, "id");
       const admission = await storage.getInPatientAdmission(id);
       if (!admission) {

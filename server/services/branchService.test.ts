@@ -61,7 +61,7 @@ describe("branchAccess roles", () => {
 describe("getTransferDestinationBranches", () => {
   const branches = [
     { id: "b1", name: "Dehiwala", branchName: "Dehiwala", code: "DEHIWALA", isActive: true },
-    { id: "b2", name: "Bandaragama", branchName: "Bandaragama", code: "BANDARAGAMA", isActive: true },
+    { id: "b2", name: "Bandaragama", branchName: "Bandaragama", code: "BANDARAGAMA", isActive: false },
     { id: "b3", name: "Neuro", branchName: "Neuro Rehabilitation", code: "NEURO", isActive: true },
     { id: "b4", name: "Nexus", branchName: "Nexus Physio", code: "NEXUS", isActive: true },
     { id: "b5", name: "Closed", branchName: "Closed", code: "CLOSED", isActive: false },
@@ -69,15 +69,13 @@ describe("getTransferDestinationBranches", () => {
 
   const storage = {
     getAllBranches: async () => branches,
-    getUserBranchPermissions: async () => [],
-    getUserBranchAccess: async () => [],
-    getStaff: async () => ({ branch: "Dehiwala" }),
   };
 
-  it("returns every active branch for Admin and MD", async () => {
+  it("returns all four enterprise branches including inactive, for any role", async () => {
     const adminList = await getTransferDestinationBranches(storage as any, "s1", "Admin");
-    const mdList = await getTransferDestinationBranches(storage as any, "s1", "MD");
-    expect(adminList.map((b) => b.id)).toEqual(["b2", "b1", "b3", "b4"]);
-    expect(mdList.map((b) => b.id)).toEqual(["b2", "b1", "b3", "b4"]);
+    const staffList = await getTransferDestinationBranches(storage as any, "s2", "Receptionist");
+    expect(adminList.map((b) => b.id)).toEqual(["b1", "b2", "b3", "b4"]);
+    expect(staffList.map((b) => b.id)).toEqual(["b1", "b2", "b3", "b4"]);
+    expect(adminList.find((b) => b.id === "b2")?.isActive).toBe(false);
   });
 });
