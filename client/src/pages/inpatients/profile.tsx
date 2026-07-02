@@ -50,7 +50,7 @@ import { SegmentedToggle } from "@/components/ui/segmented-toggle";
 import { PatientCredentials } from "@/components/patients/patient-credentials";
 import { isManager, isBranchManager, canReAdmitInPatient } from "@/lib/permissions";
 import { BRANCH_OPTIONS } from "@/lib/branches";
-import { pickEnterpriseBranchesForTransfer } from "@shared/branches";
+import { pickEnterpriseBranchesForTransfer, normalizeBranchName } from "@shared/branches";
 
 const EXPENSE_CATEGORIES = ["Food", "Nurse Visit", "Doctor Visit", "Speech Therapy", "Others"];
 
@@ -252,7 +252,7 @@ export default function InPatientProfilePage() {
     return rows
       .filter((branch) => branch?.id)
       .map((branch) => {
-        const shortName = branch.branchName ?? branch.name ?? "";
+        const shortName = normalizeBranchName(branch.branchName ?? branch.name);
         const friendly =
           BRANCH_OPTIONS.find((option) => option.value === shortName)?.label ??
           (shortName || branch.name || "Branch");
@@ -1953,11 +1953,11 @@ export default function InPatientProfilePage() {
             <div className="space-y-3">
               <div className="space-y-2">
                 <Label>Destination Branch</Label>
-                <Select value={transferBranchId} onValueChange={setTransferBranchId}>
+                <Select value={transferBranchId} onValueChange={setTransferBranchId} modal={false}>
                   <SelectTrigger data-testid="select-transfer-branch">
                     <SelectValue placeholder={transferBranchesLoading ? "Loading branches..." : "Select branch"} />
                   </SelectTrigger>
-                  <SelectContent className="z-[200]">
+                  <SelectContent>
                     {destinationBranches.map((branch) => (
                       <SelectItem key={branch.id} value={branch.id}>
                         {branch.label}
