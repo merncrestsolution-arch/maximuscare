@@ -16,6 +16,7 @@ import { formatMoney } from "@/lib/reportDatePresets";
 import { clinicTodayString } from "@/lib/utils";
 import { getDueDisplay } from "@/lib/paymentStatus";
 import {
+  applyLiveTransferCarriedForward,
   computeAdmissionBalanceSummary,
   computeAdmissionBillingBreakdown,
   computeBalanceDue,
@@ -26,9 +27,10 @@ import {
   deductionFieldsForSegment,
   isCarriedForwardCredit,
   isCarriedForwardExpense,
+  isTransferCarriedForwardExpense,
+  isTransferCarriedForwardCredit,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
-  TRANSFER_BALANCE_MARKER,
 } from "@shared/inpatientBilling";
 import { useToast } from "@/hooks/use-toast";
 import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense, InPatientPreviousSession, InPatientPriorEpisode } from "@/lib/types";
@@ -810,9 +812,25 @@ export default function InPatientProfilePage() {
       ? `Deduction (${currentSegmentDeduction.deductionValue}%)`
       : "Deduction";
 
+  const priorTransferEpisodes = priorEpisodes
+    .filter((episode) => episode.episodeType === "transfer")
+    .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
+  const liveTransferPendingBalance =
+    hasTransferHistory && priorTransferEpisodes.length > 0
+      ? priorTransferEpisodes[priorTransferEpisodes.length - 1]?.pendingBalance ?? 0
+      : null;
+
   // Apply prior overpayment credit on current bill (from carried-forward expense or live prior episode).
   const billingExtraExpenses = (() => {
-    const expenses = scopedExtraExpenses;
+    const withLiveTransfer = applyLiveTransferCarriedForward({
+      expenses: scopedExtraExpenses,
+      transferLogs: transferLogsAsc.map((transfer) => ({
+        transferDate: String(transfer.transferDate),
+        fromBranchName: transfer.fromBranchName ?? null,
+      })),
+      priorTransferPendingBalance: liveTransferPendingBalance,
+    });
+    const expenses = withLiveTransfer;
     if (expenses.some(isCarriedForwardCredit)) return expenses;
 
     const mostRecentPrior = priorEpisodes.find((episode) => episode.episodeType !== "transfer") ?? priorEpisodes[0];
@@ -835,6 +853,26 @@ export default function InPatientProfilePage() {
       },
     ];
   })();
+
+  const displayExtraExpenses: InPatientExtraExpense[] = [
+    ...(extraExpenses ?? []).filter(
+      (expense) => !isTransferCarriedForwardExpense(expense) && !isTransferCarriedForwardCredit(expense),
+    ),
+    ...billingExtraExpenses
+      .filter((expense) => isTransferCarriedForwardExpense(expense) || isCarriedForwardCredit(expense))
+      .map((expense, index) => ({
+        id: `live-carried-forward-${index}`,
+        admissionId: patientId,
+        expenseDate: (expense as { expenseDate?: string }).expenseDate ?? billingSegmentStartDate,
+        category: "Others",
+        amount: String(expense.amount),
+        description: expense.description ?? "",
+        createdByStaffId: "",
+        createdByStaffName: "System",
+        createdAt: "",
+        updatedAt: "",
+      })),
+  ];
 
   const breakdown = computeAdmissionBillingBreakdown({
     admitDate: billingSegmentStartDate,
@@ -868,6 +906,7 @@ export default function InPatientProfilePage() {
     hasCarriedForwardCredit &&
     !(extraExpenses ?? []).some(isCarriedForwardCredit);
   const hasPriorAdjustment = hasCarriedForwardBalance || hasCarriedForwardCredit;
+  const priorBalanceLabel = hasTransferHistory ? "Previous Branch Balance" : "Previous Admission Balance";
   const showBillingHistoryToggle =
     hasPriorAdjustment || hasPriorEpisodes || hasTransferHistory;
   const carriedForwardExpenses = billingExtraExpenses.filter(isCarriedForwardExpense);
@@ -876,12 +915,6 @@ export default function InPatientProfilePage() {
   const hasAdmissionDeduction = Boolean(deductionType && deductionValue > 0);
   const hasDeduction = hasAdmissionDeduction;
 
-  const priorTransferEpisodes = priorEpisodes
-    .filter((episode) => episode.episodeType === "transfer")
-    .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
-  const transferCarriedForwardDebt = (extraExpenses ?? [])
-    .filter((expense) => String(expense.description || "").toLowerCase().includes(TRANSFER_BALANCE_MARKER))
-    .reduce((sum, expense) => sum + Math.max(0, parseFloat(String(expense.amount)) || 0), 0);
   const transferPaymentAllocation =
     hasTransferHistory && priorTransferEpisodes.length > 0
       ? computeTransferStayPaymentAllocation({
@@ -890,12 +923,29 @@ export default function InPatientProfilePage() {
           paymentTotal,
         })
       : null;
-  const effectivePaymentTotal =
-    transferPaymentAllocation && transferCarriedForwardDebt <= 0
-      ? transferPaymentAllocation.currentSegmentPaid
-      : paymentTotal;
 
-  const balanceSummary = computeAdmissionBalanceSummary(breakdown, effectivePaymentTotal);
+  const balanceSummary =
+    hasTransferHistory && transferPaymentAllocation
+      ? (() => {
+          const netBalanceDue = computeBalanceDue(grandTotal, paymentTotal);
+          const livePriorDue = Math.max(0, liveTransferPendingBalance ?? 0);
+          return {
+            currentEpisodePaid: transferPaymentAllocation.currentSegmentPaid,
+            priorBalancePaid: transferPaymentAllocation.priorSegmentsPaid,
+            currentBalanceDue: currentGrandTotal - transferPaymentAllocation.currentSegmentPaid,
+            priorBalanceDue: livePriorDue,
+            netBalanceDue,
+            overpaymentCredit: Math.max(0, paymentTotal - grandTotal),
+            totalBalanceDue: netBalanceDue,
+            priorPendingForCurrentAdmission: livePriorDue,
+            hasPriorPendingInSummary: livePriorDue > 0,
+            carriedForwardCreditApplied: breakdown.carriedForwardCreditApplied,
+            hasCarriedForwardBalance: livePriorDue > 0,
+            hasCarriedForwardCredit: breakdown.carriedForwardCreditApplied > 0,
+          };
+        })()
+      : computeAdmissionBalanceSummary(breakdown, paymentTotal);
+  const effectivePaymentTotal = paymentTotal;
   const {
     currentEpisodePaid,
     priorBalancePaid,
@@ -1025,7 +1075,7 @@ export default function InPatientProfilePage() {
       : [
           ...(hasCarriedForwardBalance
             ? [{
-                item: "Previous Admission Balance",
+                item: priorBalanceLabel,
                 quantity: "-",
                 rate: "-",
                 amount: formatMoney(carriedForwardDebt),
@@ -1052,7 +1102,7 @@ export default function InPatientProfilePage() {
           : []),
         { item: "Current Stay Total", quantity: "-", rate: "-", amount: formatMoney(currentGrandTotal) },
         ...(hasCarriedForwardBalance
-          ? [{ item: "Previous Admission Balance", quantity: "-", rate: "-", amount: formatMoney(carriedForwardDebt) }]
+          ? [{ item: priorBalanceLabel, quantity: "-", rate: "-", amount: formatMoney(carriedForwardDebt) }]
           : []),
         ...(hasCarriedForwardCredit
           ? [{ item: "Previous Overpayment Credit Applied", quantity: "-", rate: "-", amount: `-${formatMoney(carriedForwardCreditApplied)}` }]
@@ -1551,7 +1601,7 @@ export default function InPatientProfilePage() {
                       {hasCarriedForwardBalance && (
                         <BillingSection title="Previous Admission — Balance Due" variant="prior-debt">
                           <BillingLine
-                            label="Previous Admission Balance"
+                            label={priorBalanceLabel}
                             value={`LKR ${formatMoney(carriedForwardDebt)}`}
                             tone="danger"
                             testId="text-prior-balance"
@@ -1874,13 +1924,13 @@ export default function InPatientProfilePage() {
             </Button>
           </div>
 
-          {!extraExpenses || extraExpenses.length === 0 ? (
+          {!displayExtraExpenses || displayExtraExpenses.length === 0 ? (
             <div className="text-center py-6 text-muted-foreground" data-testid="text-no-expenses">
               No extra expenses recorded
             </div>
           ) : (
             <div className="space-y-2">
-              {extraExpenses.map((expense: InPatientExtraExpense) => (
+              {displayExtraExpenses.map((expense: InPatientExtraExpense) => (
                 <div key={expense.id} className="border rounded-lg p-3 text-sm" data-testid={`expense-${expense.id}`}>
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
@@ -1895,7 +1945,7 @@ export default function InPatientProfilePage() {
                       <span className="font-medium" data-testid={`expense-amount-${expense.id}`}>
                         LKR {parseFloat(expense.amount).toLocaleString()}
                       </span>
-                      {isAdminMD && (
+                      {isAdminMD && !expense.id.startsWith("live-carried-forward-") && (
                         <>
                           <Button
                             variant="ghost"

@@ -2,6 +2,7 @@ import type { InPatientAdmission } from "@shared/schema";
 import type { IStorage } from "../storage";
 import { clinicDateString } from "../clinicTime";
 import {
+  applyLiveTransferCarriedForward,
   buildDischargeBillLines,
   computeAdmissionBalanceSummary,
   computeAdmissionBillingBreakdown,
@@ -11,7 +12,6 @@ import {
   deductionFieldsForSegment,
   isCarriedForwardExpense,
   resolveDeductionSegmentIndex,
-  TRANSFER_BALANCE_MARKER,
   type DischargeBillLine,
 } from "@shared/inpatientBilling";
 import { getTransferPriorBillingEpisodes } from "./inPatientAdmissionService";
@@ -116,6 +116,27 @@ export async function buildInPatientDischargeSummary(
     deduction.deductionValue,
   );
 
+  const priorTransferEpisodes = transferPriorEpisodes
+    .filter((episode) => episode.episodeType === "transfer")
+    .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
+  const liveTransferPendingBalance =
+    transferLogsAsc.length > 0 && priorTransferEpisodes.length > 0
+      ? priorTransferEpisodes[priorTransferEpisodes.length - 1]?.pendingBalance ?? 0
+      : null;
+  const branchNameById = new Map(
+    branches.map((branch) => [branch.id, branch.branchName ?? branch.name ?? "Unknown"]),
+  );
+  const billingExtraExpenses = applyLiveTransferCarriedForward({
+    expenses: scopedExtraExpenses,
+    transferLogs: transferLogsAsc.map((transfer) => ({
+      transferDate: String(transfer.transferDate),
+      fromBranchName: transfer.fromBranchId
+        ? branchNameById.get(transfer.fromBranchId) ?? null
+        : null,
+    })),
+    priorTransferPendingBalance: liveTransferPendingBalance,
+  });
+
   const breakdown = computeAdmissionBillingBreakdown({
     admitDate: billingSegmentStartDate,
     endDate,
@@ -124,7 +145,7 @@ export async function buildInPatientDischargeSummary(
     careTakerDaysOverride: admission.careTakerDaysOverride,
     deductionType: currentSegmentDeduction.deductionType,
     deductionValue: currentSegmentDeduction.deductionValue,
-    extraExpenses: scopedExtraExpenses,
+    extraExpenses: billingExtraExpenses,
   });
 
   const amountPerDay = parseFloat(String(admission.amountPerDay)) || 0;
@@ -138,12 +159,6 @@ export async function buildInPatientDischargeSummary(
   });
 
   const paymentTotal = payments.reduce((sum, payment) => sum + (parseFloat(String(payment.amount)) || 0), 0);
-  const priorTransferEpisodes = transferPriorEpisodes
-    .filter((episode) => episode.episodeType === "transfer")
-    .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
-  const transferCarriedForwardDebt = extraExpenses
-    .filter((expense) => String(expense.description || "").toLowerCase().includes(TRANSFER_BALANCE_MARKER))
-    .reduce((sum, expense) => sum + Math.max(0, parseFloat(String(expense.amount)) || 0), 0);
   const transferPaymentAllocation =
     transferLogsAsc.length > 0 && priorTransferEpisodes.length > 0
       ? computeTransferStayPaymentAllocation({
@@ -152,15 +167,12 @@ export async function buildInPatientDischargeSummary(
           paymentTotal,
         })
       : null;
-  const effectivePaymentTotal =
-    transferPaymentAllocation && transferCarriedForwardDebt <= 0
-      ? transferPaymentAllocation.currentSegmentPaid
-      : paymentTotal;
-  const balanceSummary = computeAdmissionBalanceSummary(breakdown, effectivePaymentTotal);
   const due =
-    breakdown.carriedForwardDebt > 0 || breakdown.carriedForwardCreditApplied > 0
-      ? balanceSummary.totalBalanceDue
-      : computeBalanceDue(breakdown.grandTotal, effectivePaymentTotal);
+    transferLogsAsc.length > 0 && transferPaymentAllocation
+      ? computeBalanceDue(breakdown.grandTotal, paymentTotal)
+      : breakdown.carriedForwardDebt > 0 || breakdown.carriedForwardCreditApplied > 0
+        ? computeAdmissionBalanceSummary(breakdown, paymentTotal).totalBalanceDue
+        : computeBalanceDue(breakdown.grandTotal, paymentTotal);
 
   const branchName = admission.branchId
     ? (branches.find((branch) => branch.id === admission.branchId)?.name ?? null)

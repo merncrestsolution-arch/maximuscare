@@ -7,6 +7,7 @@ import {
   computeBalanceDue,
   computeStayDays,
   computeTotalPendingBalance,
+  applyLiveTransferCarriedForward,
   buildDischargeBillLines,
   computeAdmissionBillingBreakdown,
   computeBranchStaySegmentBilling,
@@ -216,7 +217,7 @@ describe("inpatientBilling", () => {
     const transfers = [{ transferDate: "2026-06-10" }];
     expect(resolveDeductionSegmentIndex("2026-06-08", "2026-06-01", transfers)).toBe(0);
     expect(resolveDeductionSegmentIndex("2026-06-10", "2026-06-01", transfers)).toBe(0);
-    expect(resolveDeductionSegmentIndex("2026-06-11", "2026-06-01", transfers)).toBe("current");
+    expect(resolveDeductionSegmentIndex("2026-06-11", "2026-06-01", transfers)).toBe(0);
     expect(resolveDeductionSegmentIndex(null, "2026-06-01", transfers)).toBe(0);
     expect(resolveDeductionSegmentIndex("2026-06-08", "2026-06-01", [])).toBe("current");
   });
@@ -242,6 +243,24 @@ describe("inpatientBilling", () => {
     });
     expect(without.deductionAmount).toBe(0);
     expect(without.grandTotal).toBe(10_000);
+  });
+
+  it("replaces stored transfer carry-forward with live prior pending", () => {
+    const expenses = applyLiveTransferCarriedForward({
+      expenses: [
+        {
+          description: "previous branch balance carried forward (transferred 2026-07-02 from Neuro)",
+          amount: "2000",
+          expenseDate: "2026-07-02",
+        },
+        { description: "Food", amount: "100", expenseDate: "2026-07-03" },
+      ],
+      transferLogs: [{ transferDate: "2026-07-02", fromBranchName: "Neuro Rehabilitation" }],
+      priorTransferPendingBalance: 1000,
+    });
+    expect(expenses).toHaveLength(2);
+    expect(expenses[1].description).toContain("previous branch balance carried forward");
+    expect(expenses[1].amount).toBe("1000");
   });
 
   it("allocates payments to prior branch stays before the current stay", () => {

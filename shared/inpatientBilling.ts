@@ -37,6 +37,14 @@ export function parseReadmitAdmissionSource(admissionSource?: string | null): st
   return id || null;
 }
 
+export function isTransferCarriedForwardExpense(expense: { description?: string | null }): boolean {
+  return String(expense.description || "").toLowerCase().includes(TRANSFER_BALANCE_MARKER);
+}
+
+export function isTransferCarriedForwardCredit(expense: { description?: string | null }): boolean {
+  return String(expense.description || "").toLowerCase().includes(TRANSFER_CREDIT_MARKER);
+}
+
 export function isCarriedForwardExpense(expense: { description?: string | null }): boolean {
   const desc = String(expense.description || "").toLowerCase();
   return (
@@ -45,6 +53,37 @@ export function isCarriedForwardExpense(expense: { description?: string | null }
     desc.includes(TRANSFER_BALANCE_MARKER) ||
     desc.includes(TRANSFER_CREDIT_MARKER)
   );
+}
+
+/** Replace stored transfer carry-forward rows with the live pending from prior branch billing. */
+export function applyLiveTransferCarriedForward<
+  T extends { description?: string | null; amount: string | number; expenseDate?: string },
+>(input: {
+  expenses: T[];
+  transferLogs: Array<{ transferDate: string; fromBranchName?: string | null }>;
+  priorTransferPendingBalance: number | null | undefined;
+}): T[] {
+  const withoutStoredTransfer = input.expenses.filter(
+    (expense) => !isTransferCarriedForwardExpense(expense) && !isTransferCarriedForwardCredit(expense),
+  );
+  const pending = input.priorTransferPendingBalance ?? 0;
+  if (!input.transferLogs.length || pending === 0) {
+    return withoutStoredTransfer;
+  }
+
+  const lastTransfer = input.transferLogs[input.transferLogs.length - 1];
+  const transferDate = String(lastTransfer.transferDate).split("T")[0];
+  const fromBranch = lastTransfer.fromBranchName ?? "previous branch";
+  const marker = pending > 0 ? TRANSFER_BALANCE_MARKER : TRANSFER_CREDIT_MARKER;
+
+  return [
+    ...withoutStoredTransfer,
+    {
+      description: `${marker} (transferred ${transferDate} from ${fromBranch})`,
+      amount: String(pending),
+      expenseDate: transferDate,
+    } as T,
+  ];
 }
 
 export function isCarriedForwardCredit(expense: { description?: string | null }): boolean {
@@ -135,7 +174,8 @@ export function resolveDeductionSegmentIndex(
     segmentStart = segmentEnd;
   }
 
-  return "current";
+  // Deduction applied after transfer still adjusts the closing branch bill, not the new stay.
+  return transfers.length - 1;
 }
 
 /** Deduction fields for one stay segment (null/zero when the deduction belongs elsewhere). */
