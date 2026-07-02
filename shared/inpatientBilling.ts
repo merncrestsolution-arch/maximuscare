@@ -2,6 +2,8 @@ export const CLINIC_TIMEZONE = "Asia/Colombo";
 
 export const CARRIED_FORWARD_EXPENSE_MARKER = "previous admission balance carried forward";
 export const CARRIED_FORWARD_CREDIT_MARKER = "previous admission credit carried forward";
+export const TRANSFER_BALANCE_MARKER = "previous branch balance carried forward";
+export const TRANSFER_CREDIT_MARKER = "previous branch credit carried forward";
 
 /** Net balance: positive = owed, zero = settled, negative = credit/advance. */
 export function computeBalanceDue(totalBilled: number | string, totalPaid: number | string): number {
@@ -38,7 +40,10 @@ export function parseReadmitAdmissionSource(admissionSource?: string | null): st
 export function isCarriedForwardExpense(expense: { description?: string | null }): boolean {
   const desc = String(expense.description || "").toLowerCase();
   return (
-    desc.includes(CARRIED_FORWARD_EXPENSE_MARKER) || desc.includes(CARRIED_FORWARD_CREDIT_MARKER)
+    desc.includes(CARRIED_FORWARD_EXPENSE_MARKER) ||
+    desc.includes(CARRIED_FORWARD_CREDIT_MARKER) ||
+    desc.includes(TRANSFER_BALANCE_MARKER) ||
+    desc.includes(TRANSFER_CREDIT_MARKER)
   );
 }
 
@@ -52,6 +57,58 @@ export function sumCarriedForwardAmounts(
   return (expenses || [])
     .filter(isCarriedForwardExpense)
     .reduce((sum, expense) => sum + (parseFloat(String(expense.amount)) || 0), 0);
+}
+
+/** Allocate payments oldest-segment-first across stay segments (transfer / multi-episode). */
+export function allocatePaymentsAcrossSegments(
+  segmentGrandTotals: number[],
+  paymentTotal: number,
+): Array<{ amountPaid: number; pendingBalance: number }> {
+  let remaining = paymentTotal;
+  return segmentGrandTotals.map((grandTotal) => {
+    const normalizedTotal = Math.max(0, grandTotal);
+    const amountPaid = Math.min(remaining, normalizedTotal);
+    remaining = Math.max(0, remaining - amountPaid);
+    return { amountPaid, pendingBalance: grandTotal - amountPaid };
+  });
+}
+
+function dateOnly(value: string): string {
+  return String(value).split("T")[0];
+}
+
+function expenseInDateRange(
+  expense: { expenseDate: string; description?: string | null },
+  startDate: string,
+  endDate: string,
+): boolean {
+  if (isCarriedForwardExpense(expense)) return false;
+  const day = dateOnly(expense.expenseDate);
+  return day >= startDate && day <= endDate;
+}
+
+/** Bill one branch-stay segment (no deduction; expenses limited to segment dates). */
+export function computeBranchStaySegmentBilling(input: {
+  admitDate: string;
+  endDate: string;
+  amountPerDay: number | string;
+  careTakerRatePerDay: number | string;
+  careTakerDaysOverride?: number | null;
+  extraExpenses?: Array<{ expenseDate: string; amount: string | number; description?: string | null }>;
+}): AdmissionBillingBreakdown {
+  const segmentExpenses = (input.extraExpenses ?? []).filter((expense) =>
+    expenseInDateRange(expense, dateOnly(input.admitDate), dateOnly(input.endDate)),
+  );
+  return computeAdmissionBillingBreakdown({
+    admitDate: input.admitDate,
+    endDate: input.endDate,
+    amountPerDay: input.amountPerDay,
+    careTakerRatePerDay: input.careTakerRatePerDay,
+    careTakerDaysOverride: input.careTakerDaysOverride,
+    deductionType: null,
+    deductionValue: 0,
+    extraExpenses: segmentExpenses,
+  });
 }
 
 /** Allocate payments to carried-forward prior balance first, then the current episode. */

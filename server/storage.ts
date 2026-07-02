@@ -120,6 +120,7 @@ const {
   inPatientDischarges,
   inPatientPayments,
   inPatientExtraExpenses,
+  patientTransferLogs,
   expenses,
   incentiveSettings,
   appointments,
@@ -294,6 +295,7 @@ import type {
   InPatientExtraExpense,
   InsertInPatientExtraExpense,
   UpdateInPatientExtraExpense,
+  PatientTransferLog,
   IncentiveSettings,
   UpdateIncentiveSettings,
   Appointment,
@@ -471,6 +473,7 @@ export interface IStorage {
   updateInPatientExtraExpense(id: string, data: UpdateInPatientExtraExpense): Promise<InPatientExtraExpense | undefined>;
   deleteInPatientExtraExpense(id: string): Promise<boolean>;
   getExtraExpenseTotalByAdmission(admissionId: string): Promise<number>;
+  getPatientTransferLogsByAdmission(admissionId: string): Promise<PatientTransferLog[]>;
 
   // Expense methods
   getExpense(id: string): Promise<Expense | undefined>;
@@ -1456,6 +1459,14 @@ export class DatabaseStorage implements IStorage {
       .from(inPatientExtraExpenses)
       .where(eq(inPatientExtraExpenses.admissionId, admissionId));
     return parseFloat(result[0]?.total || '0');
+  }
+
+  async getPatientTransferLogsByAdmission(admissionId: string): Promise<PatientTransferLog[]> {
+    return await db
+      .select()
+      .from(patientTransferLogs)
+      .where(eq(patientTransferLogs.admissionId, admissionId))
+      .orderBy(asc(patientTransferLogs.transferDate), asc(patientTransferLogs.createdAt));
   }
 
   // Expense methods

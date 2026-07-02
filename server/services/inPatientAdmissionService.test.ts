@@ -6,6 +6,8 @@ import {
   priorAdmissionBalanceFromDischarge,
   getPreviousInPatientSessions,
   getPriorInPatientEpisodes,
+  getTransferPriorBillingEpisodes,
+  computeTransferSegmentPendingBalance,
   getInPatientSessionsForAdmissionView,
   collectPriorAdmissionIdsForSessionHistory,
   parseReadmitAdmissionSource,
@@ -201,6 +203,7 @@ describe("inPatientAdmissionService", () => {
       getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async (id: string) =>
         id === "prior" ? ([{ id: "s1" }] as any) : [],
+      getPatientTransferLogsByAdmission: async () => [],
     };
 
     const episodes = await getPriorInPatientEpisodes(storage as any, "current");
@@ -247,6 +250,7 @@ describe("inPatientAdmissionService", () => {
       getPaymentTotalByAdmission: async (id: string) => (id === "old" ? 0 : 0),
       getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async () => [],
+      getPatientTransferLogsByAdmission: async () => [],
     };
 
     const episodes = await getPriorInPatientEpisodes(storage as any, "current");
@@ -371,5 +375,68 @@ describe("inPatientAdmissionService", () => {
     const sessions = await getInPatientSessionsForAdmissionView(storage as any, "current");
     expect(sessions).toHaveLength(2);
     expect(sessions.map((session) => session.id).sort()).toEqual(["s1", "s2"]);
+  });
+
+  it("returns prior branch billing with pending balance after transfer", async () => {
+    const storage = {
+      getInPatientAdmission: async (id: string) =>
+        id === "current"
+          ? ({
+              id: "current",
+              patientId: "p1",
+              admitDate: "2024-06-01",
+              status: "Admitted",
+              branchId: "branch-b",
+              amountPerDay: "1000",
+              careTakerRatePerDay: "0",
+              careTakerDaysOverride: null,
+            } as any)
+          : undefined,
+      getPatientTransferLogsByAdmission: async () => [
+        {
+          id: "t1",
+          admissionId: "current",
+          fromBranchId: "branch-a",
+          toBranchId: "branch-b",
+          transferDate: "2024-06-10",
+        },
+      ],
+      getPaymentTotalByAdmission: async () => 0,
+      getInPatientExtraExpensesByAdmission: async () => [],
+      getInPatientSessionsByAdmission: async () => [
+        { id: "s1", sessionDate: "2024-06-05", sessionNumber: 1 } as any,
+      ],
+      getAllBranches: async () => [
+        { id: "branch-a", branchName: "Nexus", name: "Nexus Branch" },
+        { id: "branch-b", branchName: "Dehiwala", name: "Dehiwala Branch" },
+      ],
+      getInPatientDischargeByAdmission: async () => undefined,
+    };
+
+    const episodes = await getTransferPriorBillingEpisodes(storage as any, "current");
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].episodeType).toBe("transfer");
+    expect(episodes[0].branchName).toBe("Nexus");
+    expect(episodes[0].pendingBalance).toBeGreaterThan(0);
+    expect(episodes[0].sessionCount).toBe(1);
+  });
+
+  it("computes pending balance for the closed transfer segment", async () => {
+    const admission = {
+      id: "current",
+      admitDate: "2024-06-01",
+      amountPerDay: "1000",
+      careTakerRatePerDay: "0",
+      careTakerDaysOverride: null,
+    } as any;
+    const storage = {
+      getPaymentTotalByAdmission: async () => 2000,
+      getInPatientExtraExpensesByAdmission: async () => [],
+    };
+
+    const pending = await computeTransferSegmentPendingBalance(storage as any, admission, "2024-06-10", [
+      { id: "t1", transferDate: "2024-06-10", fromBranchId: "branch-a" },
+    ]);
+    expect(pending).toBeGreaterThan(0);
   });
 });

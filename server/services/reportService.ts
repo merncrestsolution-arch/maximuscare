@@ -489,6 +489,13 @@ export async function computeSessionReport(
   const patientMap = new Map(patients.map((p) => [p.id, p.name]));
   const admissions = await storage.getAllInPatientAdmissions();
   const admissionMap = new Map(admissions.map((a) => [a.id, a.patientName]));
+  const admissionBranchMap = new Map(admissions.map((a) => [a.id, a.branchId ?? null]));
+  const branches = await storage.getAllBranches();
+  const branchNameById = new Map(
+    branches.map((branch) => [branch.id, branch.branchName ?? branch.name ?? ""]),
+  );
+  const resolveBranchName = (branchId?: string | null) =>
+    branchId ? (branchNameById.get(branchId) || "—") : "—";
 
   const outpatientRows: SessionReportRow[] = visits.map((v) => ({
     type: "Outpatient",
@@ -505,6 +512,9 @@ export async function computeSessionReport(
     date: s.sessionDate,
     sessionNumber: s.sessionNumber,
     staffName: s.treatingStaffName,
+    branch: resolveBranchName(
+      (s as { branchId?: string | null }).branchId ?? admissionBranchMap.get(s.admissionId),
+    ),
     patientOrAdmission: admissionMap.get(s.admissionId) ?? s.admissionId,
     treatment: s.treatmentProvided ?? s.notes ?? "",
   }));

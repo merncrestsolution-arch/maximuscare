@@ -2904,9 +2904,11 @@ export async function registerRoutes(
   // Get sessions from prior admissions for the same patient (read-only history).
   app.get("/api/inpatients/:admissionId/sessions/previous", requireAuth, async (req: Request, res: Response) => {
     try {
-      const { getPreviousInPatientSessions } = await import("./services/inPatientAdmissionService");
+      const { getPreviousInPatientSessions, enrichInPatientSessionsWithBranchName } = await import(
+        "./services/inPatientAdmissionService"
+      );
       const sessions = await getPreviousInPatientSessions(storage, param(req, "admissionId"));
-      return res.json(sessions);
+      return res.json(await enrichInPatientSessionsWithBranchName(storage, sessions));
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -2916,17 +2918,11 @@ export async function registerRoutes(
   app.get("/api/inpatients/:admissionId/sessions", requireAuth, async (req: Request, res: Response) => {
     try {
       const admissionId = param(req, "admissionId");
-      const { getInPatientSessionsForAdmissionView } = await import("./services/inPatientAdmissionService");
-      const sessions = await getInPatientSessionsForAdmissionView(storage, admissionId);
-      const branches = await storage.getAllBranches();
-      const branchName = (branchId?: string | null) =>
-        branchId ? (branches.find((branch) => branch.id === branchId)?.name ?? "Unknown") : "Unknown";
-      return res.json(
-        sessions.map((session) => ({
-          ...session,
-          branchName: branchName((session as { branchId?: string | null }).branchId),
-        })),
+      const { getInPatientSessionsForAdmissionView, enrichInPatientSessionsWithBranchName } = await import(
+        "./services/inPatientAdmissionService"
       );
+      const sessions = await getInPatientSessionsForAdmissionView(storage, admissionId);
+      return res.json(await enrichInPatientSessionsWithBranchName(storage, sessions));
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -3442,6 +3438,29 @@ export async function registerRoutes(
       }
 
       const fromBranchId = admission.branchId ?? null;
+      const fromBranchName =
+        fromBranchId
+          ? (branches.find((b: any) => b.id === fromBranchId)?.branchName ??
+            branches.find((b: any) => b.id === fromBranchId)?.name ??
+            "previous branch")
+          : "previous branch";
+
+      const existingTransfers = await storage.getPatientTransferLogsByAdmission(id);
+      const {
+        computeTransferSegmentPendingBalance,
+        formatTransferBalanceDescription,
+        formatTransferCreditDescription,
+      } = await import("./services/inPatientAdmissionService");
+      const pendingSegmentBalance = await computeTransferSegmentPendingBalance(
+        storage,
+        admission,
+        rawDate,
+        [
+          ...existingTransfers,
+          { id: "pending-transfer", transferDate: rawDate, fromBranchId },
+        ],
+      );
+
       const updated = await storage.updateInPatientAdmission(id, {
         branchId: targetBranchId,
         status: "Admitted",
@@ -3458,6 +3477,28 @@ export async function registerRoutes(
         transferredByStaffId: user.staffId,
         transferredByName: editor?.name ?? user.name ?? "",
       });
+
+      if (pendingSegmentBalance > 0) {
+        await storage.createInPatientExtraExpense({
+          admissionId: id,
+          expenseDate: rawDate,
+          category: "Others",
+          amount: pendingSegmentBalance.toFixed(2),
+          description: formatTransferBalanceDescription(rawDate, fromBranchName),
+          createdByStaffId: user.staffId,
+          createdByStaffName: editor?.name ?? user.name ?? "System",
+        });
+      } else if (pendingSegmentBalance < 0) {
+        await storage.createInPatientExtraExpense({
+          admissionId: id,
+          expenseDate: rawDate,
+          category: "Others",
+          amount: (-Math.abs(pendingSegmentBalance)).toFixed(2),
+          description: formatTransferCreditDescription(rawDate, fromBranchName),
+          createdByStaffId: user.staffId,
+          createdByStaffName: editor?.name ?? user.name ?? "System",
+        });
+      }
 
       const actor = await auditActor(req);
       await logAudit(storage, {
@@ -3505,16 +3546,29 @@ export async function registerRoutes(
       const admission = await storage.getInPatientAdmission(admissionId);
       if (!admission) return res.status(404).json({ message: "Admission not found" });
 
-      const { getInPatientSessionsForAdmissionView } = await import("./services/inPatientAdmissionService");
-      const sessions = await getInPatientSessionsForAdmissionView(storage, admissionId);
+      const { getInPatientSessionsForAdmissionView, enrichInPatientSessionsWithBranchName } = await import(
+        "./services/inPatientAdmissionService"
+      );
+      const sessions = await enrichInPatientSessionsWithBranchName(
+        storage,
+        await getInPatientSessionsForAdmissionView(storage, admissionId),
+      );
       const exportSvc = await import("./services/exportService");
+      const branches = await storage.getAllBranches();
+      const admissionBranchLabel =
+        admission.branchId
+          ? (branches.find((branch) => branch.id === admission.branchId)?.branchName ??
+            branches.find((branch) => branch.id === admission.branchId)?.name ??
+            "Unknown")
+          : "Unknown";
 
-      const title = `Inpatient History - ${admission.patientName} (${admission.status})`;
+      const title = `Inpatient History - ${admission.patientName} (${admission.status}) — ${admissionBranchLabel}`;
       // Bug 2: include session time + Improvements, and drop the Notes column.
       const columns = [
         { label: "Date", key: "date" },
         { label: "Time", key: "time" },
         { label: "Session #", key: "sessionNumber" },
+        { label: "Branch", key: "branch" },
         { label: "Treatment", key: "treatment" },
         { label: "Therapist", key: "therapist" },
         { label: "Improvements", key: "improvements" },
@@ -3524,6 +3578,7 @@ export async function registerRoutes(
         date: s.sessionDate,
         time: [s.startTime, s.endTime].filter(Boolean).join(" - ") || "-",
         sessionNumber: String(s.sessionNumber),
+        branch: s.branchName || "-",
         treatment: s.treatmentProvided,
         therapist: s.treatingStaffName,
         improvements: s.improvements || "-",

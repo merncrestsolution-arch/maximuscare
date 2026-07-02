@@ -276,6 +276,17 @@ export default function InPatientProfilePage() {
     refetch: refetchTransferBranches,
   } = useTransferBranches(!!user);
   const { data: allBranches = [] } = useBranches();
+  const currentBranchLabel = useMemo(() => {
+    const branchId = patient?.branchId ? String(patient.branchId) : "";
+    if (!branchId) return "—";
+    const branch = allBranches.find((entry) => String(entry.id) === branchId);
+    if (!branch) return "—";
+    const shortName = normalizeBranchName(branch.branchName ?? branch.name);
+    return (
+      BRANCH_OPTIONS.find((option) => option.value === shortName)?.label ??
+      (shortName || branch.name || "—")
+    );
+  }, [allBranches, patient?.branchId]);
   const transferBranchChoices = useMemo(() => {
     const raw =
       Array.isArray(transferBranches) && transferBranches.length > 0
@@ -761,6 +772,22 @@ export default function InPatientProfilePage() {
   const billingEndDate = discharge
     ? String(discharge.dischargeDate).split("T")[0]
     : clinicTodayString();
+  const transferLogsAsc = [...(transferLogs as any[])].sort((left, right) =>
+    String(left.transferDate).localeCompare(String(right.transferDate)),
+  );
+  const billingSegmentStartDate =
+    transferLogsAsc.length > 0
+      ? String(transferLogsAsc[transferLogsAsc.length - 1].transferDate).split("T")[0]
+      : patient.admitDate;
+  const scopedExtraExpenses = (() => {
+    const rows = extraExpenses ?? [];
+    if (transferLogsAsc.length === 0) return rows;
+    return rows.filter((expense) => {
+      if (isCarriedForwardExpense(expense)) return true;
+      const day = String(expense.expenseDate).split("T")[0];
+      return day >= billingSegmentStartDate;
+    });
+  })();
   const deductionType = (patient as any).deductionType as "fixed" | "percentage" | null;
   const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
   const deductionLabel =
@@ -768,10 +795,10 @@ export default function InPatientProfilePage() {
 
   // Apply prior overpayment credit on current bill (from carried-forward expense or live prior episode).
   const billingExtraExpenses = (() => {
-    const expenses = extraExpenses ?? [];
+    const expenses = scopedExtraExpenses;
     if (expenses.some(isCarriedForwardCredit)) return expenses;
 
-    const mostRecentPrior = priorEpisodes[0];
+    const mostRecentPrior = priorEpisodes.find((episode) => episode.episodeType !== "transfer") ?? priorEpisodes[0];
     const livePriorCredit =
       mostRecentPrior && mostRecentPrior.pendingBalance < 0
         ? Math.abs(mostRecentPrior.pendingBalance)
@@ -793,7 +820,7 @@ export default function InPatientProfilePage() {
   })();
 
   const breakdown = computeAdmissionBillingBreakdown({
-    admitDate: patient.admitDate,
+    admitDate: billingSegmentStartDate,
     endDate: billingEndDate,
     amountPerDay: patient.amountPerDay,
     careTakerRatePerDay: patient.careTakerRatePerDay,
@@ -825,7 +852,7 @@ export default function InPatientProfilePage() {
     !(extraExpenses ?? []).some(isCarriedForwardCredit);
   const hasPriorAdjustment = hasCarriedForwardBalance || hasCarriedForwardCredit;
   const showBillingHistoryToggle =
-    hasPriorAdjustment || (isReadmitFromSource && hasPriorEpisodes);
+    hasPriorAdjustment || hasPriorEpisodes || hasTransferHistory;
   const carriedForwardExpenses = billingExtraExpenses.filter(isCarriedForwardExpense);
   const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
   const hasCurrentDeduction = currentDeductionAmount > 0;
@@ -844,7 +871,21 @@ export default function InPatientProfilePage() {
   } = balanceSummary;
   const showingPreviousBilling = showBillingHistoryToggle && billingSummaryView === "previous";
   const getPriorEpisodeBilling = (episode: InPatientPriorEpisode, index: number) => {
-    const isMostRecentPrior = index === 0;
+    if (episode.episodeType === "transfer") {
+      const pending = episode.pendingBalance;
+      const credit = pending < 0 ? Math.abs(pending) : 0;
+      return {
+        grandTotal: episode.grandTotal ?? 0,
+        paidDuringAdmission: episode.amountPaid,
+        paidAfterReadmit: 0,
+        paid: episode.amountPaid,
+        pending: credit > 0 ? -credit : pending,
+        credit,
+      };
+    }
+
+    const mostRecentReadmitIndex = priorEpisodes.findIndex((entry) => entry.episodeType !== "transfer");
+    const isMostRecentPrior = mostRecentReadmitIndex === index;
     const paidDuringAdmission = episode.amountPaid;
     const paidAfterReadmit =
       isMostRecentPrior && hasCarriedForwardBalance ? priorBalancePaid : 0;
@@ -919,12 +960,18 @@ export default function InPatientProfilePage() {
           const billing = getPriorEpisodeBilling(episode, index);
           return [
             {
-              item: `Admission ${format(new Date(episode.admitDate), "dd MMM yyyy")} (${episode.status})`,
+              item:
+                episode.episodeType === "transfer"
+                  ? `Branch stay — ${episode.branchName ?? "Previous branch"} (${format(new Date(episode.admitDate), "dd MMM yyyy")} to ${episode.dischargeDate ? format(new Date(episode.dischargeDate), "dd MMM yyyy") : "—"})`
+                  : `Admission ${format(new Date(episode.admitDate), "dd MMM yyyy")} (${episode.status})`,
               quantity: "-",
               rate: "-",
-              amount: episode.dischargeDate
-                ? `Discharged ${format(new Date(episode.dischargeDate), "dd MMM yyyy")}`
-                : "-",
+              amount:
+                episode.episodeType === "transfer"
+                  ? episode.status
+                  : episode.dischargeDate
+                    ? `Discharged ${format(new Date(episode.dischargeDate), "dd MMM yyyy")}`
+                    : "-",
             },
         { item: "Grand Total", quantity: "-", rate: "-", amount: formatMoney(billing.grandTotal) },
         { item: "Paid during that admission", quantity: "-", rate: "-", amount: formatMoney(billing.paidDuringAdmission) },
@@ -1336,22 +1383,38 @@ export default function InPatientProfilePage() {
                           >
                             <div className="mb-2 flex flex-wrap items-center gap-2">
                               <span className="text-sm font-semibold text-foreground">
-                                Admission {format(new Date(episode.admitDate), "dd MMM yyyy")}
+                                {episode.episodeType === "transfer"
+                                  ? `${episode.branchName ?? "Previous branch"} stay`
+                                  : `Admission ${format(new Date(episode.admitDate), "dd MMM yyyy")}`}
                               </span>
                               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-                                {episode.status}
+                                {episode.episodeType === "transfer" ? "Transferred" : episode.status}
                               </span>
+                              {episode.episodeType === "transfer" && (
+                                <span className="text-xs text-muted-foreground">
+                                  {format(new Date(episode.admitDate), "dd MMM yyyy")}
+                                  {episode.dischargeDate
+                                    ? ` → ${format(new Date(episode.dischargeDate), "dd MMM yyyy")}`
+                                    : ""}
+                                </span>
+                              )}
                             </div>
-                            {episode.dischargeDate && (
+                            {episode.dischargeDate && episode.episodeType !== "transfer" && (
                               <BillingLine
                                 label="Discharged"
+                                value={format(new Date(episode.dischargeDate), "dd MMM yyyy")}
+                              />
+                            )}
+                            {episode.dischargeDate && episode.episodeType === "transfer" && (
+                              <BillingLine
+                                label="Transferred on"
                                 value={format(new Date(episode.dischargeDate), "dd MMM yyyy")}
                               />
                             )}
                             {b ? (
                               <>
                                 <p className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
-                                  Discharge bill details
+                                  {episode.episodeType === "transfer" ? "Branch bill details" : "Discharge bill details"}
                                 </p>
                                 <BillingLine
                                   label="Stay Days"
@@ -1829,6 +1892,7 @@ export default function InPatientProfilePage() {
                   { label: "Date", key: "date" },
                   { label: "Time", key: "time" },
                   { label: "Session #", key: "sessionNumber" },
+                  { label: "Branch", key: "branch" },
                   { label: "Treatment", key: "treatmentProvided" },
                   { label: "Therapist", key: "treatingStaffName" },
                   { label: "Improvements", key: "improvements" },
@@ -1840,12 +1904,18 @@ export default function InPatientProfilePage() {
                   ...s,
                   date: format(new Date(s.sessionDate), "yyyy-MM-dd"),
                   time: [s.startTime, s.endTime].filter(Boolean).join(" - ") || "-",
+                  branch: s.branchName || currentBranchLabel || "—",
                   improvements: s.improvements || "-",
                   admissionLabel: showingPreviousSessions
                     ? `${format(new Date((s as InPatientPreviousSession).admissionAdmitDate), "dd MMM yyyy")} (${(s as InPatientPreviousSession).admissionStatus})`
                     : "-",
                 }))}
                 logoUri={logoUri}
+                meta={[
+                  { label: "Patient", value: patient?.patientName || "—" },
+                  { label: "Current Branch", value: currentBranchLabel },
+                  { label: "Generated", value: format(new Date(), "dd MMM yyyy hh:mm a") },
+                ]}
               />
               {canAddSession && !showingPreviousSessions && (
                 <Button 

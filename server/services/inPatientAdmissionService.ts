@@ -1,13 +1,18 @@
 import type { InPatientAdmission } from "@shared/schema";
 import type { IStorage } from "../storage";
+import { clinicDateString } from "../clinicTime";
 import { organizationForBranch } from "@shared/branchAccess";
 import {
   collectReadmitChainPriorAdmissionIds,
   computeAdmissionBalanceDue,
   computeAdmissionBillingBreakdown,
   computeAdmissionGrandTotal,
+  allocatePaymentsAcrossSegments,
+  computeBranchStaySegmentBilling,
   formatReadmitAdmissionSource,
   parseReadmitAdmissionSource,
+  TRANSFER_BALANCE_MARKER,
+  TRANSFER_CREDIT_MARKER,
 } from "@shared/inpatientBilling";
 
 export {
@@ -324,6 +329,9 @@ export interface PriorInPatientEpisode {
   amountPaid: number;
   pendingBalance: number;
   sessionCount: number;
+  episodeType?: "readmit" | "transfer";
+  branchId?: string | null;
+  branchName?: string | null;
   breakdown: {
     stayDays: number;
     roomCharges: number;
@@ -338,6 +346,176 @@ export interface PriorInPatientEpisode {
     amountPerDay: number;
     careTakerRatePerDay: number;
   } | null;
+}
+
+type TransferStaySegment = {
+  startDate: string;
+  endDate: string;
+  branchId: string | null;
+  transferLogId: string;
+};
+
+function buildTransferStaySegments(
+  admitDate: string,
+  transfers: Array<{ id: string; transferDate: string; fromBranchId?: string | null }>,
+): TransferStaySegment[] {
+  const segments: TransferStaySegment[] = [];
+  let startDate = admitDate;
+  for (const transfer of transfers) {
+    segments.push({
+      startDate,
+      endDate: transfer.transferDate,
+      branchId: transfer.fromBranchId ?? null,
+      transferLogId: transfer.id,
+    });
+    startDate = transfer.transferDate;
+  }
+  return segments;
+}
+
+function resolveBranchLabel(
+  branchId: string | null | undefined,
+  branchNameById: Map<string, string>,
+): string | null {
+  if (!branchId) return null;
+  return branchNameById.get(branchId) ?? null;
+}
+
+/** Prior branch-stay bills from transfer logs on the same admission (Option B transfers). */
+export async function getTransferPriorBillingEpisodes(
+  storage: IStorage,
+  admissionId: string,
+): Promise<PriorInPatientEpisode[]> {
+  const admission = await storage.getInPatientAdmission(admissionId);
+  if (!admission) return [];
+
+  const transfers = await storage.getPatientTransferLogsByAdmission(admissionId);
+  if (transfers.length === 0) return [];
+
+  const [amountPaid, extraExpenses, sessions, branches, discharge] = await Promise.all([
+    storage.getPaymentTotalByAdmission(admissionId),
+    storage.getInPatientExtraExpensesByAdmission(admissionId),
+    storage.getInPatientSessionsByAdmission(admissionId),
+    storage.getAllBranches(),
+    storage.getInPatientDischargeByAdmission(admissionId),
+  ]);
+  const branchNameById = new Map(
+    branches.map((branch) => [branch.id, branch.branchName ?? branch.name ?? "Unknown"]),
+  );
+
+  const priorSegments = buildTransferStaySegments(admission.admitDate, transfers);
+  const segmentGrandTotals = priorSegments.map((segment) =>
+    computeBranchStaySegmentBilling({
+      admitDate: segment.startDate,
+      endDate: segment.endDate,
+      amountPerDay: admission.amountPerDay,
+      careTakerRatePerDay: admission.careTakerRatePerDay,
+      careTakerDaysOverride: admission.careTakerDaysOverride,
+      extraExpenses,
+    }).grandTotal,
+  );
+  const billingEndDate = discharge?.dischargeDate
+    ? String(discharge.dischargeDate).split("T")[0]
+    : clinicDateString();
+  const currentSegmentGrandTotal = computeBranchStaySegmentBilling({
+    admitDate: priorSegments[priorSegments.length - 1]?.endDate ?? admission.admitDate,
+    endDate: billingEndDate,
+    amountPerDay: admission.amountPerDay,
+    careTakerRatePerDay: admission.careTakerRatePerDay,
+    careTakerDaysOverride: admission.careTakerDaysOverride,
+    extraExpenses,
+  }).grandTotal;
+  const allocations = allocatePaymentsAcrossSegments(
+    [...segmentGrandTotals, currentSegmentGrandTotal],
+    amountPaid,
+  );
+
+  const episodes: PriorInPatientEpisode[] = [];
+  for (let index = 0; index < priorSegments.length; index += 1) {
+    const segment = priorSegments[index];
+    const breakdown = computeBranchStaySegmentBilling({
+      admitDate: segment.startDate,
+      endDate: segment.endDate,
+      amountPerDay: admission.amountPerDay,
+      careTakerRatePerDay: admission.careTakerRatePerDay,
+      careTakerDaysOverride: admission.careTakerDaysOverride,
+      extraExpenses,
+    });
+    const allocation = allocations[index];
+    const sessionCount = sessions.filter((session) => {
+      const day = String(session.sessionDate).split("T")[0];
+      return day >= segment.startDate && day <= segment.endDate;
+    }).length;
+
+    episodes.push({
+      admissionId: `transfer:${segment.transferLogId}`,
+      admitDate: segment.startDate,
+      status: "Transferred",
+      dischargeDate: segment.endDate,
+      grandTotal: breakdown.grandTotal,
+      amountPaid: allocation.amountPaid,
+      pendingBalance: allocation.pendingBalance,
+      sessionCount,
+      episodeType: "transfer",
+      branchId: segment.branchId,
+      branchName: resolveBranchLabel(segment.branchId, branchNameById),
+      breakdown: {
+        stayDays: breakdown.stayDays,
+        roomCharges: breakdown.roomCharges,
+        careTakerDays: breakdown.careTakerDays,
+        caretakerCharges: breakdown.caretakerCharges,
+        extraExpenseTotal: breakdown.extraExpenseTotal,
+        subtotal: breakdown.subtotal,
+        deductionAmount: breakdown.deductionAmount,
+        deductionType: null,
+        deductionValue: null,
+        deductionReason: null,
+        amountPerDay: parseFloat(String(admission.amountPerDay)) || 0,
+        careTakerRatePerDay: parseFloat(String(admission.careTakerRatePerDay ?? 0)) || 0,
+      },
+    });
+  }
+
+  return episodes.sort((left, right) => right.admitDate.localeCompare(left.admitDate));
+}
+
+/** Pending balance for the branch stay that ends on `transferDate` (used when transferring). */
+export async function computeTransferSegmentPendingBalance(
+  storage: IStorage,
+  admission: InPatientAdmission,
+  transferDate: string,
+  transfersIncludingCurrent: Array<{ id: string; transferDate: string; fromBranchId?: string | null }>,
+): Promise<number> {
+  const [amountPaid, extraExpenses] = await Promise.all([
+    storage.getPaymentTotalByAdmission(admission.id),
+    storage.getInPatientExtraExpensesByAdmission(admission.id),
+  ]);
+  const priorSegments = buildTransferStaySegments(admission.admitDate, transfersIncludingCurrent);
+  const closedSegment = priorSegments[priorSegments.length - 1];
+  if (!closedSegment || closedSegment.endDate !== transferDate) {
+    return 0;
+  }
+
+  const segmentGrandTotals = priorSegments.map((segment) =>
+    computeBranchStaySegmentBilling({
+      admitDate: segment.startDate,
+      endDate: segment.endDate,
+      amountPerDay: admission.amountPerDay,
+      careTakerRatePerDay: admission.careTakerRatePerDay,
+      careTakerDaysOverride: admission.careTakerDaysOverride,
+      extraExpenses,
+    }).grandTotal,
+  );
+  const allocations = allocatePaymentsAcrossSegments(segmentGrandTotals, amountPaid);
+  return allocations[allocations.length - 1]?.pendingBalance ?? 0;
+}
+
+export function formatTransferBalanceDescription(transferDate: string, fromBranchName: string): string {
+  return `${TRANSFER_BALANCE_MARKER} (transferred ${transferDate} from ${fromBranchName})`;
+}
+
+export function formatTransferCreditDescription(transferDate: string, fromBranchName: string): string {
+  return `${TRANSFER_CREDIT_MARKER} (transferred ${transferDate} from ${fromBranchName})`;
 }
 
 /** Prior admission episodes with billing + session counts (read-only; readmit chain only). */
@@ -405,7 +583,8 @@ export async function getPriorInPatientEpisodes(
     });
   }
 
-  return episodes;
+  const transferEpisodes = await getTransferPriorBillingEpisodes(storage, admissionId);
+  return [...transferEpisodes, ...episodes];
 }
 
 /**
@@ -484,4 +663,31 @@ export async function getPreviousInPatientSessions(storage: IStorage, admissionI
     .sort(compareAdmissionRecency);
 
   return loadSessionsForPriorAdmissions(storage, priorAdmissions);
+}
+
+/** Resolve display branch for each session (session branchId, else parent admission branch). */
+export async function enrichInPatientSessionsWithBranchName<
+  T extends { admissionId: string; branchId?: string | null },
+>(storage: IStorage, sessions: T[]): Promise<Array<T & { branchName: string }>> {
+  if (sessions.length === 0) return [];
+
+  const branches = await storage.getAllBranches();
+  const branchNameById = new Map(
+    branches.map((branch) => [branch.id, branch.branchName ?? branch.name ?? "Unknown"]),
+  );
+
+  const admissionIds = [...new Set(sessions.map((session) => session.admissionId))];
+  const admissionBranchById = new Map<string, string | null>();
+  await Promise.all(
+    admissionIds.map(async (admissionId) => {
+      const admission = await storage.getInPatientAdmission(admissionId);
+      admissionBranchById.set(admissionId, admission?.branchId ?? null);
+    }),
+  );
+
+  return sessions.map((session) => {
+    const branchId = session.branchId ?? admissionBranchById.get(session.admissionId) ?? null;
+    const branchName = branchId ? (branchNameById.get(branchId) ?? "Unknown") : "Unknown";
+    return { ...session, branchName };
+  });
 }

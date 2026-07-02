@@ -166,6 +166,9 @@ export interface InPatientPriorEpisode {
   amountPaid: number;
   pendingBalance: number;
   sessionCount: number;
+  episodeType?: "readmit" | "transfer";
+  branchId?: string | null;
+  branchName?: string | null;
   breakdown: {
     stayDays: number;
     roomCharges: number;
