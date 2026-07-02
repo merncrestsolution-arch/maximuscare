@@ -4,11 +4,11 @@ import { normalizeBranchName } from "@shared/branches";
 import {
   hasFullBranchAccess,
   isNexusManagingDirector,
+  isManagingDirector,
   NEXUS_BRANCH_CODE,
   type OverviewContext,
   canAccessMaximusOverview,
   canAccessNexusOverview,
-  isManagingDirector,
 } from "@shared/branchAccess";
 import { loadStaffRoleCapabilities } from "./mdCapabilityService";
 
@@ -33,6 +33,40 @@ export async function getUserBranchPermissionIds(
   if (access.length > 0) return access.map((a) => a.branchId);
 
   return [];
+}
+
+function activeBranches(branches: Branch[]): Branch[] {
+  return branches.filter((b) => b.isActive !== false);
+}
+
+/** Branches an Admin/MD may transfer in-patients to (broader than day-to-day branch scope). */
+export async function getTransferDestinationBranches(
+  storage: IStorage,
+  staffId: string,
+  role: string,
+): Promise<Branch[]> {
+  const all = activeBranches(await storage.getAllBranches());
+
+  if (hasFullBranchAccess(role)) {
+    return all;
+  }
+
+  if (isNexusManagingDirector(role)) {
+    return all.filter((b) => String(b.code ?? "").toUpperCase() === NEXUS_BRANCH_CODE);
+  }
+
+  if (isManagingDirector(role)) {
+    const mdCaps = await loadStaffRoleCapabilities(storage, staffId);
+    if (mdCaps.maximusOverview && mdCaps.nexusOverview) {
+      return all;
+    }
+    if (mdCaps.nexusOverview) {
+      return all.filter((b) => String(b.code ?? "").toUpperCase() === NEXUS_BRANCH_CODE);
+    }
+    return all.filter((b) => String(b.code ?? "").toUpperCase() !== NEXUS_BRANCH_CODE);
+  }
+
+  return activeBranches(await getAllowedBranchesForStaff(storage, staffId, role));
 }
 
 export async function getAllowedBranchesForStaff(

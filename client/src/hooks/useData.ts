@@ -513,6 +513,14 @@ export function useDeleteInPatientSession() {
 }
 
 // In-Patient Discharge hooks
+export function useInPatientDischargeSummary(admissionId: string, dischargeDate?: string) {
+  return useQuery({
+    queryKey: ['inpatients', admissionId, 'discharge-summary', dischargeDate ?? ''],
+    queryFn: () => inPatientApi.getDischargeSummary(admissionId, dischargeDate),
+    enabled: !!admissionId,
+  });
+}
+
 export function useInPatientDischarge(admissionId: string) {
   return useQuery({
     queryKey: ['inpatients', admissionId, 'discharge'],
@@ -755,6 +763,17 @@ export function useBranches() {
   return useQuery({
     queryKey: ['branches'],
     queryFn: () => branchesApi.getAll(),
+  });
+}
+
+export function useTransferBranches(enabled = true) {
+  return useQuery({
+    queryKey: ['branches', 'transfer'],
+    queryFn: async () => {
+      const data = await branchesApi.getForTransfer();
+      return Array.isArray(data) ? data : [];
+    },
+    enabled,
   });
 }
 

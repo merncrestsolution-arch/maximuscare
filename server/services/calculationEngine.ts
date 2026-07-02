@@ -4,6 +4,9 @@
  */
 import type { Visit, Attendance, InPatientSession, StaffFine, Expense } from "@shared/schema";
 import { normalizeBranchName, getHomeVisitRateTier } from "@shared/branches";
+import { computeBalanceDue, computeOutstandingAmount } from "@shared/inpatientBilling";
+
+export { computeBalanceDue, computeOutstandingAmount };
 
 export const DEFAULT_RATES = {
   incentiveMinCount: 5,
@@ -130,7 +133,7 @@ export function normalizeVisitType(type: string | null | undefined): "home" | "c
 }
 
 export function computeOutstandingBalance(totalAmount: number, amountPaid: number): number {
-  return Math.max(0, totalAmount - Math.max(0, amountPaid));
+  return computeBalanceDue(totalAmount, amountPaid);
 }
 
 export function derivePaymentStatus(totalAmount: number, amountPaid: number): (typeof PAYMENT_STATUSES)[number] {
@@ -167,7 +170,7 @@ export function getVisitOutstandingBalance(visit: Visit): number {
   if (ps === "paid" || ps === "cancelled") return 0;
   const total = Number(visit.paymentAmount) || 0;
   const paid = Number((visit as { amountPaid?: string | number }).amountPaid) || 0;
-  return computeOutstandingBalance(total, paid);
+  return computeOutstandingAmount(total, paid);
 }
 
 export function validateNonNegative(value: number, label: string): string | null {

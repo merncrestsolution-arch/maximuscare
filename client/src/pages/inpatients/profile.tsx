@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats, useTransferBranches } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -11,10 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Loader2, Phone, MapPin, Calendar, User, Clock, Trash2, Edit, Pencil, Plus, CreditCard, Receipt, AlertTriangle } from "lucide-react";
-import { format, differenceInDays } from "date-fns";
+import { format } from "date-fns";
 import { formatMoney } from "@/lib/reportDatePresets";
+import { clinicTodayString } from "@/lib/utils";
+import { getDueDisplay } from "@/lib/paymentStatus";
 import {
   computeDeductionAmount,
+  computeStayDays,
   computeTotalPendingBalance,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
@@ -46,9 +49,25 @@ import { StructuredReportActions } from "@/components/reports/structured-report-
 import { SegmentedToggle } from "@/components/ui/segmented-toggle";
 import { PatientCredentials } from "@/components/patients/patient-credentials";
 import { isManager, isBranchManager, canReAdmitInPatient } from "@/lib/permissions";
-import { useBranches } from "@/hooks/useData";
+import { BRANCH_OPTIONS } from "@/lib/branches";
 
 const EXPENSE_CATEGORIES = ["Food", "Nurse Visit", "Doctor Visit", "Speech Therapy", "Others"];
+
+function DueBalanceBanner({ due, testId }: { due: number; testId?: string }) {
+  const display = getDueDisplay(due);
+  return (
+    <div
+      className="flex items-center justify-between rounded-lg border px-4 py-3"
+      style={{ backgroundColor: display.bgColour, borderColor: display.colour }}
+      data-testid={testId}
+    >
+      <span className="text-sm font-semibold text-slate-700">{display.label}</span>
+      <span className="text-lg font-extrabold tabular-nums" style={{ color: display.colour }}>
+        {display.value}
+      </span>
+    </div>
+  );
+}
 
 function BillingLine({
   label,
@@ -114,11 +133,6 @@ export default function InPatientProfilePage() {
   const updateAdmitDate = useUpdateInPatientAdmitDate();
   const transferInPatient = useTransferInPatient();
   const { data: transferLogs = [] } = useInPatientTransfers(patientId);
-  // Bug 4: transfer destinations span every active branch in the org (real DB ids).
-  const { data: allBranches = [] } = useBranches();
-  const transferBranchChoices = (allBranches as any[])
-    .filter((b) => b.isActive !== false && b.isActive !== 0)
-    .map((b) => ({ id: b.id, label: b.name }));
   const createPayment = useCreateInPatientPayment();
   const updatePayment = useUpdateInPatientPayment();
   const updateInPatient = useUpdateInPatient();
@@ -218,6 +232,27 @@ export default function InPatientProfilePage() {
   const canAddSession = patient?.status === "Admitted";
   const canDischarge = isAdminMD && patient?.status === "Admitted";
   const canReadmit = canReAdmitInPatient(user?.role) && patient?.status === "Discharged";
+
+  const { data: transferBranches = [], isLoading: transferBranchesLoading } = useTransferBranches(
+    transferOpen && canTransfer,
+  );
+  const transferBranchChoices = useMemo(() => {
+    const rows = Array.isArray(transferBranches) ? transferBranches : [];
+    return rows
+      .filter((branch) => branch?.id && branch.isActive !== false && branch.isActive !== 0)
+      .map((branch) => {
+        const shortName = branch.branchName ?? branch.name ?? "";
+        const friendly =
+          BRANCH_OPTIONS.find((option) => option.value === shortName)?.label ??
+          (shortName || branch.name);
+        return { id: String(branch.id), label: friendly };
+      });
+  }, [transferBranches]);
+
+  const destinationBranches = useMemo(() => {
+    const currentId = patient?.branchId ? String(patient.branchId) : "";
+    return transferBranchChoices.filter((branch) => branch.id && branch.id !== currentId);
+  }, [transferBranchChoices, patient?.branchId]);
 
   useEffect(() => {
     const action = new URLSearchParams(search).get("action");
@@ -659,8 +694,10 @@ export default function InPatientProfilePage() {
     right.admitDate.localeCompare(left.admitDate),
   );
 
-  const endDate = discharge ? new Date(discharge.dischargeDate) : new Date();
-  const stayDays = Math.max(1, differenceInDays(endDate, new Date(patient.admitDate)) + 1);
+  const billingEndDate = discharge
+    ? String(discharge.dischargeDate).split("T")[0]
+    : clinicTodayString();
+  const stayDays = computeStayDays(patient.admitDate, billingEndDate);
   const amountPerDay = parseFloat(patient.amountPerDay) || 0;
   const roomCharges = amountPerDay * stayDays;
   const careTakerRate = parseFloat(patient.careTakerRatePerDay) || 0;
@@ -691,7 +728,6 @@ export default function InPatientProfilePage() {
       : "Deduction";
   const grandTotal = subtotal - deductionAmount;
   const currentGrandTotal = currentSubtotal - currentDeductionAmount;
-  const balanceDue = grandTotal - paymentTotal;
   const {
     currentEpisodePaid,
     priorBalancePaid,
@@ -721,13 +757,16 @@ export default function InPatientProfilePage() {
   }, 0);
   /** Only a carried-forward charge (created on re-admit) affects the current bill. */
   const priorPendingForCurrentAdmission = hasCarriedForwardBalance ? priorBalanceDue : 0;
-  const totalBalanceDue = computeTotalPendingBalance(currentBalanceDue, priorPendingForCurrentAdmission);
   const hasPriorPendingInSummary = priorPendingForCurrentAdmission > 0;
+  const netBalanceDue = grandTotal - paymentTotal;
+  const totalBalanceDue = hasPriorPendingInSummary
+    ? computeTotalPendingBalance(currentBalanceDue, priorPendingForCurrentAdmission)
+    : netBalanceDue;
   // Discharge balance is recomputed from the snapshot grand total minus ALL recorded
   // payments so the Discharge Summary reconciles with the live Billing Summary even
   // when payments are added after the discharge was created.
   const dischargeBalance = discharge ? Number(discharge.grandTotal) - paymentTotal : 0;
-  const pastDueAdmission = Math.max(0, dischargeBalance);
+  const pastDueAdmission = dischargeBalance > 0 ? dischargeBalance : 0;
   const pastDueOutpatient = Math.max(0, Number(linkedPatientStats?.outstandingAmount ?? 0));
   const totalPastDue = pastDueAdmission + pastDueOutpatient;
 
@@ -817,11 +856,21 @@ export default function InPatientProfilePage() {
         { item: "Total Payments Recorded", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
         ...(hasPriorPendingInSummary
           ? [
-              { item: "Current Episode Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) },
-              { item: "Previous Admission Due", quantity: "-", rate: "-", amount: formatMoney(priorPendingForCurrentAdmission) },
-              { item: "Total Balance Due", quantity: "-", rate: "-", amount: formatMoney(totalBalanceDue) },
+              {
+                item: currentBalanceDue < 0 ? "Current Episode Credit" : "Current Episode Balance Due",
+                quantity: "-",
+                rate: "-",
+                amount: getDueDisplay(currentBalanceDue).value,
+              },
+              {
+                item: priorPendingForCurrentAdmission < 0 ? "Previous Admission Credit" : "Previous Admission Due",
+                quantity: "-",
+                rate: "-",
+                amount: getDueDisplay(priorPendingForCurrentAdmission).value,
+              },
+              { item: getDueDisplay(totalBalanceDue).label, quantity: "-", rate: "-", amount: getDueDisplay(totalBalanceDue).value },
             ]
-          : [{ item: "Balance Due", quantity: "-", rate: "-", amount: formatMoney(currentBalanceDue) }]),
+          : [{ item: getDueDisplay(netBalanceDue).label, quantity: "-", rate: "-", amount: getDueDisplay(netBalanceDue).value }]),
       ];
 
   return (
@@ -923,8 +972,27 @@ export default function InPatientProfilePage() {
           </div>
         )}
         {(transferLogs as any[]).length > 0 && (
-          <div className="rounded-lg mb-4 px-4 py-2.5 text-sm" style={{ background: "#FFF3ED", color: "#F45627" }} data-testid="banner-transferred">
-            ↗ Patient transferred to {(transferLogs as any[])[0].toBranchName ?? "another branch"} on {format(new Date((transferLogs as any[])[0].transferDate), "dd MMM yyyy")}. Original records are retained at the previous branch.
+          <div className="mb-4" data-testid="transfer-history-section">
+            <h4 className="text-[#105691] text-sm font-bold mb-2">Transfer History</h4>
+            {(transferLogs as any[]).map((transfer: any, index: number) => (
+              <div
+                key={transfer.id ?? index}
+                className="rounded-lg border border-[#F19F39] bg-[#FFF3ED] px-3.5 py-2.5 mb-2 text-sm"
+                data-testid={`transfer-log-${index}`}
+              >
+                <span className="text-[#F45627] font-semibold">↗ Transferred</span>
+                <span className="text-slate-700 ml-2">
+                  from <strong>{transfer.fromBranchName ?? "previous branch"}</strong> to{" "}
+                  <strong>{transfer.toBranchName ?? "new branch"}</strong>
+                </span>
+                <span className="text-slate-400 ml-2">
+                  on {format(new Date(transfer.transferDate), "dd MMM yyyy")}
+                </span>
+                {transfer.transferNote ? (
+                  <div className="text-slate-400 mt-1 text-xs">Note: {transfer.transferNote}</div>
+                ) : null}
+              </div>
+            ))}
           </div>
         )}
 
@@ -1328,7 +1396,7 @@ export default function InPatientProfilePage() {
                     <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-[#105691]/80">
                       Balance
                     </p>
-                    {hasPriorPendingInSummary && (
+                    {hasPriorPendingInSummary && priorPendingForCurrentAdmission > 0 && (
                       <BillingLine
                         label="Previous admission due"
                         value={`LKR ${formatMoney(priorPendingForCurrentAdmission)}`}
@@ -1336,22 +1404,51 @@ export default function InPatientProfilePage() {
                         testId="text-prior-balance-due-inline"
                       />
                     )}
-                    <BillingLine
-                      label={hasPriorPendingInSummary ? "Current stay due" : "Balance Due"}
-                      value={`LKR ${formatMoney(currentBalanceDue)}`}
-                      tone={currentBalanceDue > 0 ? "danger" : "success"}
-                      emphasized={!hasPriorPendingInSummary}
-                      testId="text-balance-due"
-                    />
-                    {hasPriorPendingInSummary && (
+                    {hasPriorPendingInSummary && priorPendingForCurrentAdmission < 0 && (
                       <BillingLine
-                        label="Total Balance Due"
-                        value={`LKR ${formatMoney(totalBalanceDue)}`}
-                        tone={totalBalanceDue > 0 ? "danger" : "success"}
-                        emphasized
-                        testId="text-total-balance-due"
+                        label="Previous admission credit"
+                        value={`LKR ${formatMoney(Math.abs(priorPendingForCurrentAdmission))}`}
+                        tone="success"
+                        testId="text-prior-balance-credit-inline"
                       />
                     )}
+                    {!hasPriorPendingInSummary && (
+                      <DueBalanceBanner due={netBalanceDue} testId="text-balance-due" />
+                    )}
+                    {hasPriorPendingInSummary && (
+                      <>
+                        {currentBalanceDue !== 0 && (
+                          <BillingLine
+                            label={currentBalanceDue > 0 ? "Current stay due" : "Current stay credit"}
+                            value={
+                              currentBalanceDue > 0
+                                ? `LKR ${formatMoney(currentBalanceDue)}`
+                                : `LKR ${formatMoney(Math.abs(currentBalanceDue))}`
+                            }
+                            tone={currentBalanceDue > 0 ? "danger" : "success"}
+                            testId="text-current-balance-due"
+                          />
+                        )}
+                        <div className="mt-2">
+                          <DueBalanceBanner due={totalBalanceDue} testId="text-total-balance-due" />
+                        </div>
+                      </>
+                    )}
+
+                    <div
+                      className="mt-3 rounded-lg px-3 py-2.5 text-xs text-slate-700"
+                      style={{ backgroundColor: "#EEF5FB" }}
+                      data-testid="text-stay-summary"
+                    >
+                      Admitted: {format(new Date(patient.admitDate), "dd MMM yyyy")} →{" "}
+                      {discharge
+                        ? `Discharged: ${format(new Date(discharge.dischargeDate), "dd MMM yyyy")}`
+                        : "Today"}
+                      {" | "}
+                      <strong>
+                        {stayDays} day{stayDays !== 1 ? "s" : ""}
+                      </strong>
+                    </div>
                   </>
                 )}
 
@@ -1389,11 +1486,9 @@ export default function InPatientProfilePage() {
                     emphasized
                   />
                   <BillingLine label="Amount Paid" value={`LKR ${formatMoney(paymentTotal)}`} tone="success" />
-                  <BillingLine
-                    label="Balance"
-                    value={`LKR ${formatMoney(dischargeBalance)}`}
-                    tone={dischargeBalance > 0 ? "danger" : "success"}
-                  />
+                  <div className="mt-2">
+                    <DueBalanceBanner due={dischargeBalance} testId="text-discharge-balance" />
+                  </div>
                   <div className="flex items-center justify-between gap-3 py-1.5">
                     <span className="text-sm text-muted-foreground">Payment Status</span>
                     <span
@@ -1654,9 +1749,19 @@ export default function InPatientProfilePage() {
                           {session.treatingStaffName}
                         </div>
                         <div className="text-sm min-w-0">
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-0.5">
-                            <Clock className="h-3 w-3 shrink-0" />
-                            #{session.sessionNumber} · {session.startTime}–{session.endTime}
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mb-0.5">
+                            <span className="inline-flex items-center gap-1">
+                              <Clock className="h-3 w-3 shrink-0" />
+                              #{session.sessionNumber} · {session.startTime}–{session.endTime}
+                            </span>
+                            {session.branchName ? (
+                              <span
+                                className="rounded-full bg-[#EEF5FB] px-2 py-0.5 text-[0.72rem] font-semibold text-[#105691]"
+                                data-testid={`session-branch-${session.id}`}
+                              >
+                                {session.branchName}
+                              </span>
+                            ) : null}
                           </div>
                           <div className="line-clamp-3">{session.treatmentProvided}</div>
                           {session.improvements ? (
@@ -1718,9 +1823,14 @@ export default function InPatientProfilePage() {
                 {payments.map((payment: InPatientPayment) => (
                   <div key={payment.id} className="bg-white rounded p-3 border text-sm" data-testid={`payment-${payment.id}`}>
                     <div className="flex justify-between items-start gap-2">
-                      <span className="text-muted-foreground">{format(new Date(payment.paymentDate), "dd MMM yyyy")}</span>
+                      <span className="text-slate-700 text-sm">
+                        {format(new Date(payment.paymentDate), "dd MMM yyyy")} — {payment.paymentMode}
+                      </span>
                       <div className="flex items-center gap-2">
-                        <span className="font-medium">LKR {parseFloat(payment.amount).toLocaleString()}</span>
+                        <span className="font-bold text-[#16A34A] text-sm tabular-nums">
+                          + LKR{" "}
+                          {parseFloat(payment.amount).toLocaleString("en-LK", { minimumFractionDigits: 2 })}
+                        </span>
                         {isAdminMD && (
                           <Button
                             type="button"
@@ -1772,8 +1882,17 @@ export default function InPatientProfilePage() {
           </Button>
         )}
 
-        <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
-          <DialogContent>
+        <Dialog
+          open={transferOpen}
+          onOpenChange={(open) => {
+            setTransferOpen(open);
+            if (!open) {
+              setTransferBranchId("");
+              setTransferNote("");
+            }
+          }}
+        >
+          <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Transfer to another branch</DialogTitle>
               <DialogDescription>
@@ -1785,16 +1904,21 @@ export default function InPatientProfilePage() {
                 <Label>Destination Branch</Label>
                 <Select value={transferBranchId} onValueChange={setTransferBranchId}>
                   <SelectTrigger data-testid="select-transfer-branch">
-                    <SelectValue placeholder="Select branch" />
+                    <SelectValue placeholder={transferBranchesLoading ? "Loading branches..." : "Select branch"} />
                   </SelectTrigger>
-                  <SelectContent>
-                    {transferBranchChoices
-                      .filter((b) => b.id !== patient?.branchId)
-                      .map((b) => (
-                        <SelectItem key={b.id} value={b.id}>{b.label}</SelectItem>
-                      ))}
+                  <SelectContent position="popper" className="z-[200] max-h-60">
+                    {destinationBranches.map((branch) => (
+                      <SelectItem key={branch.id} value={branch.id}>
+                        {branch.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
+                {!transferBranchesLoading && destinationBranches.length === 0 && (
+                  <p className="text-xs text-amber-700" data-testid="text-no-transfer-branches">
+                    No other active branches are available for transfer.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="transfer-date">Transfer Date</Label>

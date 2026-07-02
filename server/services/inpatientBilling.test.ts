@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   collectReadmitChainPriorAdmissionIds,
   computeAdmissionGrandTotal,
+  computeAdmissionBalanceDue,
+  computeBalanceDue,
+  computeStayDays,
   computeTotalPendingBalance,
+  buildDischargeBillLines,
+  computeAdmissionBillingBreakdown,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
   splitReAdmissionPayments,
@@ -54,9 +59,21 @@ describe("inpatientBilling", () => {
     });
   });
 
-  it("totals current and prior pending balance", () => {
+  it("allows negative balance when overpaid", () => {
+    expect(computeAdmissionBalanceDue(10000, 12000)).toBe(-2000);
+    expect(computeBalanceDue(5000, 8000)).toBe(-3000);
+  });
+
+  it("counts inclusive stay days in Sri Lanka timezone", () => {
+    expect(computeStayDays("2026-06-25", "2026-06-29")).toBe(5);
+    expect(computeStayDays("2026-07-01", "2026-07-01")).toBe(1);
+    expect(computeStayDays("2026-07-01", "2026-07-03")).toBe(3);
+  });
+
+  it("totals current and prior pending balance including credit", () => {
     expect(computeTotalPendingBalance(2000, 1000)).toBe(3000);
     expect(computeTotalPendingBalance(0, 0)).toBe(0);
+    expect(computeTotalPendingBalance(-500, 0)).toBe(-500);
   });
 
   it("computes live admission grand total", () => {
@@ -68,6 +85,22 @@ describe("inpatientBilling", () => {
       extraExpenses: [{ description: "Food", amount: "200" }],
     });
     expect(total).toBe(1000 * 3 + 500 * 3 + 200);
+  });
+
+  it("builds discharge bill lines", () => {
+    const breakdown = computeAdmissionBillingBreakdown({
+      admitDate: "2026-07-01",
+      endDate: "2026-07-03",
+      amountPerDay: 1000,
+      careTakerRatePerDay: 500,
+      extraExpenses: [{ description: "Food", amount: "200" }],
+    });
+    const lines = buildDischargeBillLines(breakdown, {
+      amountPerDay: 1000,
+      careTakerRatePerDay: 500,
+      packageType: "AC Room",
+    });
+    expect(lines.reduce((sum, line) => sum + line.amount, 0)).toBe(breakdown.grandTotal);
   });
 
   it("walks the readmit chain", () => {

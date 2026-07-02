@@ -698,9 +698,19 @@ export const inPatientApi = {
   },
 
   // Discharge
+  getDischargeSummary: (admissionId: string, dischargeDate?: string) => {
+    const query = dischargeDate ? `?dischargeDate=${encodeURIComponent(dischargeDate)}` : "";
+    return apiRequest<any>(`/inpatients/${admissionId}/discharge-summary${query}`);
+  },
   getDischarge: (admissionId: string) =>
     apiRequest<any>(`/inpatients/${admissionId}/discharge`),
-  createDischarge: (admissionId: string, data: any) =>
+  createDischarge: (admissionId: string, data: {
+    dischargeDate?: string;
+    nowPaying?: number;
+    paymentMethod?: string;
+    paymentDate?: string;
+    notes?: string;
+  }) =>
     apiRequest<any>(`/inpatients/${admissionId}/discharge`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1034,6 +1044,7 @@ export const clinicSettingsApi = {
 
 export const branchesApi = {
   getAll: () => apiRequest<any>("/branches").then(unwrapApiData),
+  getForTransfer: () => apiRequest<any>("/branches?forTransfer=1").then(unwrapApiData),
   create: (data: any) =>
     apiRequest<any>("/branches", { method: "POST", body: JSON.stringify(data) }).then(unwrapApiData),
   update: (id: string, data: any) =>

@@ -23,7 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import { SiteCreditFooter } from "@/components/site-credit-footer";
 import { StaffHomeWidgets } from "@/components/dashboard/staff-home-widgets";
 import { ViewLocationButton } from "@/components/attendance/view-location-button";
-import { computeOutstanding } from "@/lib/paymentStatus";
+import { computeOutstandingAmount } from "@/lib/paymentStatus";
 import { isManagementRole, canViewFinancialSummary, isManager, isBranchManager, canViewAllVisits } from "@/lib/permissions";
 import { StatCard, KpiGrid } from "@/components/ui/stat-card";
 import { PageShell } from "@/components/layout/page-shell";
@@ -278,7 +278,7 @@ export default function Dashboard() {
             <StatCard title="Unpaid Visits" value={unpaidVisits} accent="warning" icon={<Wallet className="h-5 w-5" />} />
             <StatCard
               title="Outstanding"
-              value={formatCurrency(dashboardKpis?.outstandingAmount ?? scopedUnpaid.reduce((a, v) => a + computeOutstanding(Number(v.paymentAmount), Number(v.amountPaid)), 0))}
+              value={formatCurrency(dashboardKpis?.outstandingAmount ?? scopedUnpaid.reduce((a, v) => a + computeOutstandingAmount(Number(v.paymentAmount), Number(v.amountPaid)), 0))}
               accent="danger"
               icon={<DollarSign className="h-5 w-5" />}
             />

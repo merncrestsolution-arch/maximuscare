@@ -145,6 +145,8 @@ export interface InPatientSession {
   treatmentProvided: string;
   improvements?: string;
   attachments?: string[];
+  branchId?: string | null;
+  branchName?: string | null;
   createdAt: string;
   updatedAt: string;
 }

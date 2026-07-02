@@ -34,9 +34,7 @@ export async function recordVisitPayment(
   const totalAmount = Number(visit.paymentAmount) || 0;
   const currentPaid = Number((visit as { amountPaid?: string }).amountPaid ?? 0) || 0;
   const newPaid = currentPaid + amount;
-  if (newPaid > totalAmount && totalAmount > 0) {
-    throw new Error(`Payment exceeds outstanding balance of Rs.${computeOutstandingBalance(totalAmount, currentPaid)}`);
-  }
+  // Overpayment is allowed — excess becomes credit (negative balance due).
 
   const payment = await storage.createVisitPayment({
     visitId,

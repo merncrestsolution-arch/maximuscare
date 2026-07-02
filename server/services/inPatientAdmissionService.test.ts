@@ -6,6 +6,7 @@ import {
   priorAdmissionBalanceFromDischarge,
   getPreviousInPatientSessions,
   getPriorInPatientEpisodes,
+  getInPatientSessionsForAdmissionView,
   parseReadmitAdmissionSource,
   formatReadmitAdmissionSource,
 } from "./inPatientAdmissionService";
@@ -14,7 +15,7 @@ describe("inPatientAdmissionService", () => {
   it("computes prior admission balance from discharge grand total minus payments", () => {
     expect(priorAdmissionBalanceFromDischarge(10000, 3500)).toBe(6500);
     expect(priorAdmissionBalanceFromDischarge(10000, 10000)).toBe(0);
-    expect(priorAdmissionBalanceFromDischarge(10000, 12000)).toBe(0);
+    expect(priorAdmissionBalanceFromDischarge(10000, 12000)).toBe(-2000);
   });
 
   it("prefers newer createdAt over later admitDate when picking current episode", () => {
@@ -225,5 +226,30 @@ describe("inPatientAdmissionService", () => {
 
     const episodes = await getPriorInPatientEpisodes(storage as any, "current");
     expect(episodes).toHaveLength(0);
+  });
+
+  it("merges sessions from legacy transferred admissions into the current view", async () => {
+    const storage = {
+      getInPatientAdmission: async (id: string) =>
+        id === "current"
+          ? ({ id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01" } as any)
+          : ({ id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01" } as any),
+      getInPatientAdmissionsForPatient: async () => [
+        { id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01" },
+        { id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01" },
+      ],
+      getAllInPatientAdmissions: async () => [
+        { id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01" },
+        { id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01" },
+      ],
+      getInPatientSessionsByAdmission: async (id: string) =>
+        id === "current"
+          ? [{ id: "s2", sessionDate: "2024-07-02", sessionNumber: 2 } as any]
+          : [{ id: "s1", sessionDate: "2024-06-05", sessionNumber: 1 } as any],
+    };
+
+    const sessions = await getInPatientSessionsForAdmissionView(storage as any, "current");
+    expect(sessions).toHaveLength(2);
+    expect(sessions.map((session) => session.id).sort()).toEqual(["s1", "s2"]);
   });
 });

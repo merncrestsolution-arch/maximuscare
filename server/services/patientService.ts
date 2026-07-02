@@ -2,7 +2,7 @@ import type { IStorage } from "../storage";
 import type { Patient, Visit, InPatientSession, InPatientAdmission } from "@shared/schema";
 import { nextPatientCode, bumpPatientCode } from "@shared/patientId";
 import { organizationForBranch, type OrganizationId } from "@shared/branchAccess";
-import { computeOutstandingBalance, derivePaymentStatus } from "./calculationEngine";
+import { computeOutstandingBalance, derivePaymentStatus, computeOutstandingAmount } from "./calculationEngine";
 
 const normalizePhone = (phone: string | null | undefined): string =>
   phone && phone.trim() !== "" ? phone.replace(/\s+/g, "").trim() : "";
@@ -128,9 +128,9 @@ export async function getPatientStats(storage: IStorage, patientId: string): Pro
     if (ps === "paid") totalRevenue += amount;
     else if (ps === "partially paid") {
       totalRevenue += paid;
-      outstandingAmount += computeOutstandingBalance(amount, paid);
+      outstandingAmount += computeOutstandingAmount(amount, paid);
     } else if (ps !== "cancelled") {
-      outstandingAmount += amount;
+      outstandingAmount += computeOutstandingAmount(amount, paid);
     }
     if (!lastVisitDate || v.visitDate > lastVisitDate) lastVisitDate = v.visitDate;
   }
@@ -181,7 +181,7 @@ export async function getPatientDashboard(storage: IStorage): Promise<PatientDas
   for (const v of unpaid) {
     const amount = Number(v.paymentAmount) || 0;
     const paid = Number((v as { amountPaid?: string }).amountPaid ?? 0) || 0;
-    outstandingPayments += computeOutstandingBalance(amount, paid);
+    outstandingPayments += computeOutstandingAmount(amount, paid);
   }
 
   const therapistMap = new Map<string, { name: string; count: number }>();

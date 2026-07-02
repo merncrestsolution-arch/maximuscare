@@ -17,6 +17,7 @@ import {
   getVisitOutstandingBalance,
   normalizeVisitType,
 } from "./calculationEngine";
+import { computeOutstandingAmount } from "@shared/inpatientBilling";
 import { ENTERPRISE_BRANCHES, normalizeBranchName, getHomeVisitRateTier } from "@shared/branches";
 
 export interface RevenueReport {
@@ -430,7 +431,7 @@ export async function computeUnpaidReport(
     const patient = patientMap.get(v.patientId);
     const amount = Number(v.paymentAmount) || 0;
     const paid = Number((v as { amountPaid?: string }).amountPaid ?? 0) || 0;
-    const outstandingBalance = Math.max(0, amount - paid);
+    const outstandingBalance = computeOutstandingAmount(amount, paid);
     return {
       visitId: v.id,
       patientId: v.patientId,

@@ -227,11 +227,14 @@ export function registerExtendedRoutes(app: Express) {
   app.get("/api/branches", requireAuth, async (req, res) => {
     try {
       const user = (req as any).user;
-      const { getAllowedBranchesForStaff } = await import("./services/branchService");
+      const { getAllowedBranchesForStaff, getTransferDestinationBranches } = await import("./services/branchService");
       const { hasFullBranchAccess } = await import("@shared/branchAccess");
-      const list = hasFullBranchAccess(user.role)
-        ? await storage.getAllBranches()
-        : await getAllowedBranchesForStaff(storage, user.staffId, user.role);
+      const forTransfer = String(req.query.forTransfer ?? "").toLowerCase() === "true" || req.query.forTransfer === "1";
+      const list = forTransfer
+        ? await getTransferDestinationBranches(storage, user.staffId, user.role)
+        : hasFullBranchAccess(user.role)
+          ? await storage.getAllBranches()
+          : await getAllowedBranchesForStaff(storage, user.staffId, user.role);
       return successResponse(res, list);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);

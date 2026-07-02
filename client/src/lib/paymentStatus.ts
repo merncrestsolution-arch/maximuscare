@@ -1,4 +1,7 @@
 /** Consistent paid / unpaid / partial styling across visit lists and reports. */
+import { computeBalanceDue, computeOutstandingAmount } from "@shared/inpatientBilling";
+
+export { computeBalanceDue, computeOutstandingAmount };
 export function isPaidStatus(status: string | undefined | null): boolean {
   return String(status ?? "")
     .trim()
@@ -25,5 +28,42 @@ export function paymentStatusBadgeClass(status: string | undefined | null): stri
 }
 
 export function computeOutstanding(total: number, paid: number): number {
-  return Math.max(0, total - Math.max(0, paid));
+  return computeBalanceDue(total, paid);
+}
+
+export type DueDisplay = {
+  label: string;
+  value: string;
+  colour: string;
+  bgColour: string;
+  tone: "danger" | "success";
+};
+
+/** Display rules for due / credit / settled balances (Phase 1 billing). */
+export function getDueDisplay(due: number): DueDisplay {
+  if (due > 0) {
+    return {
+      label: "Due Amount",
+      value: `LKR ${due.toLocaleString("en-LK", { minimumFractionDigits: 2 })}`,
+      colour: "#DC2626",
+      bgColour: "#FEF2F2",
+      tone: "danger",
+    };
+  }
+  if (due === 0) {
+    return {
+      label: "Payment Status",
+      value: "Fully Paid",
+      colour: "#16A34A",
+      bgColour: "#F0FDF4",
+      tone: "success",
+    };
+  }
+  return {
+    label: "Credit Balance",
+    value: `LKR ${Math.abs(due).toLocaleString("en-LK", { minimumFractionDigits: 2 })}`,
+    colour: "#16A34A",
+    bgColour: "#F0FDF4",
+    tone: "success",
+  };
 }

@@ -2900,11 +2900,21 @@ export async function registerRoutes(
     }
   });
 
-  // Get all sessions for an admission
+  // Get all sessions for an admission (no branchId filter — includes legacy transfer sessions).
   app.get("/api/inpatients/:admissionId/sessions", requireAuth, async (req: Request, res: Response) => {
     try {
-      const sessions = await storage.getInPatientSessionsByAdmission(param(req, "admissionId"));
-      return res.json(sessions);
+      const admissionId = param(req, "admissionId");
+      const { getInPatientSessionsForAdmissionView } = await import("./services/inPatientAdmissionService");
+      const sessions = await getInPatientSessionsForAdmissionView(storage, admissionId);
+      const branches = await storage.getAllBranches();
+      const branchName = (branchId?: string | null) =>
+        branchId ? (branches.find((branch) => branch.id === branchId)?.name ?? "Unknown") : "Unknown";
+      return res.json(
+        sessions.map((session) => ({
+          ...session,
+          branchName: branchName((session as { branchId?: string | null }).branchId),
+        })),
+      );
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -3085,6 +3095,37 @@ export async function registerRoutes(
 
   // ========== In-Patient Discharge Routes ==========
 
+  // Get discharge summary (read-only bill + payment history before discharge)
+  app.get("/api/inpatients/:admissionId/discharge-summary", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
+    try {
+      const admissionId = param(req, "admissionId");
+      const admission = await storage.getInPatientAdmission(admissionId);
+      if (!admission) {
+        return res.status(404).json({ message: "Admission not found" });
+      }
+      const { branchId, organizationId } = resolveUserScope(req);
+      if (branchId && admission.branchId && admission.branchId !== branchId) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      if (organizationId) {
+        const admissionBranchName = await resolveBranchNameById(admission.branchId);
+        if (admissionBranchName && organizationForBranch(admissionBranchName) !== organizationId) {
+          return res.status(403).json({ message: "Access denied" });
+        }
+      }
+
+      const dischargeDate = (req.query.dischargeDate as string | undefined)?.split("T")[0];
+      const { buildInPatientDischargeSummary } = await import("./services/inPatientDischargeService");
+      const summary = await buildInPatientDischargeSummary(storage, admissionId, dischargeDate);
+      if (!summary) {
+        return res.status(404).json({ message: "Admission not found" });
+      }
+      return res.json(summary);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get discharge info for an admission
   app.get("/api/inpatients/:admissionId/discharge", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -3098,10 +3139,12 @@ export async function registerRoutes(
     }
   });
 
-  // Create discharge (Admin, MD only)
+  // Create discharge (Admin, MD only) — records optional final payment then discharges.
   app.post("/api/inpatients/:admissionId/discharge", requireAuth, requireInpatientsManage, async (req: Request, res: Response) => {
     try {
-      const admission = await storage.getInPatientAdmission(param(req, "admissionId"));
+      const user = (req as any).user;
+      const admissionId = param(req, "admissionId");
+      const admission = await storage.getInPatientAdmission(admissionId);
       if (!admission) {
         return res.status(404).json({ message: "Admission not found" });
       }
@@ -3109,28 +3152,25 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Patient already discharged" });
       }
 
-      const data = {
-        ...req.body,
-        admissionId: param(req, "admissionId"),
-        patientName: admission.patientName,
-      };
+      const staffInfo = await storage.getStaff(user.staffId);
+      const { processInPatientDischarge } = await import("./services/inPatientDischargeService");
+      const result = await processInPatientDischarge(
+        storage,
+        admissionId,
+        req.body as any,
+        { staffId: user.staffId, name: staffInfo?.name ?? user.name },
+      );
 
-      const parsed = insertInPatientDischargeSchema.safeParse(data);
-      if (!parsed.success) {
-        return res.status(400).json({ message: "Invalid data", errors: parsed.error.flatten() });
-      }
+      const actor = await auditActor(req);
+      await logAudit(storage, {
+        ...actor,
+        module: "inpatient",
+        action: "discharge",
+        recordId: admissionId,
+        newValue: result.discharge,
+      });
 
-      // Create discharge record
-      const discharge = await storage.createInPatientDischarge(parsed.data);
-
-      // Update admission status to Discharged
-      await storage.updateInPatientAdmission(param(req, "admissionId"), { status: 'Discharged' });
-
-      if (admission.patientId) {
-        await storage.updatePatient(admission.patientId, { status: "Discharged" });
-      }
-
-      return res.status(201).json(discharge);
+      return res.status(201).json(result.discharge);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -3343,8 +3383,9 @@ export async function registerRoutes(
     }
   });
 
-  // Bug 4: transfer an in-patient to another branch. Historical sessions/bills keep their
-  // original branch; only the admission's current branch changes and a transfer log is written.
+  // Bug 4: transfer an in-patient to another branch.
+  // Investigation: legacy code created a NEW admission row (sessions stayed on the old id).
+  // Fix (Option B): update the SAME admission's branchId; sessions remain linked via admissionId.
   app.post("/api/inpatients/:id/transfer", requireAuth, async (req: Request, res: Response) => {
     try {
       const user = (req as any).user;
@@ -3356,6 +3397,9 @@ export async function registerRoutes(
       const admission = await storage.getInPatientAdmission(id);
       if (!admission) {
         return res.status(404).json({ message: "Admission not found" });
+      }
+      if (admission.status === "Discharged") {
+        return res.status(400).json({ message: "Cannot transfer a discharged patient." });
       }
       const { targetBranchId, transferNote } = (req.body as any) ?? {};
       if (!targetBranchId || typeof targetBranchId !== "string") {
@@ -3375,16 +3419,9 @@ export async function registerRoutes(
       }
 
       const fromBranchId = admission.branchId ?? null;
-      const updated = await storage.updateInPatientAdmission(id, { status: "Transferred" } as any);
-
-      const { id: _, branchId: __, status: ___, createdAt: ____, updatedAt: _____, admitDate: ______, ...rest } = admission;
-      await storage.createInPatientAdmission({
-        ...rest,
-        admitDate: rawDate,
+      const updated = await storage.updateInPatientAdmission(id, {
         branchId: targetBranchId,
         status: "Admitted",
-        reportsAttachments: admission.reportsAttachments ? JSON.stringify(admission.reportsAttachments) : null,
-        idCopyAttachments: admission.idCopyAttachments ? JSON.stringify(admission.idCopyAttachments) : null,
       } as any);
 
       const editor = await storage.getStaff(user.staffId);
@@ -3445,7 +3482,8 @@ export async function registerRoutes(
       const admission = await storage.getInPatientAdmission(admissionId);
       if (!admission) return res.status(404).json({ message: "Admission not found" });
 
-      const sessions = await storage.getInPatientSessionsByAdmission(admissionId);
+      const { getInPatientSessionsForAdmissionView } = await import("./services/inPatientAdmissionService");
+      const sessions = await getInPatientSessionsForAdmissionView(storage, admissionId);
       const exportSvc = await import("./services/exportService");
 
       const title = `Inpatient History - ${admission.patientName} (${admission.status})`;

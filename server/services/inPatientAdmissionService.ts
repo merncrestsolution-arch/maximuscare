@@ -277,6 +277,47 @@ export async function getPriorInPatientEpisodes(
   return episodes;
 }
 
+/**
+ * Bug 4 — transfer investigation (2026-07):
+ * The legacy transfer handler CREATED a new InPatient admission and set the old row to
+ * status "Transferred", leaving sessions on the old admissionId. Going forward, transfer
+ * updates the SAME admission's branchId (Option B). This helper merges sessions from
+ * legacy transferred source rows so the current admission view shows the full history.
+ */
+export async function getInPatientSessionsForAdmissionView(
+  storage: IStorage,
+  admissionId: string,
+) {
+  const admission = await storage.getInPatientAdmission(admissionId);
+  if (!admission) return [];
+
+  const primary = await storage.getInPatientSessionsByAdmission(admissionId);
+  const related = await getRelatedInPatientAdmissions(storage, admission);
+  const legacyTransferred = related.filter(
+    (entry) =>
+      entry.id !== admissionId &&
+      normalizeAdmissionListStatus(entry.status) === "transferred",
+  );
+
+  const merged = [...primary];
+  const seen = new Set(primary.map((session) => session.id));
+  for (const prior of legacyTransferred) {
+    const rows = await storage.getInPatientSessionsByAdmission(prior.id);
+    for (const row of rows) {
+      if (!seen.has(row.id)) {
+        seen.add(row.id);
+        merged.push(row);
+      }
+    }
+  }
+
+  return merged.sort((left, right) => {
+    const dateCmp = right.sessionDate.localeCompare(left.sessionDate);
+    if (dateCmp !== 0) return dateCmp;
+    return left.sessionNumber - right.sessionNumber;
+  });
+}
+
 /** Sessions from prior admission episodes for the same person (read-only history). */
 export async function getPreviousInPatientSessions(storage: IStorage, admissionId: string) {
   const admission = await storage.getInPatientAdmission(admissionId);
