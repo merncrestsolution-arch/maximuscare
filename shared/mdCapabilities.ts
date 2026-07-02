@@ -19,7 +19,7 @@ export const DEFAULT_MD_CAPABILITIES: MdRoleCapabilities = {
   viewAttendanceLocation: false,
   viewAllStaffFines: true,
   manageStaffFines: false,
-  maximusOverview: false,
+  maximusOverview: true,
   nexusOverview: false,
 };
 

@@ -14,6 +14,7 @@ import { useGoToBranchSelect } from "@/hooks/use-go-to-branch-select";
 import { useBranch } from "@/context/branch-context";
 import { BRANCH_SELECTION_CARDS } from "@shared/branchAccess";
 import type { OverviewContext } from "@shared/branchAccess";
+import { branchMatchesEnterpriseCode } from "@shared/branches";
 import {
   Drawer,
   DrawerClose,
@@ -73,13 +74,10 @@ export function BranchSwitcher() {
   const label = workspaceLabel(selectedBranchName, selectedContext);
 
   const branchCards = useMemo(() => {
-    const allowedCodes = new Set(
-      allowedBranches.map((b) => String(b.code ?? "").toUpperCase())
-    );
-    return BRANCH_SELECTION_CARDS.filter((card) => allowedCodes.has(card.code)).map((card) => {
-      const branch = allowedBranches.find(
-        (b) => String(b.code ?? "").toUpperCase() === card.code
-      );
+    return BRANCH_SELECTION_CARDS.filter((card) =>
+      allowedBranches.some((b) => branchMatchesEnterpriseCode(b, card.code)),
+    ).map((card) => {
+      const branch = allowedBranches.find((b) => branchMatchesEnterpriseCode(b, card.code));
       return { ...card, branchId: branch?.id ?? "" };
     });
   }, [allowedBranches]);

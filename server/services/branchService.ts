@@ -9,6 +9,7 @@ import {
   type OverviewContext,
   canAccessMaximusOverview,
   canAccessNexusOverview,
+  deriveOverviewAccessFromBranches,
 } from "@shared/branchAccess";
 import { loadStaffRoleCapabilities } from "./mdCapabilityService";
 
@@ -118,8 +119,10 @@ export async function resolveBranchAccessContext(
   let canNexusOverview = canAccessNexusOverview(role);
   if (isManagingDirector(role)) {
     const mdCaps = await loadStaffRoleCapabilities(storage, staffId);
-    if (mdCaps.maximusOverview) canMaximusOverview = true;
-    if (mdCaps.nexusOverview) canNexusOverview = true;
+    const derived = deriveOverviewAccessFromBranches(allowedBranches);
+    // MD sees org overview for assigned branches; caps can grant extra org access.
+    if (derived.maximus || mdCaps.maximusOverview) canMaximusOverview = true;
+    if (derived.nexus || mdCaps.nexusOverview) canNexusOverview = true;
   }
 
   return {

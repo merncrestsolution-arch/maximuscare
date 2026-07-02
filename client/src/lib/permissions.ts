@@ -17,8 +17,7 @@ export function isBranchManager(role: string | undefined): boolean {
 }
 
 export function isManager(role: string | undefined): boolean {
-  const r = String(role ?? "").trim();
-  return r === "Manager" || r === "Staff";
+  return String(role ?? "").trim() === "Manager";
 }
 
 /** Admin, MD, and Nexus MD — income, revenue, and org-wide financial summaries. */
@@ -84,7 +83,7 @@ export function canAccessMaximusOverview(
   mdCaps?: MdRoleCapabilities,
 ): boolean {
   if (isAdminRole(role)) return true;
-  if (String(role ?? "").trim() === "MD") return mdCaps?.maximusOverview ?? false;
+  if (String(role ?? "").trim() === "MD") return mdCaps?.maximusOverview ?? true;
   return false;
 }
 
@@ -163,7 +162,12 @@ export function canManageTasks(role: string | undefined): boolean {
  */
 export function canManageAppointments(role: string | undefined): boolean {
   const r = String(role ?? "").trim();
-  return isOperationalLead(r) || isNexusManagingDirector(r) || r === "Receptionist";
+  return (
+    isManagementRole(r) ||
+    isOperationalLead(r) ||
+    isNexusManagingDirector(r) ||
+    r === "Receptionist"
+  );
 }
 
 /** Read access to the staff directory, profiles, and attendance history. */

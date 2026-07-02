@@ -233,6 +233,8 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart30MdRoleCapabilities();
   const { runPart31StaffRoleCapabilities } = await import("./migrations/part31StaffRoleCapabilities");
   await runPart31StaffRoleCapabilities();
+  const { runPart32MdOverviewCapsFix } = await import("./migrations/part32MdOverviewCapsFix");
+  await runPart32MdOverviewCapsFix();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -311,5 +313,17 @@ export async function ensurePostgresSchemaCompatibility() {
     await runPart30MdRoleCapabilities();
   } catch (error) {
     console.error("[db] Part 30 MD role capabilities failed (non-fatal):", error);
+  }
+  try {
+    const { runPart31StaffRoleCapabilities } = await import("./migrations/part31StaffRoleCapabilities");
+    await runPart31StaffRoleCapabilities();
+  } catch (error) {
+    console.error("[db] Part 31 staff role capabilities failed (non-fatal):", error);
+  }
+  try {
+    const { runPart32MdOverviewCapsFix } = await import("./migrations/part32MdOverviewCapsFix");
+    await runPart32MdOverviewCapsFix();
+  } catch (error) {
+    console.error("[db] Part 32 MD overview caps fix failed (non-fatal):", error);
   }
 }

@@ -27,7 +27,7 @@ import {
   canViewSalary,
   canViewAuditLogs,
   canViewStaffList,
-  isManagementRole,
+  canManageSettings,
 } from "@/lib/permissions";
 import {
   Drawer,
@@ -127,7 +127,7 @@ export default function BottomNav() {
     { href: "/salary", label: "Salary", icon: <Banknote className="h-6 w-6" />, active: location.startsWith("/salary"), show: canViewSalary(role) },
     { href: staffHref, label: canViewStaffList(role) ? "Staff" : "Profile", icon: <UserCircle className="h-6 w-6" />, active: isActive("/staff") || isActive("/profile"), show: true },
     { href: "/audit", label: "Activity Log", icon: <ScrollText className="h-6 w-6" />, active: isActive("/audit"), show: canViewAuditLogs(role) },
-    { href: "/settings", label: "Settings", icon: <Settings className="h-6 w-6" />, active: isActive("/settings"), show: isManagementRole(role) },
+    { href: "/settings", label: "Settings", icon: <Settings className="h-6 w-6" />, active: isActive("/settings"), show: canManageSettings(role) },
   ];
 
   const visibleMoreItems = moreItems.filter((item) => item.show);

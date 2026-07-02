@@ -1,4 +1,4 @@
-import { ENTERPRISE_BRANCHES, normalizeBranchName, type BranchCode } from "./branches";
+import { ENTERPRISE_BRANCHES, branchMatchesEnterpriseCode, normalizeBranchName, type BranchCode } from "./branches";
 
 export type OverviewContext = "maximus-overview" | "nexus-overview";
 
@@ -90,6 +90,25 @@ export function canAccessMaximusOverview(role: string): boolean {
 
 export function canAccessNexusOverview(role: string): boolean {
   return isSuperAdmin(role) || isNexusManagingDirector(role);
+}
+
+/** Derive org overview access from the branches a user is allowed to work in. */
+export function deriveOverviewAccessFromBranches(
+  allowedBranches: Array<{ code?: string | null; branchName?: string | null; name?: string | null }>,
+): { maximus: boolean; nexus: boolean } {
+  let maximus = false;
+  let nexus = false;
+
+  for (const branch of allowedBranches) {
+    if (MAXIMUS_BRANCH_CODES.some((code) => branchMatchesEnterpriseCode(branch, code))) {
+      maximus = true;
+    }
+    if (branchMatchesEnterpriseCode(branch, NEXUS_BRANCH_CODE)) {
+      nexus = true;
+    }
+  }
+
+  return { maximus, nexus };
 }
 
 export function getMaximusBranchNames(): string[] {

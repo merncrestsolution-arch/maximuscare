@@ -104,3 +104,18 @@ export function pickEnterpriseBranchesForTransfer<T extends TransferBranchRow>(b
 
   return results.length > 0 ? results : [...branches];
 }
+
+export type BranchLike = {
+  id?: string;
+  code?: string | null;
+  branchName?: string | null;
+  name?: string | null;
+};
+
+/** True when a branch row matches an enterprise code (by code field or normalized name). */
+export function branchMatchesEnterpriseCode(branch: BranchLike, code: BranchCode): boolean {
+  if (String(branch.code ?? "").toUpperCase() === code) return true;
+  const def = ENTERPRISE_BRANCHES.find((b) => b.code === code);
+  if (!def) return false;
+  return normalizeBranchName(branch.branchName ?? branch.name) === def.shortName;
+}

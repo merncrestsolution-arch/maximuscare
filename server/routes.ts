@@ -262,6 +262,11 @@ function normalizeInPatientAdmissionBody(body: Record<string, unknown>) {
   };
   if (normalized.reportsAttachments === undefined) delete (normalized as any).reportsAttachments;
   if (normalized.idCopyAttachments === undefined) delete (normalized as any).idCopyAttachments;
+  for (const key of ["phone", "careTakerName", "careTakerRelationship"] as const) {
+    if (key in normalized && normalized[key] == null) {
+      (normalized as Record<string, unknown>)[key] = "";
+    }
+  }
   return normalized;
 }
 

@@ -8,6 +8,7 @@ import {
   canAccessMaximusOverview,
   canAccessNexusOverview,
   hasFullBranchAccess,
+  deriveOverviewAccessFromBranches,
 } from "@shared/branchAccess";
 
 describe("shared/branches", () => {
@@ -55,6 +56,18 @@ describe("branchAccess roles", () => {
     expect(canAccessMaximusOverview("MD")).toBe(false);
     expect(canAccessNexusOverview("Nexus MD")).toBe(true);
     expect(canAccessNexusOverview("Branch Manager")).toBe(false);
+  });
+
+  it("derives overview access from assigned branches", () => {
+    expect(
+      deriveOverviewAccessFromBranches([{ name: "Dehiwala Main Branch", branchName: "Dehiwala", code: null }]),
+    ).toEqual({ maximus: true, nexus: false });
+    expect(
+      deriveOverviewAccessFromBranches([{ branchName: "Dehiwala", code: null }]),
+    ).toEqual({ maximus: true, nexus: false });
+    expect(
+      deriveOverviewAccessFromBranches([{ branchName: "Nexus Physio", code: "NEXUS" }]),
+    ).toEqual({ maximus: false, nexus: true });
   });
 });
 

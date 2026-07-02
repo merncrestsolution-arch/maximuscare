@@ -1,4 +1,4 @@
-import { ENTERPRISE_BRANCHES, normalizeBranchName } from "@shared/branches";
+import { branchMatchesEnterpriseCode } from "@shared/branches";
 import { authApi } from "@/lib/api";
 
 export function pickDefaultBranchId(
@@ -8,12 +8,7 @@ export function pickDefaultBranchId(
 
   const order = ["DEHIWALA", "BANDARAGAMA", "NEURO", "NEXUS"] as const;
   for (const code of order) {
-    const def = ENTERPRISE_BRANCHES.find((b) => b.code === code);
-    const match = allowedBranches.find((branch) => {
-      if (String(branch.code ?? "").toUpperCase() === code) return true;
-      const label = normalizeBranchName(branch.branchName ?? branch.name);
-      return !!def && label === def.shortName;
-    });
+    const match = allowedBranches.find((branch) => branchMatchesEnterpriseCode(branch, code));
     if (match) return match.id;
   }
 

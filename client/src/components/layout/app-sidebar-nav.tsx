@@ -27,6 +27,7 @@ import {
   canViewReportsHub,
   canViewAuditLogs,
   canViewStaffList,
+  canManageSettings,
 } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { useNavigateHome } from "@/hooks/use-navigate-home";
@@ -144,18 +145,15 @@ export function AppSidebarNav() {
               {canAccessMaximusOverview && (
                 <SidebarMenuItem>
                   <SidebarMenuButton
-                    isActive={isActive("/auth/branch-select")}
+                    isActive={isActive("/maximus-overview")}
                     className={cn(
                       "min-h-11",
-                      isActive("/auth/branch-select") && "bg-blue-600/20 text-white"
+                      isActive("/maximus-overview") && "bg-blue-600/20 text-white"
                     )}
-                    onClick={() => {
-                      closeMobile();
-                      void goToBranchSelect();
-                    }}
+                    onClick={() => goToOverview("maximus-overview", "/maximus-overview")}
                   >
                     <LayoutGrid className="h-5 w-5" />
-                    <span>Maximus Care</span>
+                    <span>Maximus Overview</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
@@ -280,7 +278,7 @@ export function AppSidebarNav() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )}
-                  {["Admin", "MD"].includes(user.role) && (
+                  {canManageSettings(user.role) && (
                     <SidebarMenuItem>
                       <SidebarMenuButton asChild isActive={isActive("/settings")} className="min-h-11">
                         <Link href="/settings" onClick={closeMobile}>

@@ -70,8 +70,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <div className={`flex-1 min-h-0 min-w-0 w-full overflow-x-hidden overflow-y-auto scrollbar-smooth p-3 md:p-6 ${showBottomNav ? 'pb-28' : 'pb-6'} md:pb-6 px-safe`}>
           <motion.div
             key={location}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             className="mx-auto w-full max-w-[1600px] min-w-0"
           >
