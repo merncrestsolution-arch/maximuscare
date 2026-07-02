@@ -2829,7 +2829,7 @@ export async function registerRoutes(
 
       const admission = await storage.createInPatientAdmission({
         ...d,
-        branchId: d.branchId || branchId,
+        branchId: branchId || d.branchId,
         patientId: linkedPatientId,
         patientCode,
         admissionSource,

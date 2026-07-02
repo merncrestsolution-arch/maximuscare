@@ -3,6 +3,7 @@ import { useLocation, useSearch } from "wouter";
 import { useCreateInPatient, usePatientLookup, usePatient } from "@/hooks/useData";
 import { useBranch } from "@/context/branch-context";
 import { useBranchOptions } from "@/hooks/use-branch-options";
+import { normalizeBranchName } from "@shared/branches";
 import { patientApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,7 +54,7 @@ export default function AddInPatientPage() {
   // Transfer mode = converting an existing out-patient into an in-patient admission.
   const isTransfer = searchParams.get("transfer") === "1" && !!prefillId;
   const { toast } = useToast();
-  const { selectedBranchName } = useBranch();
+  const { selectedBranchName, selectedBranchId } = useBranch();
   const { options: branchOptions } = useBranchOptions({ forRegistration: true });
   const createInPatient = useCreateInPatient();
   const lookup = usePatientLookup();
@@ -68,12 +69,21 @@ export default function AddInPatientPage() {
   const [branchId, setBranchId] = useState<string>("");
   const prefilledRef = useRef(false);
 
-  // Default the target branch to the current workspace branch once options load.
+  // Default ward branch to the active workspace branch once real branch IDs load.
   useEffect(() => {
-    if (branchId || branchOptions.length === 0) return;
-    const current = branchOptions.find((b) => b.value === selectedBranchName);
-    setBranchId(current?.id ?? branchOptions[0].id);
-  }, [branchOptions, selectedBranchName, branchId]);
+    const ready = branchOptions.filter((b) => !b.id.startsWith("static-"));
+    if (ready.length === 0) return;
+
+    let defaultId: string | undefined;
+    if (selectedBranchId && ready.some((b) => b.id === selectedBranchId)) {
+      defaultId = selectedBranchId;
+    } else {
+      defaultId = ready.find(
+        (b) => normalizeBranchName(b.value) === normalizeBranchName(selectedBranchName),
+      )?.id;
+    }
+    if (defaultId) setBranchId(defaultId);
+  }, [branchOptions, selectedBranchName, selectedBranchId]);
 
   const applyPatient = (p: Patient) => {
     setExisting(p);

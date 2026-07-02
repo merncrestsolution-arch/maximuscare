@@ -71,6 +71,17 @@ export function resolveInPatientAdmissionKey(entry: {
   return `legacy:${name}|${phone}|${idNo}`;
 }
 
+/** Legacy name matching is only safe when phone or NIC is present (avoids global name collisions). */
+export function isResolvableLegacyAdmissionKey(entry: {
+  patientId?: string | null;
+  patientCode?: string | null;
+  phone?: string | null;
+  patientIdNo?: string | null;
+}): boolean {
+  if (entry.patientId || entry.patientCode) return true;
+  return Boolean(String(entry.phone ?? "").trim() || String(entry.patientIdNo ?? "").trim());
+}
+
 /**
  * Returns negative when `left` is MORE RECENT than `right` (should win as current episode).
  * Uses createdAt first so a re-admission with a backdated admitDate still becomes current.
@@ -137,34 +148,53 @@ export function isCurrentlyAdmitted(admission: InPatientAdmission): boolean {
   return st === "admitted" || st === "active";
 }
 
-/** All admissions for the same person as `admission` (linked patient or legacy match). */
+/** Admissions for the same person as `admission` — scoped to branch; no cross-org bleed. */
 export async function getRelatedInPatientAdmissions(
   storage: IStorage,
   admission: InPatientAdmission,
 ): Promise<InPatientAdmission[]> {
   const matches = new Map<string, InPatientAdmission>();
-  const add = (entries: InPatientAdmission[]) => {
-    for (const entry of entries) matches.set(entry.id, entry);
+  matches.set(admission.id, admission);
+
+  const branchId = admission.branchId ?? null;
+
+  const addIfSameBranch = (entry: InPatientAdmission) => {
+    if (!branchId || entry.branchId === branchId) {
+      matches.set(entry.id, entry);
+    }
   };
 
   if (admission.patientId) {
-    add(await storage.getInPatientAdmissionsForPatient(admission.patientId));
+    const forPatient = await storage.getInPatientAdmissionsForPatient(admission.patientId, branchId);
+    for (const entry of forPatient) addIfSameBranch(entry);
   }
 
-  const all = await storage.getAllInPatientAdmissions();
-
-  if (admission.patientCode) {
-    for (const entry of all) {
+  if (admission.patientCode && branchId) {
+    const branchAdmissions = await storage.getAllInPatientAdmissions(branchId);
+    for (const entry of branchAdmissions) {
       if (entry.patientCode && entry.patientCode === admission.patientCode) {
-        matches.set(entry.id, entry);
+        addIfSameBranch(entry);
       }
     }
   }
 
-  const key = resolveInPatientAdmissionKey(admission);
-  for (const entry of all) {
-    if (resolveInPatientAdmissionKey(entry) === key) {
-      matches.set(entry.id, entry);
+  if (
+    !admission.patientId &&
+    !admission.patientCode &&
+    isResolvableLegacyAdmissionKey(admission) &&
+    branchId
+  ) {
+    const branchAdmissions = await storage.getAllInPatientAdmissions(branchId);
+    const key = resolveInPatientAdmissionKey(admission);
+    for (const entry of branchAdmissions) {
+      if (
+        !entry.patientId &&
+        !entry.patientCode &&
+        isResolvableLegacyAdmissionKey(entry) &&
+        resolveInPatientAdmissionKey(entry) === key
+      ) {
+        matches.set(entry.id, entry);
+      }
     }
   }
 
@@ -174,10 +204,13 @@ export async function getRelatedInPatientAdmissions(
     if (prior) matches.set(prior.id, prior);
   }
 
-  for (const entry of all) {
-    const fromId = parseReadmitAdmissionSource((entry as any).admissionSource);
-    if (fromId === admission.id) {
-      matches.set(entry.id, entry);
+  if (branchId) {
+    const branchAdmissions = await storage.getAllInPatientAdmissions(branchId);
+    for (const entry of branchAdmissions) {
+      const fromId = parseReadmitAdmissionSource((entry as any).admissionSource);
+      if (fromId === admission.id) {
+        matches.set(entry.id, entry);
+      }
     }
   }
 
@@ -319,13 +352,16 @@ export async function getInPatientSessionsForAdmissionView(
 }
 
 /** Sessions from prior admission episodes for the same person (read-only history). */
+/** Sessions from prior readmit-chain episodes only (same person, same branch). */
 export async function getPreviousInPatientSessions(storage: IStorage, admissionId: string) {
   const admission = await storage.getInPatientAdmission(admissionId);
   if (!admission) return [];
 
   const related = await getRelatedInPatientAdmissions(storage, admission);
+  const relatedById = new Map(related.map((entry) => [entry.id, entry]));
+  const readmitChainIds = new Set(collectReadmitChainPriorAdmissionIds(admission, relatedById));
   const priorAdmissions = related
-    .filter((entry) => entry.id !== admissionId)
+    .filter((entry) => entry.id !== admissionId && readmitChainIds.has(entry.id))
     .sort(compareAdmissionRecency);
 
   const results: Array<

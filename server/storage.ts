@@ -628,7 +628,7 @@ export interface IStorage {
   deletePatientNote(id: string): Promise<boolean>;
 
   getInPatientSessionsForPatient(patientId: string): Promise<InPatientSession[]>;
-  getInPatientAdmissionsForPatient(patientId: string): Promise<InPatientAdmission[]>;
+  getInPatientAdmissionsForPatient(patientId: string, branchId?: string | null): Promise<InPatientAdmission[]>;
   getHomeVisitsFiltered(filters: {
     startDate?: string;
     endDate?: string;
@@ -1929,17 +1929,17 @@ export class DatabaseStorage implements IStorage {
    * link (set on new admissions); falls back to a name match for legacy rows that
    * pre-date the link columns.
    */
-  async getInPatientAdmissionsForPatient(patientId: string): Promise<InPatientAdmission[]> {
+  async getInPatientAdmissionsForPatient(
+    patientId: string,
+    branchId?: string | null,
+  ): Promise<InPatientAdmission[]> {
     const patient = await this.getPatient(patientId);
     if (!patient) return [];
-    const admissions = await this.getAllInPatientAdmissions();
+    const admissions = await this.getAllInPatientAdmissions(branchId ?? undefined);
     const code = patient.patientCode ?? null;
     return admissions.filter((a) => {
       if ((a as any).patientId && (a as any).patientId === patient.id) return true;
       if (code && (a as any).patientCode && (a as any).patientCode === code) return true;
-      if (!(a as any).patientId && !(a as any).patientCode && a.patientName === patient.name) {
-        return true;
-      }
       return false;
     });
   }

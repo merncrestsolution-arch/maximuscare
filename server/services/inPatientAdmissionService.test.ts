@@ -70,22 +70,42 @@ describe("inPatientAdmissionService", () => {
     expect(active[0].id).toBe("a2");
   });
 
-  it("returns sessions from prior admissions only", async () => {
+  it("returns sessions from readmit-chain prior admissions only", async () => {
     const storage = {
       getInPatientAdmission: async (id: string) => {
         if (id === "current") {
-          return { id: "current", patientId: "p1", admitDate: "2024-07-01", status: "Admitted" } as any;
+          return {
+            id: "current",
+            patientId: "p1",
+            branchId: "branch-a",
+            admitDate: "2024-07-01",
+            status: "Admitted",
+            admissionSource: "readmit:prior",
+          } as any;
+        }
+        if (id === "prior") {
+          return {
+            id: "prior",
+            patientId: "p1",
+            branchId: "branch-a",
+            admitDate: "2024-05-01",
+            status: "Discharged",
+            createdAt: new Date("2024-05-01"),
+          } as any;
         }
         return undefined;
       },
       getInPatientAdmissionsForPatient: async () => [
-        { id: "prior", patientId: "p1", admitDate: "2024-05-01", status: "Discharged", createdAt: new Date("2024-05-01") },
-        { id: "current", patientId: "p1", admitDate: "2024-07-01", status: "Admitted", createdAt: new Date("2024-07-01") },
+        { id: "prior", patientId: "p1", branchId: "branch-a", admitDate: "2024-05-01", status: "Discharged", createdAt: new Date("2024-05-01") },
+        { id: "current", patientId: "p1", branchId: "branch-a", admitDate: "2024-07-01", status: "Admitted", admissionSource: "readmit:prior", createdAt: new Date("2024-07-01") },
       ] as any,
-      getAllInPatientAdmissions: async () => [
-        { id: "prior", patientId: "p1", admitDate: "2024-05-01", status: "Discharged", createdAt: new Date("2024-05-01") },
-        { id: "current", patientId: "p1", admitDate: "2024-07-01", status: "Admitted", createdAt: new Date("2024-07-01") },
-      ] as any,
+      getAllInPatientAdmissions: async (branchId?: string) => {
+        const rows = [
+          { id: "prior", patientId: "p1", branchId: "branch-a", admitDate: "2024-05-01", status: "Discharged", createdAt: new Date("2024-05-01") },
+          { id: "current", patientId: "p1", branchId: "branch-a", admitDate: "2024-07-01", status: "Admitted", admissionSource: "readmit:prior", createdAt: new Date("2024-07-01") },
+        ] as any;
+        return branchId ? rows.filter((r) => r.branchId === branchId) : rows;
+      },
       getInPatientSessionsByAdmission: async (admissionId: string) => {
         if (admissionId === "prior") {
           return [
@@ -226,6 +246,38 @@ describe("inPatientAdmissionService", () => {
 
     const episodes = await getPriorInPatientEpisodes(storage as any, "current");
     expect(episodes).toHaveLength(0);
+  });
+
+  it("does not merge admissions with the same name across branches", async () => {
+    const storage = {
+      getInPatientAdmission: async (id: string) => {
+        if (id === "dehiwala-sir") {
+          return {
+            id: "dehiwala-sir",
+            patientName: "Sir",
+            branchId: "branch-dehiwala",
+            admitDate: "2024-07-01",
+            status: "Admitted",
+          } as any;
+        }
+        return undefined;
+      },
+      getInPatientAdmissionsForPatient: async () => [],
+      getAllInPatientAdmissions: async (branchId?: string) => {
+        const rows = [
+          { id: "dehiwala-sir", patientName: "Sir", branchId: "branch-dehiwala", phone: "", patientIdNo: "", admitDate: "2024-07-01", status: "Admitted" },
+          { id: "nexus-sir", patientName: "Sir", branchId: "branch-nexus", phone: "", patientIdNo: "", admitDate: "2024-06-01", status: "Discharged" },
+        ] as any;
+        return branchId ? rows.filter((r) => r.branchId === branchId) : rows;
+      },
+      getInPatientDischargeByAdmission: async () => undefined,
+      getPaymentTotalByAdmission: async () => 0,
+      getInPatientExtraExpensesByAdmission: async () => [],
+      getInPatientSessionsByAdmission: async () => [],
+    };
+
+    const previous = await getPreviousInPatientSessions(storage as any, "dehiwala-sir");
+    expect(previous).toHaveLength(0);
   });
 
   it("merges sessions from legacy transferred admissions into the current view", async () => {

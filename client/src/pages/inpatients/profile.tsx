@@ -21,6 +21,8 @@ import {
   computeBalanceDue,
   computeDeductionAmount,
   computeStayDays,
+  CARRIED_FORWARD_CREDIT_MARKER,
+  isCarriedForwardCredit,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
 } from "@shared/inpatientBilling";
@@ -755,6 +757,33 @@ export default function InPatientProfilePage() {
   const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
   const deductionLabel =
     deductionType === "percentage" ? `Deduction (${deductionValue}%)` : "Deduction";
+
+  // Apply prior overpayment credit on current bill (from carried-forward expense or live prior episode).
+  const billingExtraExpenses = (() => {
+    const expenses = extraExpenses ?? [];
+    if (expenses.some(isCarriedForwardCredit)) return expenses;
+
+    const mostRecentPrior = priorEpisodes[0];
+    const livePriorCredit =
+      mostRecentPrior && mostRecentPrior.pendingBalance < 0
+        ? Math.abs(mostRecentPrior.pendingBalance)
+        : 0;
+    if (livePriorCredit <= 0) return expenses;
+
+    const dischargedOn = mostRecentPrior.dischargeDate
+      ? String(mostRecentPrior.dischargeDate).split("T")[0]
+      : null;
+    return [
+      ...expenses,
+      {
+        description: dischargedOn
+          ? `${CARRIED_FORWARD_CREDIT_MARKER} (discharged ${dischargedOn})`
+          : CARRIED_FORWARD_CREDIT_MARKER,
+        amount: String(-livePriorCredit),
+      },
+    ];
+  })();
+
   const breakdown = computeAdmissionBillingBreakdown({
     admitDate: patient.admitDate,
     endDate: billingEndDate,
@@ -763,7 +792,7 @@ export default function InPatientProfilePage() {
     careTakerDaysOverride: patient.careTakerDaysOverride,
     deductionType,
     deductionValue,
-    extraExpenses,
+    extraExpenses: billingExtraExpenses,
   });
   const {
     stayDays,
@@ -783,13 +812,16 @@ export default function InPatientProfilePage() {
   const careTakerRate = parseFloat(patient.careTakerRatePerDay) || 0;
   const hasCarriedForwardBalance = carriedForwardDebt > 0;
   const hasCarriedForwardCredit = carriedForwardCreditApplied > 0;
+  const hasLivePriorCredit =
+    hasCarriedForwardCredit &&
+    !(extraExpenses ?? []).some(isCarriedForwardCredit);
   const hasPriorAdjustment = hasCarriedForwardBalance || hasCarriedForwardCredit;
   const isReadmitAdmission =
     Boolean(parseReadmitAdmissionSource((patient as { admissionSource?: string | null }).admissionSource)) ||
     hasPriorAdjustment;
   const showBillingHistoryToggle =
     hasPriorAdjustment || (isReadmitAdmission && hasPriorEpisodes);
-  const carriedForwardExpenses = (extraExpenses || []).filter(isCarriedForwardExpense);
+  const carriedForwardExpenses = billingExtraExpenses.filter(isCarriedForwardExpense);
   const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
   const hasCurrentDeduction = currentDeductionAmount > 0;
   const hasDeduction = currentDeductionAmount > 0;
@@ -1501,7 +1533,11 @@ export default function InPatientProfilePage() {
                           label="Previous Overpayment Credit Applied"
                           value={`- LKR ${formatMoney(carriedForwardCreditApplied)}`}
                           tone="credit"
-                          sublabel="Auto-deducted from this bill"
+                          sublabel={
+                            hasLivePriorCredit
+                              ? "Auto-deducted from previous admission credit balance"
+                              : "Auto-deducted from this bill"
+                          }
                           testId="text-carried-forward-credit"
                         />
                       </BillingSection>
