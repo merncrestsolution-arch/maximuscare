@@ -728,14 +728,14 @@ export default function InPatientProfilePage() {
   const sortedDates = Object.keys(sessionsByDate).sort((a, b) => b.localeCompare(a));
   const hasPriorEpisodes = priorEpisodes.length > 0;
   const hasPreviousSessions = previousSessions.length > 0 || priorEpisodes.some((episode) => episode.sessionCount > 0);
-  const isReadmitAdmission = Boolean(
+  const isReadmitFromSource = Boolean(
     parseReadmitAdmissionSource((patient as { admissionSource?: string | null }).admissionSource),
   );
   const hasTransferHistory = (transferLogs as any[]).length > 0;
   const showSessionsHistoryToggle =
     hasPriorEpisodes ||
     hasPreviousSessions ||
-    isReadmitAdmission ||
+    isReadmitFromSource ||
     hasTransferHistory;
   const showingPreviousSessions = showSessionsHistoryToggle && sessionsView === "previous";
   const displayedSessions = showingPreviousSessions ? previousSessions : (sessions || []);
@@ -824,11 +824,8 @@ export default function InPatientProfilePage() {
     hasCarriedForwardCredit &&
     !(extraExpenses ?? []).some(isCarriedForwardCredit);
   const hasPriorAdjustment = hasCarriedForwardBalance || hasCarriedForwardCredit;
-  const isReadmitAdmission =
-    Boolean(parseReadmitAdmissionSource((patient as { admissionSource?: string | null }).admissionSource)) ||
-    hasPriorAdjustment;
   const showBillingHistoryToggle =
-    hasPriorAdjustment || (isReadmitAdmission && hasPriorEpisodes);
+    hasPriorAdjustment || (isReadmitFromSource && hasPriorEpisodes);
   const carriedForwardExpenses = billingExtraExpenses.filter(isCarriedForwardExpense);
   const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
   const hasCurrentDeduction = currentDeductionAmount > 0;
