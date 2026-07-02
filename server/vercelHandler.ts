@@ -60,12 +60,14 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     app(req, res);
   } catch (err) {
     console.error("[api] Failed to initialize serverless backend:", err);
+    const detail = err instanceof Error ? err.message : String(err);
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify({
         message:
           "Backend initialization failed. Check that the database (DATABASE_URL / POSTGRES_URL) is set and reachable.",
+        detail: process.env.NODE_ENV === "production" ? detail : undefined,
       })
     );
   }

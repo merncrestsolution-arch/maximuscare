@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
-const usePostgres = !!process.env.DATABASE_URL?.startsWith("postgres");
+const usePostgres = /^postgres(ql)?:\/\//i.test(process.env.DATABASE_URL || "");
 
 async function run(statement: string) {
   const query = sql.raw(statement);

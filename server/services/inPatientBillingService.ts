@@ -18,7 +18,7 @@ import { getPriorInPatientEpisodes } from "./inPatientAdmissionService";
 import {
   filterExcludedPriorEpisodes,
   getExcludedPriorBillingSourceIds,
-} from "./inPatientPriorBillingService";
+} from "./inPatientPriorBillingExclusions";
 
 function toPaymentLine(payment: InPatientPayment): CurrentBillingPaymentLine {
   return {

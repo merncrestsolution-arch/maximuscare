@@ -1,34 +1,8 @@
 import type { IStorage } from "../storage";
-import type { PriorInPatientEpisode } from "./inPatientAdmissionService";
 import { logAudit } from "./auditService";
-import { calculateAdmissionBilling } from "./inPatientBillingService";
+import type { PriorBillingExclusionSnapshot } from "./inPatientPriorBillingExclusions";
 
-export type PriorBillingExclusionSnapshot = {
-  sourceId: string;
-  episodeType: "readmit" | "transfer";
-  admitDate: string;
-  dischargeDate: string | null;
-  branchName: string | null;
-  grandTotal: number | null;
-  amountPaid: number;
-  pendingBalance: number;
-};
-
-export async function getExcludedPriorBillingSourceIds(
-  storage: IStorage,
-  admissionId: string,
-): Promise<Set<string>> {
-  const rows = await storage.getInPatientPriorBillingExclusionsByAdmission(admissionId);
-  return new Set(rows.map((row) => row.sourceId));
-}
-
-export function filterExcludedPriorEpisodes(
-  episodes: PriorInPatientEpisode[],
-  excludedSourceIds: Set<string>,
-): PriorInPatientEpisode[] {
-  if (excludedSourceIds.size === 0) return episodes;
-  return episodes.filter((episode) => !excludedSourceIds.has(episode.admissionId));
-}
+export type { PriorBillingExclusionSnapshot } from "./inPatientPriorBillingExclusions";
 
 export async function excludePriorBillingEpisode(
   storage: IStorage,
@@ -42,6 +16,7 @@ export async function excludePriorBillingEpisode(
   const existing = await storage.getInPatientPriorBillingExclusion(admissionId, sourceId);
   if (existing) throw new Error("This previous billing record is already excluded");
 
+  const { calculateAdmissionBilling } = await import("./inPatientBillingService");
   const billing = await calculateAdmissionBilling(storage, admissionId);
   const line = billing?.previousBilling.lines.find((entry) => entry.sourceId === sourceId);
   if (!line) throw new Error("Previous billing record not found");

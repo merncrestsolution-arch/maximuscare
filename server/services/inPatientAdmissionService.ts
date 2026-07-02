@@ -22,7 +22,7 @@ import {
 import {
   filterExcludedPriorEpisodes,
   getExcludedPriorBillingSourceIds,
-} from "./inPatientPriorBillingService";
+} from "./inPatientPriorBillingExclusions";
 
 export {
   formatReadmitAdmissionSource,
