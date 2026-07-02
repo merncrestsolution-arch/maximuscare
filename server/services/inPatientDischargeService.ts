@@ -3,11 +3,18 @@ import type { IStorage } from "../storage";
 import { clinicDateString } from "../clinicTime";
 import {
   buildDischargeBillLines,
+  computeAdmissionBalanceSummary,
   computeAdmissionBillingBreakdown,
   computeBalanceDue,
   computeStayDays,
+  computeTransferStayPaymentAllocation,
+  deductionFieldsForSegment,
+  isCarriedForwardExpense,
+  resolveDeductionSegmentIndex,
+  TRANSFER_BALANCE_MARKER,
   type DischargeBillLine,
 } from "@shared/inpatientBilling";
+import { getTransferPriorBillingEpisodes } from "./inPatientAdmissionService";
 
 export type DischargeSummaryPayment = {
   id: string;
@@ -72,22 +79,52 @@ export async function buildInPatientDischargeSummary(
   if (!admission) return null;
 
   const endDate = dischargeDate?.split("T")[0] || clinicDateString();
-  const [extraExpenses, payments, branches] = await Promise.all([
+  const [extraExpenses, payments, branches, transfers, transferPriorEpisodes] = await Promise.all([
     storage.getInPatientExtraExpensesByAdmission(admissionId),
     storage.getInPatientPaymentsByAdmission(admissionId),
     storage.getAllBranches(),
+    storage.getPatientTransferLogsByAdmission(admissionId),
+    getTransferPriorBillingEpisodes(storage, admissionId),
   ]);
 
+  const transferLogsAsc = [...transfers].sort((left, right) =>
+    String(left.transferDate).localeCompare(String(right.transferDate)),
+  );
+  const billingSegmentStartDate =
+    transferLogsAsc.length > 0
+      ? String(transferLogsAsc[transferLogsAsc.length - 1].transferDate).split("T")[0]
+      : admission.admitDate;
+  const scopedExtraExpenses =
+    transferLogsAsc.length === 0
+      ? extraExpenses
+      : extraExpenses.filter((expense) => {
+          if (isCarriedForwardExpense(expense)) return true;
+          const day = String(expense.expenseDate).split("T")[0];
+          return day >= billingSegmentStartDate;
+        });
+
   const deduction = admissionDeductionFields(admission);
+  const deductionSegment = resolveDeductionSegmentIndex(
+    (admission as { deductionAppliedAt?: Date | string | null }).deductionAppliedAt ?? null,
+    admission.admitDate,
+    transferLogsAsc.map((transfer) => ({ transferDate: String(transfer.transferDate) })),
+  );
+  const currentSegmentDeduction = deductionFieldsForSegment(
+    deductionSegment,
+    "current",
+    deduction.deductionType,
+    deduction.deductionValue,
+  );
+
   const breakdown = computeAdmissionBillingBreakdown({
-    admitDate: admission.admitDate,
+    admitDate: billingSegmentStartDate,
     endDate,
     amountPerDay: admission.amountPerDay,
     careTakerRatePerDay: admission.careTakerRatePerDay,
     careTakerDaysOverride: admission.careTakerDaysOverride,
-    deductionType: deduction.deductionType,
-    deductionValue: deduction.deductionValue,
-    extraExpenses,
+    deductionType: currentSegmentDeduction.deductionType,
+    deductionValue: currentSegmentDeduction.deductionValue,
+    extraExpenses: scopedExtraExpenses,
   });
 
   const amountPerDay = parseFloat(String(admission.amountPerDay)) || 0;
@@ -96,11 +133,35 @@ export async function buildInPatientDischargeSummary(
     amountPerDay,
     careTakerRatePerDay,
     packageType: admission.packageType,
-    deductionType: deduction.deductionType,
-    deductionValue: deduction.deductionValue,
+    deductionType: currentSegmentDeduction.deductionType,
+    deductionValue: currentSegmentDeduction.deductionValue,
   });
 
-  const totalPaid = payments.reduce((sum, payment) => sum + (parseFloat(String(payment.amount)) || 0), 0);
+  const paymentTotal = payments.reduce((sum, payment) => sum + (parseFloat(String(payment.amount)) || 0), 0);
+  const priorTransferEpisodes = transferPriorEpisodes
+    .filter((episode) => episode.episodeType === "transfer")
+    .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
+  const transferCarriedForwardDebt = extraExpenses
+    .filter((expense) => String(expense.description || "").toLowerCase().includes(TRANSFER_BALANCE_MARKER))
+    .reduce((sum, expense) => sum + Math.max(0, parseFloat(String(expense.amount)) || 0), 0);
+  const transferPaymentAllocation =
+    transferLogsAsc.length > 0 && priorTransferEpisodes.length > 0
+      ? computeTransferStayPaymentAllocation({
+          priorSegmentGrandTotals: priorTransferEpisodes.map((episode) => episode.grandTotal ?? 0),
+          currentSegmentGrandTotal: breakdown.currentGrandTotal,
+          paymentTotal,
+        })
+      : null;
+  const effectivePaymentTotal =
+    transferPaymentAllocation && transferCarriedForwardDebt <= 0
+      ? transferPaymentAllocation.currentSegmentPaid
+      : paymentTotal;
+  const balanceSummary = computeAdmissionBalanceSummary(breakdown, effectivePaymentTotal);
+  const due =
+    breakdown.carriedForwardDebt > 0 || breakdown.carriedForwardCreditApplied > 0
+      ? balanceSummary.totalBalanceDue
+      : computeBalanceDue(breakdown.grandTotal, effectivePaymentTotal);
+
   const branchName = admission.branchId
     ? (branches.find((branch) => branch.id === admission.branchId)?.name ?? null)
     : null;
@@ -130,13 +191,13 @@ export async function buildInPatientDischargeSummary(
       amount: parseFloat(String(payment.amount)) || 0,
       notes: payment.notes,
     })),
-    totalPaid,
-    due: computeBalanceDue(breakdown.grandTotal, totalPaid),
+    totalPaid: paymentTotal,
+    due,
     stayAmount: breakdown.roomCharges,
     caretakerTotal: breakdown.caretakerCharges,
     extraExpenseTotal: breakdown.extraExpenseTotal,
-    deductionType: deduction.deductionType,
-    deductionValue: deduction.deductionValue,
+    deductionType: currentSegmentDeduction.deductionType,
+    deductionValue: currentSegmentDeduction.deductionValue,
     deductionReason: deduction.deductionReason,
   };
 }
@@ -179,7 +240,7 @@ export async function processInPatientDischarge(
   if (!summary) throw new Error("Admission not found");
 
   const totalPaidAfter = summary.totalPaid;
-  const balance = computeBalanceDue(summary.totalBill, totalPaidAfter);
+  const balance = summary.due;
   const paymentStatus = balance <= 0 ? "Paid" : "Unpaid";
 
   const discharge = await storage.createInPatientDischarge({

@@ -73,6 +73,28 @@ export function allocatePaymentsAcrossSegments(
   });
 }
 
+/** Payment split across prior branch stays and the active stay after transfer(s). */
+export function computeTransferStayPaymentAllocation(input: {
+  priorSegmentGrandTotals: number[];
+  currentSegmentGrandTotal: number;
+  paymentTotal: number;
+}) {
+  const allocations = allocatePaymentsAcrossSegments(
+    [...input.priorSegmentGrandTotals, input.currentSegmentGrandTotal],
+    input.paymentTotal,
+  );
+  const priorAllocations = allocations.slice(0, -1);
+  const currentAllocation = allocations[allocations.length - 1] ?? { amountPaid: 0, pendingBalance: 0 };
+  const priorSegmentsPaid = priorAllocations.reduce((sum, row) => sum + row.amountPaid, 0);
+
+  return {
+    allocations,
+    priorSegmentsPaid,
+    currentSegmentPaid: currentAllocation.amountPaid,
+    currentSegmentPending: currentAllocation.pendingBalance,
+  };
+}
+
 function dateOnly(value: string): string {
   return String(value).split("T")[0];
 }
@@ -87,13 +109,58 @@ function expenseInDateRange(
   return day >= startDate && day <= endDate;
 }
 
-/** Bill one branch-stay segment (no deduction; expenses limited to segment dates). */
+/**
+ * Which branch-stay segment owns the admission-level deduction.
+ * Returns the index into prior (closed) transfer segments, or "current" for the active segment.
+ */
+export function resolveDeductionSegmentIndex(
+  deductionAppliedAt: Date | string | null | undefined,
+  admitDate: string,
+  transfers: Array<{ transferDate: string }>,
+): number | "current" {
+  if (transfers.length === 0) return "current";
+
+  const appliedDay = deductionAppliedAt ? clinicDateOnly(deductionAppliedAt) : null;
+  if (!appliedDay) {
+    // Legacy rows without applied-at: attribute to the last closed segment when transfers exist.
+    return transfers.length - 1;
+  }
+
+  let segmentStart = dateOnly(admitDate);
+  for (let index = 0; index < transfers.length; index += 1) {
+    const segmentEnd = dateOnly(transfers[index].transferDate);
+    if (appliedDay >= segmentStart && appliedDay <= segmentEnd) {
+      return index;
+    }
+    segmentStart = segmentEnd;
+  }
+
+  return "current";
+}
+
+/** Deduction fields for one stay segment (null/zero when the deduction belongs elsewhere). */
+export function deductionFieldsForSegment(
+  ownerSegment: number | "current",
+  targetSegment: number | "current",
+  deductionType: "fixed" | "percentage" | null | undefined,
+  deductionValue: number | string | null | undefined,
+): { deductionType: "fixed" | "percentage" | null; deductionValue: number } {
+  const value = parseFloat(String(deductionValue ?? 0)) || 0;
+  if (ownerSegment === targetSegment && deductionType && value > 0) {
+    return { deductionType, deductionValue: value };
+  }
+  return { deductionType: null, deductionValue: 0 };
+}
+
+/** Bill one branch-stay segment (expenses limited to segment dates; optional segment deduction). */
 export function computeBranchStaySegmentBilling(input: {
   admitDate: string;
   endDate: string;
   amountPerDay: number | string;
   careTakerRatePerDay: number | string;
   careTakerDaysOverride?: number | null;
+  deductionType?: "fixed" | "percentage" | null;
+  deductionValue?: number | string | null;
   extraExpenses?: Array<{ expenseDate: string; amount: string | number; description?: string | null }>;
 }): AdmissionBillingBreakdown {
   const segmentExpenses = (input.extraExpenses ?? []).filter((expense) =>
@@ -105,8 +172,8 @@ export function computeBranchStaySegmentBilling(input: {
     amountPerDay: input.amountPerDay,
     careTakerRatePerDay: input.careTakerRatePerDay,
     careTakerDaysOverride: input.careTakerDaysOverride,
-    deductionType: null,
-    deductionValue: 0,
+    deductionType: input.deductionType ?? null,
+    deductionValue: input.deductionValue ?? 0,
     extraExpenses: segmentExpenses,
   });
 }

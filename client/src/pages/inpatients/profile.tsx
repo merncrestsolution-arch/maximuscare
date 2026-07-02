@@ -21,10 +21,14 @@ import {
   computeBalanceDue,
   computeDeductionAmount,
   computeStayDays,
+  computeTransferStayPaymentAllocation,
   CARRIED_FORWARD_CREDIT_MARKER,
+  deductionFieldsForSegment,
   isCarriedForwardCredit,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
+  resolveDeductionSegmentIndex,
+  TRANSFER_BALANCE_MARKER,
 } from "@shared/inpatientBilling";
 import { useToast } from "@/hooks/use-toast";
 import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense, InPatientPreviousSession, InPatientPriorEpisode } from "@/lib/types";
@@ -790,8 +794,21 @@ export default function InPatientProfilePage() {
   })();
   const deductionType = (patient as any).deductionType as "fixed" | "percentage" | null;
   const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
+  const deductionSegment = resolveDeductionSegmentIndex(
+    (patient as any).deductionAppliedAt ?? null,
+    patient.admitDate,
+    transferLogsAsc.map((transfer) => ({ transferDate: String(transfer.transferDate) })),
+  );
+  const currentSegmentDeduction = deductionFieldsForSegment(
+    deductionSegment,
+    "current",
+    deductionType,
+    deductionValue,
+  );
   const deductionLabel =
-    deductionType === "percentage" ? `Deduction (${deductionValue}%)` : "Deduction";
+    currentSegmentDeduction.deductionType === "percentage"
+      ? `Deduction (${currentSegmentDeduction.deductionValue}%)`
+      : "Deduction";
 
   // Apply prior overpayment credit on current bill (from carried-forward expense or live prior episode).
   const billingExtraExpenses = (() => {
@@ -825,8 +842,8 @@ export default function InPatientProfilePage() {
     amountPerDay: patient.amountPerDay,
     careTakerRatePerDay: patient.careTakerRatePerDay,
     careTakerDaysOverride: patient.careTakerDaysOverride,
-    deductionType,
-    deductionValue,
+    deductionType: currentSegmentDeduction.deductionType,
+    deductionValue: currentSegmentDeduction.deductionValue,
     extraExpenses: billingExtraExpenses,
   });
   const {
@@ -856,8 +873,29 @@ export default function InPatientProfilePage() {
   const carriedForwardExpenses = billingExtraExpenses.filter(isCarriedForwardExpense);
   const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
   const hasCurrentDeduction = currentDeductionAmount > 0;
-  const hasDeduction = currentDeductionAmount > 0;
-  const balanceSummary = computeAdmissionBalanceSummary(breakdown, paymentTotal);
+  const hasAdmissionDeduction = Boolean(deductionType && deductionValue > 0);
+  const hasDeduction = hasAdmissionDeduction;
+
+  const priorTransferEpisodes = priorEpisodes
+    .filter((episode) => episode.episodeType === "transfer")
+    .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
+  const transferCarriedForwardDebt = (extraExpenses ?? [])
+    .filter((expense) => String(expense.description || "").toLowerCase().includes(TRANSFER_BALANCE_MARKER))
+    .reduce((sum, expense) => sum + Math.max(0, parseFloat(String(expense.amount)) || 0), 0);
+  const transferPaymentAllocation =
+    hasTransferHistory && priorTransferEpisodes.length > 0
+      ? computeTransferStayPaymentAllocation({
+          priorSegmentGrandTotals: priorTransferEpisodes.map((episode) => episode.grandTotal ?? 0),
+          currentSegmentGrandTotal: currentGrandTotal,
+          paymentTotal,
+        })
+      : null;
+  const effectivePaymentTotal =
+    transferPaymentAllocation && transferCarriedForwardDebt <= 0
+      ? transferPaymentAllocation.currentSegmentPaid
+      : paymentTotal;
+
+  const balanceSummary = computeAdmissionBalanceSummary(breakdown, effectivePaymentTotal);
   const {
     currentEpisodePaid,
     priorBalancePaid,
@@ -911,7 +949,7 @@ export default function InPatientProfilePage() {
   const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode, index) => {
     return sum + getPriorEpisodeBilling(episode, index).pending;
   }, 0);
-  const dischargeBalance = discharge ? computeBalanceDue(grandTotal, paymentTotal) : 0;
+  const dischargeBalance = discharge ? computeBalanceDue(grandTotal, effectivePaymentTotal) : 0;
   const pastDueAdmission = dischargeBalance > 0 ? dischargeBalance : 0;
   const pastDueOutpatient = Math.max(0, Number(linkedPatientStats?.outstandingAmount ?? 0));
   const totalPastDue = pastDueAdmission + pastDueOutpatient;
@@ -1020,13 +1058,32 @@ export default function InPatientProfilePage() {
           ? [{ item: "Previous Overpayment Credit Applied", quantity: "-", rate: "-", amount: `-${formatMoney(carriedForwardCreditApplied)}` }]
           : []),
         { item: "Total Bill", quantity: "-", rate: "-", amount: formatMoney(grandTotal) },
-        ...(hasCarriedForwardBalance
+        ...(transferPaymentAllocation
+          ? [
+              ...(transferPaymentAllocation.priorSegmentsPaid > 0
+                ? [{
+                    item: "Paid toward previous branch",
+                    quantity: "-",
+                    rate: "-",
+                    amount: formatMoney(transferPaymentAllocation.priorSegmentsPaid),
+                  }]
+                : []),
+              {
+                item: "Paid toward current stay",
+                quantity: "-",
+                rate: "-",
+                amount: formatMoney(transferPaymentAllocation.currentSegmentPaid),
+              },
+            ]
+          : hasCarriedForwardBalance
           ? [
               { item: "Paid toward previous due", quantity: "-", rate: "-", amount: formatMoney(priorBalancePaid) },
               { item: "Paid toward current stay", quantity: "-", rate: "-", amount: formatMoney(currentEpisodePaid) },
             ]
           : []),
-        { item: "Total Payments Recorded", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
+        ...(!transferPaymentAllocation
+          ? [{ item: "Total Payments Recorded", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) }]
+          : []),
         ...(overpaymentCredit > 0
           ? [{ item: "Overpayment / Credit", quantity: "-", rate: "-", amount: formatMoney(overpaymentCredit) }]
           : []),
@@ -1621,7 +1678,24 @@ export default function InPatientProfilePage() {
                     </BillingSection>
 
                     <BillingSection title="Payments" variant="payments">
-                      {hasCarriedForwardBalance && (
+                      {transferPaymentAllocation ? (
+                        <>
+                          {transferPaymentAllocation.priorSegmentsPaid > 0 && (
+                            <BillingLine
+                              label="Paid toward previous branch"
+                              value={`LKR ${formatMoney(transferPaymentAllocation.priorSegmentsPaid)}`}
+                              tone="success"
+                              testId="text-prior-branch-paid"
+                            />
+                          )}
+                          <BillingLine
+                            label="Paid toward current stay"
+                            value={`LKR ${formatMoney(transferPaymentAllocation.currentSegmentPaid)}`}
+                            tone="success"
+                            testId="text-current-stay-paid"
+                          />
+                        </>
+                      ) : hasCarriedForwardBalance ? (
                         <>
                           <BillingLine
                             label="Paid toward previous admission"
@@ -1634,13 +1708,14 @@ export default function InPatientProfilePage() {
                             tone="success"
                           />
                         </>
+                      ) : (
+                        <BillingLine
+                          label="Total Payments Recorded"
+                          value={`LKR ${formatMoney(paymentTotal)}`}
+                          tone="success"
+                          testId="text-total-paid"
+                        />
                       )}
-                      <BillingLine
-                        label="Total Payments Recorded"
-                        value={`LKR ${formatMoney(paymentTotal)}`}
-                        tone="success"
-                        testId="text-total-paid"
-                      />
                       {overpaymentCredit > 0 && (
                         <BillingLine
                           label="Overpayment / Credit"
@@ -1761,7 +1836,11 @@ export default function InPatientProfilePage() {
                     value={`LKR ${formatMoney(grandTotal)}`}
                     emphasized
                   />
-                  <BillingLine label="Amount Paid" value={`LKR ${formatMoney(paymentTotal)}`} tone="success" />
+                  <BillingLine
+                    label="Amount Paid"
+                    value={`LKR ${formatMoney(transferPaymentAllocation ? transferPaymentAllocation.currentSegmentPaid : effectivePaymentTotal)}`}
+                    tone="success"
+                  />
                   <div className="mt-2">
                     <DueBalanceBanner due={dischargeBalance} testId="text-discharge-balance" />
                   </div>
@@ -2093,11 +2172,25 @@ export default function InPatientProfilePage() {
 
             <div className="bg-white rounded-lg p-3 mb-4 border">
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Payment Done (Total):</span>
+                <span className="text-muted-foreground">
+                  {transferPaymentAllocation ? "Paid toward current stay:" : "Payment Done (Total):"}
+                </span>
                 <span className="font-bold text-lg text-green-700" data-testid="text-payment-total">
-                  LKR {paymentTotal.toLocaleString()}
+                  LKR{" "}
+                  {(transferPaymentAllocation
+                    ? transferPaymentAllocation.currentSegmentPaid
+                    : paymentTotal
+                  ).toLocaleString()}
                 </span>
               </div>
+              {transferPaymentAllocation && transferPaymentAllocation.priorSegmentsPaid > 0 && (
+                <div className="mt-2 flex justify-between items-center text-sm text-muted-foreground">
+                  <span>Paid toward previous branch:</span>
+                  <span className="font-medium text-green-700 tabular-nums">
+                    LKR {transferPaymentAllocation.priorSegmentsPaid.toLocaleString()}
+                  </span>
+                </div>
+              )}
             </div>
 
             {payments && payments.length > 0 && (
@@ -2626,18 +2719,30 @@ export default function InPatientProfilePage() {
               />
               {(() => {
                 const v = parseFloat(deductionForm.deductionValue) || 0;
+                const priorTransferEpisodes = priorEpisodes
+                  .filter((episode) => episode.episodeType === "transfer")
+                  .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
+                const deductionPreviewSubtotal =
+                  deductionSegment === "current"
+                    ? currentSubtotal
+                    : priorTransferEpisodes[deductionSegment as number]?.breakdown?.subtotal ?? currentSubtotal;
                 const preview = computeDeductionAmount(
-                  currentSubtotal,
+                  deductionPreviewSubtotal,
                   deductionForm.deductionType,
                   v,
                 );
                 if (v <= 0) return null;
-                const newCurrentTotal = Math.max(0, currentSubtotal - preview);
-                const newTotalBill = newCurrentTotal + carriedForwardTotal;
+                const previewLabel =
+                  deductionSegment === "current" ? "Current stay" : "Prior branch stay";
+                const newSegmentTotal = Math.max(0, deductionPreviewSubtotal - preview);
+                const newTotalBill =
+                  deductionSegment === "current"
+                    ? newSegmentTotal + carriedForwardTotal
+                    : grandTotal - preview;
                 return (
                   <p className="text-xs text-muted-foreground" data-testid="text-deduction-preview">
-                    Deduction: - LKR {formatMoney(preview)} → Current stay: LKR {formatMoney(newCurrentTotal)}
-                    {hasCarriedForwardBalance
+                    Deduction: - LKR {formatMoney(preview)} → {previewLabel}: LKR {formatMoney(newSegmentTotal)}
+                    {deductionSegment === "current" && hasCarriedForwardBalance
                       ? ` → Total bill: LKR ${formatMoney(newTotalBill)}`
                       : null}
                   </p>

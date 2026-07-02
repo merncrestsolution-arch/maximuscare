@@ -439,4 +439,50 @@ describe("inPatientAdmissionService", () => {
     ]);
     expect(pending).toBeGreaterThan(0);
   });
+
+  it("includes pre-transfer deduction on the prior branch billing episode", async () => {
+    const storage = {
+      getInPatientAdmission: async (id: string) =>
+        id === "current"
+          ? ({
+              id: "current",
+              patientId: "p1",
+              admitDate: "2024-06-01",
+              status: "Admitted",
+              branchId: "branch-b",
+              amountPerDay: "1000",
+              careTakerRatePerDay: "0",
+              careTakerDaysOverride: null,
+              deductionType: "fixed",
+              deductionValue: "500",
+              deductionReason: "Staff discount",
+              deductionAppliedAt: new Date("2024-06-08"),
+            } as any)
+          : undefined,
+      getPatientTransferLogsByAdmission: async () => [
+        {
+          id: "t1",
+          admissionId: "current",
+          fromBranchId: "branch-dehiwala",
+          toBranchId: "branch-neuro",
+          transferDate: "2024-06-10",
+        },
+      ],
+      getPaymentTotalByAdmission: async () => 0,
+      getInPatientExtraExpensesByAdmission: async () => [],
+      getInPatientSessionsByAdmission: async () => [],
+      getAllBranches: async () => [
+        { id: "branch-dehiwala", branchName: "Dehiwala", name: "Dehiwala Branch" },
+        { id: "branch-neuro", branchName: "Neuro", name: "Neuro Unit" },
+      ],
+      getInPatientDischargeByAdmission: async () => undefined,
+    };
+
+    const episodes = await getTransferPriorBillingEpisodes(storage as any, "current");
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].branchName).toBe("Dehiwala");
+    expect(episodes[0].breakdown?.deductionAmount).toBe(500);
+    expect(episodes[0].breakdown?.deductionReason).toBe("Staff discount");
+    expect(episodes[0].grandTotal).toBe(10_000 - 500);
+  });
 });

@@ -9,8 +9,11 @@ import {
   computeTotalPendingBalance,
   buildDischargeBillLines,
   computeAdmissionBillingBreakdown,
+  computeBranchStaySegmentBilling,
+  computeTransferStayPaymentAllocation,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
+  resolveDeductionSegmentIndex,
   splitReAdmissionPayments,
   sumCarriedForwardAmounts,
 } from "../../shared/inpatientBilling";
@@ -207,5 +210,57 @@ describe("inpatientBilling", () => {
       "a1",
     ]);
     expect(parseReadmitAdmissionSource("readmit:a1")).toBe("a1");
+  });
+
+  it("attributes deduction to the closed branch segment when applied before transfer", () => {
+    const transfers = [{ transferDate: "2026-06-10" }];
+    expect(resolveDeductionSegmentIndex("2026-06-08", "2026-06-01", transfers)).toBe(0);
+    expect(resolveDeductionSegmentIndex("2026-06-10", "2026-06-01", transfers)).toBe(0);
+    expect(resolveDeductionSegmentIndex("2026-06-11", "2026-06-01", transfers)).toBe("current");
+    expect(resolveDeductionSegmentIndex(null, "2026-06-01", transfers)).toBe(0);
+    expect(resolveDeductionSegmentIndex("2026-06-08", "2026-06-01", [])).toBe("current");
+  });
+
+  it("applies deduction only to the owning transfer segment", () => {
+    const breakdown = computeBranchStaySegmentBilling({
+      admitDate: "2026-06-01",
+      endDate: "2026-06-10",
+      amountPerDay: 1000,
+      careTakerRatePerDay: 0,
+      deductionType: "fixed",
+      deductionValue: 500,
+    });
+    expect(breakdown.stayDays).toBe(10);
+    expect(breakdown.deductionAmount).toBe(500);
+    expect(breakdown.grandTotal).toBe(10_000 - 500);
+
+    const without = computeBranchStaySegmentBilling({
+      admitDate: "2026-06-01",
+      endDate: "2026-06-10",
+      amountPerDay: 1000,
+      careTakerRatePerDay: 0,
+    });
+    expect(without.deductionAmount).toBe(0);
+    expect(without.grandTotal).toBe(10_000);
+  });
+
+  it("allocates payments to prior branch stays before the current stay", () => {
+    const allocation = computeTransferStayPaymentAllocation({
+      priorSegmentGrandTotals: [10_000],
+      currentSegmentGrandTotal: 3000,
+      paymentTotal: 5000,
+    });
+    expect(allocation.priorSegmentsPaid).toBe(5000);
+    expect(allocation.currentSegmentPaid).toBe(0);
+    expect(allocation.currentSegmentPending).toBe(3000);
+
+    const fullyPaidPrior = computeTransferStayPaymentAllocation({
+      priorSegmentGrandTotals: [10_000],
+      currentSegmentGrandTotal: 3000,
+      paymentTotal: 12_000,
+    });
+    expect(fullyPaidPrior.priorSegmentsPaid).toBe(10_000);
+    expect(fullyPaidPrior.currentSegmentPaid).toBe(2000);
+    expect(fullyPaidPrior.currentSegmentPending).toBe(1000);
   });
 });

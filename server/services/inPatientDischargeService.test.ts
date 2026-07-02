@@ -53,6 +53,7 @@ describe("inPatientDischargeService", () => {
         },
       ],
       getAllBranches: async () => [{ id: "b1", name: "Dehiwala" }],
+      getPatientTransferLogsByAdmission: async () => [],
     };
 
     const summary = await buildInPatientDischargeSummary(storage as any, "a1", "2026-07-03");
@@ -89,6 +90,7 @@ describe("inPatientDischargeService", () => {
         { id: "p1", paymentDate: "2026-07-06", amount: "5000", paymentMode: "Cash", notes: null },
       ],
       getAllBranches: async () => [{ id: "b1", name: "Dehiwala" }],
+      getPatientTransferLogsByAdmission: async () => [],
     };
 
     const summary = await buildInPatientDischargeSummary(storage as any, "a2", "2026-07-07");
