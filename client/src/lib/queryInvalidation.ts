@@ -40,6 +40,7 @@ export function invalidateInPatientQueries(queryClient: QueryClient, admissionId
       ["inpatients", admissionId, "sessions"],
       ["inpatients", admissionId, "sessions", "previous"],
       ["inpatients", admissionId, "prior-episodes"],
+      ["inpatients", admissionId, "billing-summary"],
       ["inpatients", admissionId, "discharge"],
       ["inpatients", admissionId, "discharge-summary"],
       ["inpatients", admissionId, "payments"],

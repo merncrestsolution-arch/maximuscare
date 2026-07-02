@@ -473,6 +473,14 @@ export function useInPatientPriorEpisodes(admissionId: string, enabled = true) {
   });
 }
 
+export function useInPatientBillingSummary(admissionId: string, enabled = true, asOfDate?: string) {
+  return useQuery({
+    queryKey: ['inpatients', admissionId, 'billing-summary', asOfDate ?? ''],
+    queryFn: () => inPatientApi.getBillingSummary(admissionId, asOfDate),
+    enabled: !!admissionId && enabled,
+  });
+}
+
 export function useNextSessionNumber(admissionId: string, date: string) {
   return useQuery({
     queryKey: ['inpatients', admissionId, 'sessions', 'next-number', date],

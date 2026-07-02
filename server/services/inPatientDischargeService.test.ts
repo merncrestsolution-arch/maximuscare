@@ -54,6 +54,20 @@ describe("inPatientDischargeService", () => {
       ],
       getAllBranches: async () => [{ id: "b1", name: "Dehiwala" }],
       getPatientTransferLogsByAdmission: async () => [],
+      getInPatientDischargeByAdmission: async () => null,
+      getAllInPatientAdmissions: async () => [
+        {
+          id: "a1",
+          patientCode: "P001",
+          branchId: "b1",
+          admitDate: "2026-07-01",
+          status: "Admitted",
+          amountPerDay: "1000",
+        },
+      ],
+      getInPatientAdmissionsForPatient: async () => [],
+      getPaymentTotalByAdmission: async () => 0,
+      getInPatientSessionsByAdmission: async () => [],
     };
 
     const summary = await buildInPatientDischargeSummary(storage as any, "a1", "2026-07-03");
@@ -63,39 +77,105 @@ describe("inPatientDischargeService", () => {
     expect(summary?.inpatient.branchName).toBe("Dehiwala");
   });
 
-  it("separates carried-forward balance on discharge bill lines", async () => {
+  it("separates previous stay balance on discharge bill lines", async () => {
     const storage = {
-      getInPatientAdmission: async () => ({
-        id: "a2",
-        patientName: "Re-admit Patient",
-        patientCode: "P002",
-        admitDate: "2026-07-05",
-        branchId: "b1",
-        condition: "Stroke",
-        packageType: "Non-AC Room",
-        amountPerDay: "1000",
-        careTakerRatePerDay: "0",
-        careTakerDaysOverride: null,
-        deductionType: null,
-        deductionValue: "0",
-        deductionReason: null,
-      }),
-      getInPatientExtraExpensesByAdmission: async () => [
-        {
-          description: "Previous admission balance carried forward (discharged 2026-07-04)",
-          amount: "4000",
-        },
-      ],
+      getInPatientAdmission: async (id: string) => {
+        if (id === "a2") {
+          return {
+            id: "a2",
+            patientName: "Re-admit Patient",
+            patientCode: "P002",
+            patientId: "p2",
+            admitDate: "2026-07-05",
+            branchId: "b1",
+            condition: "Stroke",
+            packageType: "Non-AC Room",
+            amountPerDay: "1000",
+            careTakerRatePerDay: "0",
+            careTakerDaysOverride: null,
+            deductionType: null,
+            deductionValue: "0",
+            deductionReason: null,
+            admissionSource: "readmit:prior",
+          };
+        }
+        if (id === "prior") {
+          return {
+            id: "prior",
+            patientName: "Re-admit Patient",
+            patientCode: "P002",
+            patientId: "p2",
+            admitDate: "2026-07-01",
+            branchId: "b1",
+            status: "Discharged",
+            amountPerDay: "1000",
+            careTakerRatePerDay: "0",
+            careTakerDaysOverride: null,
+            deductionType: null,
+            deductionValue: "0",
+          };
+        }
+        return undefined;
+      },
+      getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientPaymentsByAdmission: async () => [
         { id: "p1", paymentDate: "2026-07-06", amount: "5000", paymentMode: "Cash", notes: null },
       ],
       getAllBranches: async () => [{ id: "b1", name: "Dehiwala" }],
       getPatientTransferLogsByAdmission: async () => [],
+      getInPatientDischargeByAdmission: async (id: string) =>
+        id === "prior" ? ({ dischargeDate: "2026-07-04" } as any) : null,
+      getAllInPatientAdmissions: async () => [
+        {
+          id: "prior",
+          patientCode: "P002",
+          patientId: "p2",
+          branchId: "b1",
+          admitDate: "2026-07-01",
+          status: "Discharged",
+          amountPerDay: "1000",
+        },
+        {
+          id: "a2",
+          patientCode: "P002",
+          patientId: "p2",
+          branchId: "b1",
+          admitDate: "2026-07-05",
+          status: "Admitted",
+          amountPerDay: "1000",
+          admissionSource: "readmit:prior",
+        },
+      ],
+      getInPatientAdmissionsForPatient: async () => [
+        {
+          id: "prior",
+          patientCode: "P002",
+          patientId: "p2",
+          branchId: "b1",
+          admitDate: "2026-07-01",
+          status: "Discharged",
+          amountPerDay: "1000",
+        },
+        {
+          id: "a2",
+          patientCode: "P002",
+          patientId: "p2",
+          branchId: "b1",
+          admitDate: "2026-07-05",
+          status: "Admitted",
+          amountPerDay: "1000",
+          admissionSource: "readmit:prior",
+        },
+      ],
+      getPaymentTotalByAdmission: async (id: string) => (id === "prior" ? 0 : 0),
+      getInPatientSessionsByAdmission: async () => [],
     };
 
     const summary = await buildInPatientDischargeSummary(storage as any, "a2", "2026-07-07");
-    expect(summary?.billLines.some((line) => line.description === "Previous Admission Balance")).toBe(true);
+    expect(summary?.billLines.some((line) => line.description === "Previous Stay Balance Due")).toBe(true);
     expect(summary?.totalBill).toBe(1000 * 3 + 4000);
     expect(summary?.due).toBe(2000);
+    expect(summary?.priorBalancePaid).toBe(4000);
+    expect(summary?.currentBalancePaid).toBe(1000);
   });
 });

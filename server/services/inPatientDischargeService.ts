@@ -1,20 +1,11 @@
-import type { InPatientAdmission } from "@shared/schema";
 import type { IStorage } from "../storage";
 import { clinicDateString } from "../clinicTime";
 import {
-  applyLiveTransferCarriedForward,
   buildDischargeBillLines,
-  computeAdmissionBalanceSummary,
-  computeAdmissionBillingBreakdown,
-  computeBalanceDue,
   computeStayDays,
-  getPaymentsForCurrentStay,
-  isCarriedForwardExpense,
-  resolveSegmentDeductionFields,
-  sumPaymentAmounts,
   type DischargeBillLine,
 } from "@shared/inpatientBilling";
-import { getTransferPriorBillingEpisodes } from "./inPatientAdmissionService";
+import { calculateAdmissionBilling } from "./inPatientBillingService";
 
 export type DischargeSummaryPayment = {
   id: string;
@@ -51,6 +42,13 @@ export type InPatientDischargeSummary = {
   deductionType: "fixed" | "percentage" | null;
   deductionValue: number;
   deductionReason: string | null;
+  previousPendingTotal: number;
+  previousDeductionTotal: number;
+  currentChargesTotal: number;
+  priorBalancePaid: number;
+  currentBalancePaid: number;
+  priorBalanceRemaining: number;
+  currentBalanceRemaining: number;
 };
 
 function normalizePaymentMode(method?: string | null): string {
@@ -61,121 +59,50 @@ function normalizePaymentMode(method?: string | null): string {
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
-function admissionDeductionFields(admission: InPatientAdmission) {
-  return {
-    deductionType: (admission as { deductionType?: "fixed" | "percentage" | null }).deductionType ?? null,
-    deductionValue:
-      parseFloat(String((admission as { deductionValue?: string | null }).deductionValue ?? 0)) || 0,
-    deductionReason: (admission as { deductionReason?: string | null }).deductionReason ?? null,
-  };
-}
-
 export async function buildInPatientDischargeSummary(
   storage: IStorage,
   admissionId: string,
   dischargeDate?: string,
 ): Promise<InPatientDischargeSummary | null> {
+  const endDate = dischargeDate?.split("T")[0] || clinicDateString();
+  const billing = await calculateAdmissionBilling(storage, admissionId, { asOfDate: endDate });
+  if (!billing) return null;
+
   const admission = await storage.getInPatientAdmission(admissionId);
   if (!admission) return null;
 
-  const endDate = dischargeDate?.split("T")[0] || clinicDateString();
-  const [extraExpenses, payments, branches, transfers, transferPriorEpisodes] = await Promise.all([
-    storage.getInPatientExtraExpensesByAdmission(admissionId),
-    storage.getInPatientPaymentsByAdmission(admissionId),
-    storage.getAllBranches(),
-    storage.getPatientTransferLogsByAdmission(admissionId),
-    getTransferPriorBillingEpisodes(storage, admissionId),
-  ]);
-
-  const transferLogsAsc = [...transfers].sort((left, right) =>
-    String(left.transferDate).localeCompare(String(right.transferDate)),
-  );
-  const billingSegmentStartDate =
-    transferLogsAsc.length > 0
-      ? String(transferLogsAsc[transferLogsAsc.length - 1].transferDate).split("T")[0]
-      : admission.admitDate;
-  const scopedExtraExpenses =
-    transferLogsAsc.length === 0
-      ? extraExpenses
-      : extraExpenses.filter((expense) => {
-          if (isCarriedForwardExpense(expense)) return true;
-          const day = String(expense.expenseDate).split("T")[0];
-          return day >= billingSegmentStartDate;
-        });
-
-  const deduction = admissionDeductionFields(admission);
-  const transferDates = transferLogsAsc.map((transfer) => ({ transferDate: String(transfer.transferDate) }));
-  const currentSegmentDeduction = resolveSegmentDeductionFields(
-    {
-      admitDate: admission.admitDate,
-      deductionType: deduction.deductionType,
-      deductionValue: deduction.deductionValue,
-      deductionReason: deduction.deductionReason,
-      deductionAppliedAt: (admission as { deductionAppliedAt?: Date | string | null }).deductionAppliedAt ?? null,
-      currentDeductionType: (admission as { currentDeductionType?: "fixed" | "percentage" | null }).currentDeductionType,
-      currentDeductionValue: (admission as { currentDeductionValue?: string | null }).currentDeductionValue,
-      currentDeductionReason: (admission as { currentDeductionReason?: string | null }).currentDeductionReason,
-    },
-    transferDates,
-    "current",
-  );
-
-  const priorTransferEpisodes = transferPriorEpisodes
-    .filter((episode) => episode.episodeType === "transfer")
-    .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
-  const liveTransferPendingBalance =
-    transferLogsAsc.length > 0 && priorTransferEpisodes.length > 0
-      ? priorTransferEpisodes[priorTransferEpisodes.length - 1]?.pendingBalance ?? 0
-      : null;
-  const branchNameById = new Map(
-    branches.map((branch) => [branch.id, branch.branchName ?? branch.name ?? "Unknown"]),
-  );
-  const billingExtraExpenses = applyLiveTransferCarriedForward({
-    expenses: scopedExtraExpenses,
-    transferLogs: transferLogsAsc.map((transfer) => ({
-      transferDate: String(transfer.transferDate),
-      fromBranchName: transfer.fromBranchId
-        ? branchNameById.get(transfer.fromBranchId) ?? null
-        : null,
-    })),
-    priorTransferPendingBalance: liveTransferPendingBalance,
-  });
-
-  const breakdown = computeAdmissionBillingBreakdown({
-    admitDate: billingSegmentStartDate,
-    endDate,
-    amountPerDay: admission.amountPerDay,
-    careTakerRatePerDay: admission.careTakerRatePerDay,
-    careTakerDaysOverride: admission.careTakerDaysOverride,
-    deductionType: currentSegmentDeduction.deductionType,
-    deductionValue: currentSegmentDeduction.deductionValue,
-    extraExpenses: billingExtraExpenses,
-  });
-
+  const branches = await storage.getAllBranches();
   const amountPerDay = parseFloat(String(admission.amountPerDay)) || 0;
   const careTakerRatePerDay = parseFloat(String(admission.careTakerRatePerDay ?? 0)) || 0;
-  const billLines = buildDischargeBillLines(breakdown, {
-    amountPerDay,
-    careTakerRatePerDay,
-    packageType: admission.packageType,
-    deductionType: currentSegmentDeduction.deductionType,
-    deductionValue: currentSegmentDeduction.deductionValue,
-  });
-
-  const paymentTotal = payments.reduce((sum, payment) => sum + (parseFloat(String(payment.amount)) || 0), 0);
-  const currentStayPaymentTotal =
-    transferLogsAsc.length > 0
-      ? sumPaymentAmounts(getPaymentsForCurrentStay(payments, transferLogsAsc))
-      : paymentTotal;
-  const billPaymentTotal = transferLogsAsc.length > 0 ? currentStayPaymentTotal : paymentTotal;
-  const due =
-    breakdown.carriedForwardDebt > 0 || breakdown.carriedForwardCreditApplied > 0
-      ? computeAdmissionBalanceSummary(breakdown, billPaymentTotal).totalBalanceDue
-      : computeBalanceDue(breakdown.grandTotal, billPaymentTotal);
-
   const branchName = admission.branchId
     ? (branches.find((branch) => branch.id === admission.branchId)?.name ?? null)
     : null;
+
+  const billLines = buildDischargeBillLines(billing.currentBreakdown, {
+    amountPerDay,
+    careTakerRatePerDay,
+    packageType: admission.packageType,
+    deductionType: billing.currentBilling.deductionType,
+    deductionValue: billing.currentBilling.deductionValue,
+  });
+
+  if (billing.previousBilling.totalPending > 0) {
+    billLines.splice(billLines.findIndex((line) => line.description === "Extra Expenses") >= 0
+      ? billLines.findIndex((line) => line.description === "Extra Expenses")
+      : billLines.length, 0, {
+      description: "Previous Stay Balance Due",
+      quantity: "-",
+      rate: null,
+      amount: billing.previousBilling.totalPending,
+    });
+  } else if (billing.previousBilling.totalPending < 0) {
+    billLines.push({
+      description: "Previous Overpayment Credit Applied",
+      quantity: "-",
+      rate: null,
+      amount: billing.previousBilling.totalPending,
+    });
+  }
 
   return {
     inpatient: {
@@ -191,25 +118,32 @@ export async function buildInPatientDischargeSummary(
     },
     dischargeDate: endDate,
     billLines,
-    totalDays: breakdown.stayDays,
-    totalBill: breakdown.grandTotal,
-    subtotal: breakdown.subtotal,
-    deductionAmount: breakdown.deductionAmount,
-    payments: payments.map((payment) => ({
+    totalDays: billing.currentBilling.stayDays,
+    totalBill: billing.totals.totalBill,
+    subtotal: billing.currentBilling.subtotal + billing.previousBilling.totalPending,
+    deductionAmount: billing.currentBilling.deductionAmount,
+    payments: billing.currentBilling.payments.map((payment) => ({
       id: payment.id,
       date: payment.paymentDate,
       method: payment.paymentMode,
-      amount: parseFloat(String(payment.amount)) || 0,
+      amount: payment.amount,
       notes: payment.notes,
     })),
-    totalPaid: paymentTotal,
-    due,
-    stayAmount: breakdown.roomCharges,
-    caretakerTotal: breakdown.caretakerCharges,
-    extraExpenseTotal: breakdown.extraExpenseTotal,
-    deductionType: currentSegmentDeduction.deductionType,
-    deductionValue: currentSegmentDeduction.deductionValue,
-    deductionReason: currentSegmentDeduction.deductionReason,
+    totalPaid: billing.totals.totalPaid,
+    due: billing.totals.totalBalanceDue,
+    stayAmount: billing.currentBilling.roomCharges,
+    caretakerTotal: billing.currentBilling.caretakerCharges,
+    extraExpenseTotal: billing.currentBilling.otherCharges,
+    deductionType: billing.currentBilling.deductionType,
+    deductionValue: billing.currentBilling.deductionValue ?? 0,
+    deductionReason: billing.currentBilling.deductionReason,
+    previousPendingTotal: billing.previousBilling.totalPending,
+    previousDeductionTotal: billing.previousBilling.totalDeduction,
+    currentChargesTotal: billing.currentBilling.chargesTotal,
+    priorBalancePaid: billing.totals.priorBalancePaid,
+    currentBalancePaid: billing.totals.currentBalancePaid,
+    priorBalanceRemaining: billing.totals.priorBalanceRemaining,
+    currentBalanceRemaining: billing.totals.currentBalanceRemaining,
   };
 }
 

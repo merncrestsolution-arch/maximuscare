@@ -670,6 +670,10 @@ export const inPatientApi = {
     apiRequest<any[]>(`/inpatients/${admissionId}/sessions/previous`),
   getPriorEpisodes: (admissionId: string) =>
     apiRequest<any[]>(`/inpatients/${admissionId}/prior-episodes`),
+  getBillingSummary: (admissionId: string, asOfDate?: string) => {
+    const qs = asOfDate ? `?asOfDate=${encodeURIComponent(asOfDate)}` : "";
+    return apiRequest<any>(`/inpatients/${admissionId}/billing-summary${qs}`);
+  },
   getNextSessionNumber: (admissionId: string, date: string) =>
     apiRequest<{ nextSessionNumber: number }>(`/inpatients/${admissionId}/sessions/next-number?date=${date}`),
   createSession: (admissionId: string, data: any) => 

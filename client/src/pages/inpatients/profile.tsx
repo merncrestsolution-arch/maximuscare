@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats, useTransferBranches, useBranches } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientBillingSummary, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats, useTransferBranches, useBranches } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -16,27 +16,26 @@ import { formatMoney } from "@/lib/reportDatePresets";
 import { clinicTodayString } from "@/lib/utils";
 import { getDueDisplay } from "@/lib/paymentStatus";
 import {
-  applyLiveTransferCarriedForward,
-  computeAdmissionBalanceSummary,
-  computeAdmissionBillingBreakdown,
-  computeBalanceDue,
   computeDeductionAmount,
-  computeStayDays,
-  CARRIED_FORWARD_CREDIT_MARKER,
   formatInpatientPaymentTimestamp,
-  getPaymentsForCurrentStay,
   getPaymentsForPriorTransferStays,
-  isCarriedForwardCredit,
   isCarriedForwardExpense,
   isTransferCarriedForwardExpense,
   isTransferCarriedForwardCredit,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
-  resolveSegmentDeductionFields,
   sumPaymentAmounts,
 } from "@shared/inpatientBilling";
 import { useToast } from "@/hooks/use-toast";
-import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense, InPatientPreviousSession, InPatientPriorEpisode } from "@/lib/types";
+import type {
+  InPatientSession,
+  InPatientDischarge,
+  InPatientPayment,
+  InPatientExtraExpense,
+  InPatientPreviousSession,
+  InPatientPriorEpisode,
+  AdmissionBillingView,
+} from "@/lib/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -169,6 +168,10 @@ export default function InPatientProfilePage() {
   const { data: previousSessions = [] } = useInPatientPreviousSessions(patientId, !!patient);
   const { data: priorEpisodes = [] } = useInPatientPriorEpisodes(patientId, !!patient);
   const { data: discharge } = useInPatientDischarge(patientId);
+  const billingEndDate = discharge
+    ? String(discharge.dischargeDate).split("T")[0]
+    : clinicTodayString();
+  const { data: billingView } = useInPatientBillingSummary(patientId, !!patient, billingEndDate);
   const { data: payments } = useInPatientPayments(patientId);
   const { data: paymentTotalData } = useInPatientPaymentTotal(patientId);
   const { data: extraExpenses } = useInPatientExtraExpenses(patientId);
@@ -795,16 +798,8 @@ export default function InPatientProfilePage() {
     right.admitDate.localeCompare(left.admitDate),
   );
 
-  const billingEndDate = discharge
-    ? String(discharge.dischargeDate).split("T")[0]
-    : clinicTodayString();
   const transferLogsAsc = [...(transferLogs as any[])].sort((left, right) =>
     String(left.transferDate).localeCompare(String(right.transferDate)),
-  );
-  const currentStayPayments = getPaymentsForCurrentStay(payments ?? [], transferLogsAsc).sort(
-    (left, right) =>
-      new Date(right.createdAt ?? right.paymentDate).getTime() -
-      new Date(left.createdAt ?? left.paymentDate).getTime(),
   );
   const priorStayPayments = hasTransferHistory
     ? getPaymentsForPriorTransferStays(payments ?? [], transferLogsAsc).sort(
@@ -813,20 +808,7 @@ export default function InPatientProfilePage() {
           new Date(left.createdAt ?? left.paymentDate).getTime(),
       )
     : [];
-  const currentStayPaymentTotal = sumPaymentAmounts(currentStayPayments);
-  const billingSegmentStartDate =
-    transferLogsAsc.length > 0
-      ? String(transferLogsAsc[transferLogsAsc.length - 1].transferDate).split("T")[0]
-      : patient.admitDate;
-  const scopedExtraExpenses = (() => {
-    const rows = extraExpenses ?? [];
-    if (transferLogsAsc.length === 0) return rows;
-    return rows.filter((expense) => {
-      if (isCarriedForwardExpense(expense)) return true;
-      const day = String(expense.expenseDate).split("T")[0];
-      return day >= billingSegmentStartDate;
-    });
-  })();
+
   const deductionType = (patient as any).deductionType as "fixed" | "percentage" | null;
   const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
   const admissionDeductionSource = {
@@ -845,180 +827,89 @@ export default function InPatientProfilePage() {
     patient.admitDate,
     transferDates,
   );
-  const currentSegmentDeduction = resolveSegmentDeductionFields(
-    admissionDeductionSource,
-    transferDates,
-    "current",
-  );
-  const deductionLabel =
-    currentSegmentDeduction.deductionType === "percentage"
-      ? `Deduction (${currentSegmentDeduction.deductionValue}%)`
-      : "Deduction";
-
-  const priorTransferEpisodes = priorEpisodes
-    .filter((episode) => episode.episodeType === "transfer")
-    .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
-  const liveTransferPendingBalance =
-    hasTransferHistory && priorTransferEpisodes.length > 0
-      ? priorTransferEpisodes[priorTransferEpisodes.length - 1]?.pendingBalance ?? 0
-      : null;
-
-  // Apply prior overpayment credit on current bill (from carried-forward expense or live prior episode).
-  const billingExtraExpenses = (() => {
-    const withLiveTransfer = applyLiveTransferCarriedForward({
-      expenses: scopedExtraExpenses,
-      transferLogs: transferLogsAsc.map((transfer) => ({
-        transferDate: String(transfer.transferDate),
-        fromBranchName: transfer.fromBranchName ?? null,
-      })),
-      priorTransferPendingBalance: liveTransferPendingBalance,
-    });
-    const expenses = withLiveTransfer;
-    if (expenses.some(isCarriedForwardCredit)) return expenses;
-
-    const mostRecentPrior = priorEpisodes.find((episode) => episode.episodeType !== "transfer") ?? priorEpisodes[0];
-    const livePriorCredit =
-      mostRecentPrior && mostRecentPrior.pendingBalance < 0
-        ? Math.abs(mostRecentPrior.pendingBalance)
-        : 0;
-    if (livePriorCredit <= 0) return expenses;
-
-    const dischargedOn = mostRecentPrior.dischargeDate
-      ? String(mostRecentPrior.dischargeDate).split("T")[0]
-      : null;
-    return [
-      ...expenses,
-      {
-        description: dischargedOn
-          ? `${CARRIED_FORWARD_CREDIT_MARKER} (discharged ${dischargedOn})`
-          : CARRIED_FORWARD_CREDIT_MARKER,
-        amount: String(-livePriorCredit),
-      },
-    ];
-  })();
-
-  const displayExtraExpenses: InPatientExtraExpense[] = [
-    ...(extraExpenses ?? []).filter(
-      (expense) => !isTransferCarriedForwardExpense(expense) && !isTransferCarriedForwardCredit(expense),
-    ),
-    ...billingExtraExpenses
-      .filter((expense) => isTransferCarriedForwardExpense(expense) || isCarriedForwardCredit(expense))
-      .map((expense, index) => ({
-        id: `live-carried-forward-${index}`,
-        admissionId: patientId,
-        expenseDate: (expense as { expenseDate?: string }).expenseDate ?? billingSegmentStartDate,
-        category: "Others",
-        amount: String(expense.amount),
-        description: expense.description ?? "",
-        createdByStaffId: "",
-        createdByStaffName: "System",
-        createdAt: "",
-        updatedAt: "",
-      })),
-  ];
-
-  const breakdown = computeAdmissionBillingBreakdown({
-    admitDate: billingSegmentStartDate,
-    endDate: billingEndDate,
-    amountPerDay: patient.amountPerDay,
-    careTakerRatePerDay: patient.careTakerRatePerDay,
-    careTakerDaysOverride: patient.careTakerDaysOverride,
-    deductionType: currentSegmentDeduction.deductionType,
-    deductionValue: currentSegmentDeduction.deductionValue,
-    extraExpenses: billingExtraExpenses,
-  });
-  const {
-    stayDays,
-    roomCharges,
-    careTakerDays,
-    caretakerCharges,
-    extraExpenseTotal: currentExtraExpenseTotal,
-    carriedForwardTotal,
-    carriedForwardDebt,
-    carriedForwardCreditApplied,
-    currentSubtotal,
-    deductionAmount: currentDeductionAmount,
-    currentGrandTotal,
-    grandTotal,
-  } = breakdown;
+  const billing = billingView?.currentBilling;
+  const totals = billingView?.totals;
+  const previousBilling = billingView?.previousBilling;
+  const breakdown = billingView?.currentBreakdown;
+  const stayDays = billing?.stayDays ?? 0;
+  const roomCharges = billing?.roomCharges ?? 0;
+  const careTakerDays = billing?.careTakerDays ?? 0;
+  const caretakerCharges = billing?.caretakerCharges ?? 0;
+  const currentExtraExpenseTotal = billing?.otherCharges ?? 0;
+  const currentSubtotal = billing?.subtotal ?? 0;
+  const currentDeductionAmount = billing?.deductionAmount ?? 0;
+  const currentGrandTotal = billing?.chargesTotal ?? 0;
+  const grandTotal = totals?.totalBill ?? 0;
+  const totalPreviousPending = previousBilling?.totalPending ?? 0;
+  const carriedForwardDebt = Math.max(0, totalPreviousPending);
+  const carriedForwardCreditApplied = Math.max(0, -totalPreviousPending);
+  const carriedForwardTotal = totalPreviousPending;
   const amountPerDay = parseFloat(patient.amountPerDay) || 0;
   const careTakerRate = parseFloat(patient.careTakerRatePerDay) || 0;
   const hasCarriedForwardBalance = carriedForwardDebt > 0;
   const hasCarriedForwardCredit = carriedForwardCreditApplied > 0;
-  const hasLivePriorCredit =
-    hasCarriedForwardCredit &&
-    !(extraExpenses ?? []).some(isCarriedForwardCredit);
-  const hasPriorAdjustment = hasCarriedForwardBalance || hasCarriedForwardCredit;
+  const hasLivePriorCredit = hasCarriedForwardCredit;
+  const hasPriorAdjustment = previousBilling?.applicable ?? false;
   const priorBalanceLabel = hasTransferHistory ? "Previous Branch Balance" : "Previous Admission Balance";
-  const showBillingHistoryToggle =
-    hasPriorAdjustment || hasPriorEpisodes || hasTransferHistory;
-  const carriedForwardExpenses = billingExtraExpenses.filter(isCarriedForwardExpense);
-  const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
+  const showBillingHistoryToggle = hasPriorAdjustment || hasPriorEpisodes || hasTransferHistory;
+  const priorDischargeNote = previousBilling?.lines[0]?.dischargeDate
+    ? format(new Date(previousBilling.lines[0].dischargeDate), "dd MMM yyyy")
+    : undefined;
+  const deductionLabel =
+    billing?.deductionType === "percentage"
+      ? `Deduction (${billing.deductionValue ?? 0}%)`
+      : "Deduction";
   const hasCurrentDeduction = currentDeductionAmount > 0;
   const hasPriorSegmentDeduction =
     hasTransferHistory && deductionSegment !== "current" && deductionType && deductionValue > 0;
   const targetHasDeduction =
     deductionTargetSegment === "current" ? hasCurrentDeduction : hasPriorSegmentDeduction;
-
-  // After transfer, only payments on the current branch stay apply to this bill.
-  // Prior-branch payments are already reflected on Previous Billing.
-  const billPaymentTotal = hasTransferHistory ? currentStayPaymentTotal : paymentTotal;
-  const balanceSummary = computeAdmissionBalanceSummary(breakdown, billPaymentTotal);
-  const effectivePaymentTotal = paymentTotal;
-  const {
-    currentEpisodePaid,
-    priorBalancePaid,
-    currentBalanceDue,
-    priorBalanceDue,
-    netBalanceDue,
-    overpaymentCredit,
-    totalBalanceDue,
-    priorPendingForCurrentAdmission,
-    hasPriorPendingInSummary,
-  } = balanceSummary;
+  const currentStayPaymentTotal = billing?.paymentsTotal ?? 0;
+  const currentStayPayments = (billing?.payments ?? []).map((payment: NonNullable<typeof billing>["payments"][number]) => ({
+    id: payment.id,
+    admissionId: patientId,
+    paymentDate: payment.paymentDate,
+    amount: String(payment.amount),
+    paymentMode: payment.paymentMode,
+    notes: payment.notes ?? "",
+    createdByStaffId: "",
+    createdByName: "",
+    createdAt: payment.createdAt ?? payment.paymentDate,
+    updatedAt: payment.createdAt ?? payment.paymentDate,
+  })) as InPatientPayment[];
+  const currentEpisodePaid = totals?.currentBalancePaid ?? 0;
+  const priorBalancePaid = totals?.priorBalancePaid ?? 0;
+  const currentBalanceDue = totals?.currentBalanceRemaining ?? 0;
+  const priorBalanceDue = totals?.priorBalanceRemaining ?? 0;
+  const netBalanceDue = totals?.totalBalanceDue ?? 0;
+  const overpaymentCredit = totals?.overpaymentCredit ?? 0;
+  const totalBalanceDue = netBalanceDue;
+  const priorPendingForCurrentAdmission = priorBalanceDue;
+  const hasPriorPendingInSummary = hasCarriedForwardBalance || hasCarriedForwardCredit;
+  const effectivePaymentTotal = currentStayPaymentTotal;
+  const displayExtraExpenses: InPatientExtraExpense[] = (extraExpenses ?? []).filter(
+    (expense) =>
+      !isCarriedForwardExpense(expense) &&
+      !isTransferCarriedForwardExpense(expense) &&
+      !isTransferCarriedForwardCredit(expense),
+  );
   const showingPreviousBilling = showBillingHistoryToggle && billingSummaryView === "previous";
-  const getPriorEpisodeBilling = (episode: InPatientPriorEpisode, index: number) => {
-    if (episode.episodeType === "transfer") {
-      const pending = episode.pendingBalance;
-      const credit = pending < 0 ? Math.abs(pending) : 0;
-      return {
-        grandTotal: episode.grandTotal ?? 0,
-        paidDuringAdmission: episode.amountPaid,
-        paidAfterReadmit: 0,
-        paid: episode.amountPaid,
-        pending: credit > 0 ? -credit : pending,
-        credit,
-      };
-    }
-
-    const mostRecentReadmitIndex = priorEpisodes.findIndex((entry) => entry.episodeType !== "transfer");
-    const isMostRecentPrior = mostRecentReadmitIndex === index;
-    const paidDuringAdmission = episode.amountPaid;
-    const paidAfterReadmit =
-      isMostRecentPrior && hasCarriedForwardBalance ? priorBalancePaid : 0;
-    const totalPaid = paidDuringAdmission + paidAfterReadmit;
-    const pending =
-      isMostRecentPrior && hasCarriedForwardBalance ? priorBalanceDue : episode.pendingBalance;
-    const credit =
-      isMostRecentPrior && hasCarriedForwardBalance && priorBalanceDue < 0
-        ? Math.abs(priorBalanceDue)
-        : pending < 0
-          ? Math.abs(pending)
-          : 0;
-
+  const getPriorEpisodeBilling = (episode: InPatientPriorEpisode) => {
+    const pending = episode.pendingBalance;
+    const credit = pending < 0 ? Math.abs(pending) : 0;
     return {
       grandTotal: episode.grandTotal ?? 0,
-      paidDuringAdmission,
-      paidAfterReadmit,
-      paid: totalPaid,
+      paidDuringAdmission: episode.amountPaid,
+      paidAfterReadmit: 0,
+      paid: episode.amountPaid,
       pending: credit > 0 ? -credit : pending,
       credit,
     };
   };
-  const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode, index) => {
-    return sum + getPriorEpisodeBilling(episode, index).pending;
+  const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode) => {
+    return sum + getPriorEpisodeBilling(episode).pending;
   }, 0);
-  const dischargeBalance = discharge ? computeBalanceDue(grandTotal, effectivePaymentTotal) : 0;
+  const dischargeBalance = discharge ? netBalanceDue : 0;
   const pastDueAdmission = dischargeBalance > 0 ? dischargeBalance : 0;
   const pastDueOutpatient = Math.max(0, Number(linkedPatientStats?.outstandingAmount ?? 0));
   const totalPastDue = pastDueAdmission + pastDueOutpatient;
@@ -1064,7 +955,7 @@ export default function InPatientProfilePage() {
   const billingRows = showingPreviousBilling
     ? priorEpisodes.length > 0
       ? priorEpisodes.flatMap((episode, index) => {
-          const billing = getPriorEpisodeBilling(episode, index);
+          const billing = getPriorEpisodeBilling(episode);
           return [
             {
               item:
@@ -1133,7 +1024,7 @@ export default function InPatientProfilePage() {
                 item: `Payment — ${formatInpatientPaymentTimestamp(payment)}`,
                 quantity: payment.paymentMode,
                 rate: "-",
-                amount: formatMoney(payment.amount),
+                amount: formatMoney(parseFloat(String(payment.amount)) || 0),
               })),
               {
                 item: "Total paid (current stay)",
@@ -1152,7 +1043,7 @@ export default function InPatientProfilePage() {
                 item: `Payment — ${formatInpatientPaymentTimestamp(payment)}`,
                 quantity: payment.paymentMode,
                 rate: "-",
-                amount: formatMoney(payment.amount),
+                amount: formatMoney(parseFloat(String(payment.amount)) || 0),
               }))),
               { item: "Total Payments Recorded", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
             ]),
@@ -1509,7 +1400,7 @@ export default function InPatientProfilePage() {
                   priorEpisodes.length > 0 ? (
                     <div className="space-y-3">
                       {priorEpisodes.map((episode, index) => {
-                        const billing = getPriorEpisodeBilling(episode, index);
+                        const billing = getPriorEpisodeBilling(episode);
                         const b = episode.breakdown;
                         const priorDeductionLabel =
                           b?.deductionType === "percentage" && b.deductionValue
@@ -1593,7 +1484,7 @@ export default function InPatientProfilePage() {
                                   <BillingLine
                                     key={payment.id}
                                     label={formatInpatientPaymentTimestamp(payment)}
-                                    value={`LKR ${formatMoney(payment.amount)}`}
+                                    value={`LKR ${formatMoney(parseFloat(String(payment.amount)) || 0)}`}
                                     tone="success"
                                     sublabel={payment.paymentMode}
                                   />
@@ -1790,7 +1681,7 @@ export default function InPatientProfilePage() {
                               <BillingLine
                                 key={payment.id}
                                 label={formatInpatientPaymentTimestamp(payment)}
-                                value={`LKR ${formatMoney(payment.amount)}`}
+                                value={`LKR ${formatMoney(parseFloat(String(payment.amount)) || 0)}`}
                                 tone="success"
                                 sublabel={payment.paymentMode}
                                 testId={`text-current-payment-${payment.id}`}

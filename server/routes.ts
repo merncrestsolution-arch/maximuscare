@@ -2901,6 +2901,21 @@ export async function registerRoutes(
     }
   });
 
+  // Canonical billing summary (shared by Billing Summary and Discharge Summary).
+  app.get("/api/inpatients/:admissionId/billing-summary", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { calculateAdmissionBilling } = await import("./services/inPatientBillingService");
+      const asOfDate = typeof req.query.asOfDate === "string" ? req.query.asOfDate : undefined;
+      const summary = await calculateAdmissionBilling(storage, param(req, "admissionId"), { asOfDate });
+      if (!summary) {
+        return res.status(404).json({ message: "Admission not found" });
+      }
+      return res.json(summary);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   // Get sessions from prior admissions for the same patient (read-only history).
   app.get("/api/inpatients/:admissionId/sessions/previous", requireAuth, async (req: Request, res: Response) => {
     try {

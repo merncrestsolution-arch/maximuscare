@@ -185,6 +185,8 @@ export interface InPatientPriorEpisode {
   } | null;
 }
 
+export type AdmissionBillingView = import("@shared/admissionBillingView").AdmissionBillingView;
+
 export interface OtherCharge {
   label: string;
   amount: number;
