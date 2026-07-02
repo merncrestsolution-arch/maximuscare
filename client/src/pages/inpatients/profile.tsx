@@ -19,6 +19,7 @@ import {
   computeAdmissionBalanceSummary,
   computeAdmissionBillingBreakdown,
   computeBalanceDue,
+  computeDeductionAmount,
   computeStayDays,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
@@ -2338,7 +2339,7 @@ export default function InPatientProfilePage() {
           <DialogHeader>
             <DialogTitle>{hasDeduction ? "Edit Deduction" : "Apply Deduction"}</DialogTitle>
             <DialogDescription>
-              Applied against the subtotal of LKR {formatMoney(subtotal)}.
+              Applied against the current stay subtotal of LKR {formatMoney(currentSubtotal)}.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -2374,14 +2375,20 @@ export default function InPatientProfilePage() {
               />
               {(() => {
                 const v = parseFloat(deductionForm.deductionValue) || 0;
-                const preview =
-                  deductionForm.deductionType === "percentage"
-                    ? Math.min(subtotal, subtotal * (v / 100))
-                    : Math.min(subtotal, v);
+                const preview = computeDeductionAmount(
+                  currentSubtotal,
+                  deductionForm.deductionType,
+                  v,
+                );
                 if (v <= 0) return null;
+                const newCurrentTotal = Math.max(0, currentSubtotal - preview);
+                const newTotalBill = newCurrentTotal + carriedForwardTotal;
                 return (
                   <p className="text-xs text-muted-foreground" data-testid="text-deduction-preview">
-                    Deduction: - LKR {formatMoney(preview)} → New total: LKR {formatMoney(subtotal - preview)}
+                    Deduction: - LKR {formatMoney(preview)} → Current stay: LKR {formatMoney(newCurrentTotal)}
+                    {hasCarriedForwardBalance
+                      ? ` → Total bill: LKR ${formatMoney(newTotalBill)}`
+                      : null}
                   </p>
                 );
               })()}
