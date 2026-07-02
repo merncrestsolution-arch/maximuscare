@@ -222,6 +222,27 @@ export function getPaymentsForPriorTransferStays<T extends InpatientPaymentLike>
   return payments.filter((payment) => !current.has(payment));
 }
 
+/** Payments recorded during one closed branch-stay segment (before the next transfer). */
+export function getPaymentsForClosedTransferSegment<T extends InpatientPaymentLike>(
+  payments: T[],
+  transfersAsc: TransferLogLike[],
+  segmentIndex: number,
+): T[] {
+  if (segmentIndex < 0 || segmentIndex >= transfersAsc.length) return [];
+
+  const segmentEnd = transferInstant(transfersAsc[segmentIndex]);
+  const segmentStart =
+    segmentIndex === 0 ? Number.NEGATIVE_INFINITY : transferInstant(transfersAsc[segmentIndex - 1]);
+
+  return payments.filter((payment) => {
+    const at = paymentInstant(payment);
+    if (segmentIndex === 0) {
+      return at < segmentEnd;
+    }
+    return at >= segmentStart && at < segmentEnd;
+  });
+}
+
 export function sumPaymentAmounts(payments: Array<{ amount: string | number }>): number {
   return payments.reduce((sum, payment) => sum + (parseFloat(String(payment.amount)) || 0), 0);
 }

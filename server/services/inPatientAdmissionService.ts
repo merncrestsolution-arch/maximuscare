@@ -7,15 +7,15 @@ import {
   computeAdmissionBalanceDue,
   computeAdmissionBillingBreakdown,
   computeAdmissionGrandTotal,
-  allocatePaymentsAcrossSegments,
   computeBranchStaySegmentBilling,
-  computeTransferStayPaymentAllocation,
+  getPaymentsForClosedTransferSegment,
   getSessionsForCurrentStay,
   getSessionsForPriorTransferStays,
   formatReadmitAdmissionSource,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
   resolveSegmentDeductionFields,
+  sumPaymentAmounts,
   TRANSFER_BALANCE_MARKER,
   TRANSFER_CREDIT_MARKER,
 } from "@shared/inpatientBilling";
@@ -452,8 +452,12 @@ export async function getTransferPriorBillingEpisodes(
   const transfers = await storage.getPatientTransferLogsByAdmission(admissionId);
   if (transfers.length === 0) return [];
 
-  const [amountPaid, extraExpenses, sessions, branches, discharge] = await Promise.all([
-    storage.getPaymentTotalByAdmission(admissionId),
+  const transfersAsc = [...transfers].sort((left, right) =>
+    String(left.transferDate).localeCompare(String(right.transferDate)),
+  );
+
+  const [payments, extraExpenses, sessions, branches, discharge] = await Promise.all([
+    storage.getInPatientPaymentsByAdmission(admissionId),
     storage.getInPatientExtraExpensesByAdmission(admissionId),
     storage.getInPatientSessionsByAdmission(admissionId),
     storage.getAllBranches(),
@@ -463,9 +467,9 @@ export async function getTransferPriorBillingEpisodes(
     branches.map((branch) => [branch.id, branch.branchName ?? branch.name ?? "Unknown"]),
   );
 
-  const priorSegments = buildTransferStaySegments(admission.admitDate, transfers);
+  const priorSegments = buildTransferStaySegments(admission.admitDate, transfersAsc);
   const { deductionType, deductionValue, deductionReason, segmentDeduction } =
-    admissionTransferDeductionContext(admission, transfers);
+    admissionTransferDeductionContext(admission, transfersAsc);
 
   const segmentBillingInput = (segment: TransferStaySegment, targetSegment: number | "current") => {
     const deduction = segmentDeduction(targetSegment);
@@ -480,31 +484,12 @@ export async function getTransferPriorBillingEpisodes(
     };
   };
 
-  const segmentGrandTotals = priorSegments.map((segment, index) =>
-    computeBranchStaySegmentBilling(segmentBillingInput(segment, index)).grandTotal,
-  );
-  const billingEndDate = discharge?.dischargeDate
-    ? String(discharge.dischargeDate).split("T")[0]
-    : clinicDateString();
-  const currentSegmentGrandTotal = computeBranchStaySegmentBilling({
-    admitDate: priorSegments[priorSegments.length - 1]?.endDate ?? admission.admitDate,
-    endDate: billingEndDate,
-    amountPerDay: admission.amountPerDay,
-    careTakerRatePerDay: admission.careTakerRatePerDay,
-    careTakerDaysOverride: admission.careTakerDaysOverride,
-    extraExpenses,
-    ...segmentDeduction("current"),
-  }).grandTotal;
-  const allocations = allocatePaymentsAcrossSegments(
-    [...segmentGrandTotals, currentSegmentGrandTotal],
-    amountPaid,
-  );
-
   const episodes: PriorInPatientEpisode[] = [];
   for (let index = 0; index < priorSegments.length; index += 1) {
     const segment = priorSegments[index];
     const breakdown = computeBranchStaySegmentBilling(segmentBillingInput(segment, index));
-    const allocation = allocations[index];
+    const segmentPayments = getPaymentsForClosedTransferSegment(payments, transfersAsc, index);
+    const segmentAmountPaid = sumPaymentAmounts(segmentPayments);
     const sessionCount = sessions.filter((session) => {
       const day = String(session.sessionDate).split("T")[0];
       return day >= segment.startDate && day <= segment.endDate;
@@ -521,7 +506,7 @@ export async function getTransferPriorBillingEpisodes(
         currentDeductionValue: (admission as { currentDeductionValue?: string | null }).currentDeductionValue,
         currentDeductionReason: (admission as { currentDeductionReason?: string | null }).currentDeductionReason,
       },
-      transfers,
+      transfersAsc,
       index,
     ).deductionReason;
 
@@ -531,8 +516,8 @@ export async function getTransferPriorBillingEpisodes(
       status: "Transferred",
       dischargeDate: segment.endDate,
       grandTotal: breakdown.grandTotal,
-      amountPaid: allocation.amountPaid,
-      pendingBalance: allocation.pendingBalance,
+      amountPaid: segmentAmountPaid,
+      pendingBalance: breakdown.grandTotal - segmentAmountPaid,
       sessionCount,
       episodeType: "transfer",
       branchId: segment.branchId,
@@ -564,30 +549,32 @@ export async function computeTransferSegmentPendingBalance(
   transferDate: string,
   transfersIncludingCurrent: Array<{ id: string; transferDate: string; fromBranchId?: string | null }>,
 ): Promise<number> {
-  const [amountPaid, extraExpenses] = await Promise.all([
-    storage.getPaymentTotalByAdmission(admission.id),
+  const [payments, extraExpenses] = await Promise.all([
+    storage.getInPatientPaymentsByAdmission(admission.id),
     storage.getInPatientExtraExpensesByAdmission(admission.id),
   ]);
-  const priorSegments = buildTransferStaySegments(admission.admitDate, transfersIncludingCurrent);
+  const transfersAsc = [...transfersIncludingCurrent].sort((left, right) =>
+    String(left.transferDate).localeCompare(String(right.transferDate)),
+  );
+  const priorSegments = buildTransferStaySegments(admission.admitDate, transfersAsc);
   const closedSegment = priorSegments[priorSegments.length - 1];
   if (!closedSegment || closedSegment.endDate !== transferDate) {
     return 0;
   }
 
-  const { segmentDeduction } = admissionTransferDeductionContext(admission, transfersIncludingCurrent);
-  const segmentGrandTotals = priorSegments.map((segment, index) =>
-    computeBranchStaySegmentBilling({
-      admitDate: segment.startDate,
-      endDate: segment.endDate,
-      amountPerDay: admission.amountPerDay,
-      careTakerRatePerDay: admission.careTakerRatePerDay,
-      careTakerDaysOverride: admission.careTakerDaysOverride,
-      extraExpenses,
-      ...segmentDeduction(index),
-    }).grandTotal,
-  );
-  const allocations = allocatePaymentsAcrossSegments(segmentGrandTotals, amountPaid);
-  return allocations[allocations.length - 1]?.pendingBalance ?? 0;
+  const closedIndex = priorSegments.length - 1;
+  const { segmentDeduction } = admissionTransferDeductionContext(admission, transfersAsc);
+  const breakdown = computeBranchStaySegmentBilling({
+    admitDate: closedSegment.startDate,
+    endDate: closedSegment.endDate,
+    amountPerDay: admission.amountPerDay,
+    careTakerRatePerDay: admission.careTakerRatePerDay,
+    careTakerDaysOverride: admission.careTakerDaysOverride,
+    extraExpenses,
+    ...segmentDeduction(closedIndex),
+  });
+  const segmentPayments = getPaymentsForClosedTransferSegment(payments, transfersAsc, closedIndex);
+  return breakdown.grandTotal - sumPaymentAmounts(segmentPayments);
 }
 
 export function formatTransferBalanceDescription(transferDate: string, fromBranchName: string): string {

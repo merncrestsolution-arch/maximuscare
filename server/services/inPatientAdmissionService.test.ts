@@ -281,7 +281,7 @@ describe("inPatientAdmissionService", () => {
         return branchId ? rows.filter((r) => r.branchId === branchId) : rows;
       },
       getInPatientDischargeByAdmission: async () => undefined,
-      getPaymentTotalByAdmission: async () => 0,
+      getInPatientPaymentsByAdmission: async () => [],
       getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async () => [],
       getPatientTransferLogsByAdmission: async () => [],
@@ -405,7 +405,7 @@ describe("inPatientAdmissionService", () => {
           transferDate: "2024-06-10",
         },
       ],
-      getPaymentTotalByAdmission: async () => 0,
+      getInPatientPaymentsByAdmission: async () => [],
       getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async () => [
         { id: "s1", sessionDate: "2024-06-05", sessionNumber: 1 } as any,
@@ -423,25 +423,6 @@ describe("inPatientAdmissionService", () => {
     expect(episodes[0].branchName).toBe("Nexus");
     expect(episodes[0].pendingBalance).toBeGreaterThan(0);
     expect(episodes[0].sessionCount).toBe(1);
-  });
-
-  it("computes pending balance for the closed transfer segment", async () => {
-    const admission = {
-      id: "current",
-      admitDate: "2024-06-01",
-      amountPerDay: "1000",
-      careTakerRatePerDay: "0",
-      careTakerDaysOverride: null,
-    } as any;
-    const storage = {
-      getPaymentTotalByAdmission: async () => 2000,
-      getInPatientExtraExpensesByAdmission: async () => [],
-    };
-
-    const pending = await computeTransferSegmentPendingBalance(storage as any, admission, "2024-06-10", [
-      { id: "t1", transferDate: "2024-06-10", fromBranchId: "branch-a" },
-    ]);
-    expect(pending).toBeGreaterThan(0);
   });
 
   it("includes pre-transfer deduction on the prior branch billing episode", async () => {
@@ -472,7 +453,7 @@ describe("inPatientAdmissionService", () => {
           transferDate: "2024-06-10",
         },
       ],
-      getPaymentTotalByAdmission: async () => 0,
+      getInPatientPaymentsByAdmission: async () => [],
       getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async () => [],
       getAllBranches: async () => [
@@ -488,6 +469,83 @@ describe("inPatientAdmissionService", () => {
     expect(episodes[0].breakdown?.deductionAmount).toBe(500);
     expect(episodes[0].breakdown?.deductionReason).toBe("Staff discount");
     expect(episodes[0].grandTotal).toBe(10_000 - 500);
+  });
+
+  it("keeps prior branch pending when payments are made after transfer", async () => {
+    const transferAt = "2026-07-02T10:00:00.000Z";
+    const storage = {
+      getInPatientAdmission: async (id: string) =>
+        id === "current"
+          ? ({
+              id: "current",
+              patientId: "p1",
+              admitDate: "2026-07-01",
+              status: "Admitted",
+              branchId: "branch-neuro",
+              amountPerDay: "7000",
+              careTakerRatePerDay: "0",
+              careTakerDaysOverride: null,
+              deductionType: "fixed",
+              deductionValue: "2000",
+              deductionReason: "no food",
+              deductionAppliedAt: new Date("2026-07-02T07:00:00.000Z"),
+            } as any)
+          : undefined,
+      getPatientTransferLogsByAdmission: async () => [
+        {
+          id: "t1",
+          admissionId: "current",
+          fromBranchId: "branch-nexus",
+          toBranchId: "branch-neuro",
+          transferDate: "2026-07-02",
+          createdAt: transferAt,
+        },
+      ],
+      getInPatientPaymentsByAdmission: async () => [
+        {
+          id: "p1",
+          paymentDate: "2026-07-02",
+          createdAt: "2026-07-02T07:36:00.000Z",
+          amount: "10000",
+          paymentMode: "Cash",
+        },
+        {
+          id: "p2",
+          paymentDate: "2026-07-02",
+          createdAt: "2026-07-02T12:47:00.000Z",
+          amount: "5000",
+          paymentMode: "Cash",
+        },
+      ],
+      getInPatientExtraExpensesByAdmission: async () => [],
+      getInPatientSessionsByAdmission: async () => [],
+      getAllBranches: async () => [
+        { id: "branch-nexus", branchName: "Nexus Physio", name: "Nexus Physio" },
+        { id: "branch-neuro", branchName: "Neuro", name: "Neuro Unit" },
+      ],
+      getInPatientDischargeByAdmission: async () => undefined,
+    };
+
+    const episodes = await getTransferPriorBillingEpisodes(storage as any, "current");
+    expect(episodes).toHaveLength(1);
+    expect(episodes[0].grandTotal).toBe(12_000);
+    expect(episodes[0].amountPaid).toBe(10_000);
+    expect(episodes[0].pendingBalance).toBe(2_000);
+
+    const admission = {
+      id: "current",
+      admitDate: "2026-07-01",
+      amountPerDay: "7000",
+      careTakerRatePerDay: "0",
+      careTakerDaysOverride: null,
+      deductionType: "fixed",
+      deductionValue: "2000",
+      deductionAppliedAt: new Date("2026-07-02T07:00:00.000Z"),
+    } as any;
+    const pending = await computeTransferSegmentPendingBalance(storage as any, admission, "2026-07-02", [
+      { id: "t1", transferDate: "2026-07-02", fromBranchId: "branch-nexus", createdAt: transferAt },
+    ]);
+    expect(pending).toBe(2_000);
   });
 
   it("moves pre-transfer sessions on the same admission into previous session history", async () => {

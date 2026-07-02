@@ -13,6 +13,7 @@ import {
   computeBranchStaySegmentBilling,
   computeTransferStayPaymentAllocation,
   formatInpatientPaymentTimestamp,
+  getPaymentsForClosedTransferSegment,
   getPaymentsForCurrentStay,
   getPaymentsForPriorTransferStays,
   getSessionsForCurrentStay,
@@ -331,6 +332,17 @@ describe("inpatientBilling", () => {
     expect(getPaymentsForCurrentStay(payments, transfers)).toHaveLength(1);
     expect(sumPaymentAmounts(getPaymentsForCurrentStay(payments, transfers))).toBe(1000);
     expect(getPaymentsForPriorTransferStays(payments, transfers)).toHaveLength(0);
+  });
+
+  it("keeps closed-segment payments separate from the current stay", () => {
+    const transferAt = "2026-07-02T10:00:00.000Z";
+    const payments = [
+      { paymentDate: "2026-07-02", createdAt: "2026-07-02T08:00:00.000Z", amount: "10000" },
+      { paymentDate: "2026-07-02", createdAt: "2026-07-02T12:00:00.000Z", amount: "5000" },
+    ];
+    const transfers = [{ transferDate: "2026-07-02", createdAt: transferAt }];
+    expect(sumPaymentAmounts(getPaymentsForClosedTransferSegment(payments, transfers, 0))).toBe(10000);
+    expect(sumPaymentAmounts(getPaymentsForCurrentStay(payments, transfers))).toBe(5000);
   });
 
   it("applies current-stay payments to carried-forward balance before current charges", () => {
