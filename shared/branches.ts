@@ -68,3 +68,39 @@ export function isIncentiveEligibleBranch(branch: string | null | undefined): bo
   const normalized = normalizeBranchName(branch);
   return normalized === "Dehiwala";
 }
+
+export type TransferBranchRow = {
+  id: string;
+  name?: string | null;
+  branchName?: string | null;
+  code?: string | null;
+  isActive?: boolean | number | null;
+};
+
+/** Pick the four enterprise branches for transfer (by code, then short name, then full name). */
+export function pickEnterpriseBranchesForTransfer<T extends TransferBranchRow>(branches: T[]): T[] {
+  const usedIds = new Set<string>();
+  const results: T[] = [];
+
+  for (const enterprise of ENTERPRISE_BRANCHES) {
+    const match =
+      branches.find(
+        (b) => !usedIds.has(b.id) && String(b.code ?? "").toUpperCase() === enterprise.code,
+      ) ??
+      branches.find((b) => {
+        if (usedIds.has(b.id)) return false;
+        return normalizeBranchName(b.branchName ?? b.name) === enterprise.shortName;
+      }) ??
+      branches.find((b) => {
+        if (usedIds.has(b.id)) return false;
+        return String(b.name ?? "").trim().toLowerCase() === enterprise.name.toLowerCase();
+      });
+
+    if (match) {
+      usedIds.add(match.id);
+      results.push(match);
+    }
+  }
+
+  return results.length > 0 ? results : [...branches];
+}

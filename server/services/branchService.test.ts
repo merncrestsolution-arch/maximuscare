@@ -71,11 +71,23 @@ describe("getTransferDestinationBranches", () => {
     getAllBranches: async () => branches,
   };
 
-  it("returns all four enterprise branches including inactive, for any role", async () => {
-    const adminList = await getTransferDestinationBranches(storage as any, "s1", "Admin");
-    const staffList = await getTransferDestinationBranches(storage as any, "s2", "Receptionist");
-    expect(adminList.map((b) => b.id)).toEqual(["b1", "b2", "b3", "b4"]);
-    expect(staffList.map((b) => b.id)).toEqual(["b1", "b2", "b3", "b4"]);
-    expect(adminList.find((b) => b.id === "b2")?.isActive).toBe(false);
+  it("returns coded enterprise branches in clinic order", async () => {
+    const list = await getTransferDestinationBranches(storage as any, "s1", "Admin");
+    expect(list.map((b) => b.id)).toEqual(["b1", "b2", "b3", "b4"]);
+    expect(list.find((b) => b.id === "b2")?.isActive).toBe(false);
+  });
+
+  it("matches enterprise branches by code or name when code is missing", async () => {
+    const legacyStorage = {
+      getAllBranches: async () => [
+        { id: "b1", name: "Dehiwala Main Branch", branchName: "Dehiwala", code: null, isActive: true },
+        { id: "b2", name: "Bandaragama Branch", branchName: "Bandaragama", code: null, isActive: false },
+        { id: "b3", name: "Neuro Rehabilitation Unit", branchName: "Neuro Rehabilitation", code: null, isActive: true },
+        { id: "b4", name: "Nexus Physio & Rehab Center", branchName: "Nexus Physio", code: null, isActive: true },
+      ],
+    };
+    const list = await getTransferDestinationBranches(legacyStorage as any, "s1", "Receptionist");
+    expect(list).toHaveLength(4);
+    expect(list.map((b) => b.id)).toEqual(["b1", "b2", "b3", "b4"]);
   });
 });

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats, useTransferBranches } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats, useTransferBranches, useBranches } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -50,6 +50,7 @@ import { SegmentedToggle } from "@/components/ui/segmented-toggle";
 import { PatientCredentials } from "@/components/patients/patient-credentials";
 import { isManager, isBranchManager, canReAdmitInPatient } from "@/lib/permissions";
 import { BRANCH_OPTIONS } from "@/lib/branches";
+import { pickEnterpriseBranchesForTransfer } from "@shared/branches";
 
 const EXPENSE_CATEGORIES = ["Food", "Nurse Visit", "Doctor Visit", "Speech Therapy", "Others"];
 
@@ -237,9 +238,17 @@ export default function InPatientProfilePage() {
     data: transferBranches = [],
     isLoading: transferBranchesLoading,
     isError: transferBranchesError,
-  } = useTransferBranches(canTransfer);
+    refetch: refetchTransferBranches,
+  } = useTransferBranches(!!user);
+  const { data: allBranches = [] } = useBranches();
   const transferBranchChoices = useMemo(() => {
-    const rows = Array.isArray(transferBranches) ? transferBranches : [];
+    const raw =
+      Array.isArray(transferBranches) && transferBranches.length > 0
+        ? transferBranches
+        : Array.isArray(allBranches)
+          ? allBranches
+          : [];
+    const rows = pickEnterpriseBranchesForTransfer(raw);
     return rows
       .filter((branch) => branch?.id)
       .map((branch) => {
@@ -253,7 +262,13 @@ export default function InPatientProfilePage() {
           label: inactive ? `${friendly} (Inactive)` : friendly,
         };
       });
-  }, [transferBranches]);
+  }, [transferBranches, allBranches]);
+
+  useEffect(() => {
+    if (transferOpen) {
+      void refetchTransferBranches();
+    }
+  }, [transferOpen, refetchTransferBranches]);
 
   const destinationBranches = useMemo(() => {
     const currentId = patient?.branchId ? String(patient.branchId) : "";
@@ -1942,7 +1957,7 @@ export default function InPatientProfilePage() {
                   <SelectTrigger data-testid="select-transfer-branch">
                     <SelectValue placeholder={transferBranchesLoading ? "Loading branches..." : "Select branch"} />
                   </SelectTrigger>
-                  <SelectContent position="popper" className="z-[200] max-h-60">
+                  <SelectContent className="z-[200]">
                     {destinationBranches.map((branch) => (
                       <SelectItem key={branch.id} value={branch.id}>
                         {branch.label}
@@ -1957,7 +1972,7 @@ export default function InPatientProfilePage() {
                 )}
                 {!transferBranchesLoading && !transferBranchesError && destinationBranches.length === 0 && (
                   <p className="text-xs text-amber-700" data-testid="text-no-transfer-branches">
-                    No other active branches are available for transfer.
+                    No other branches are available for transfer.
                   </p>
                 )}
               </div>

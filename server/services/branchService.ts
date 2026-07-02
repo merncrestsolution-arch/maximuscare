@@ -1,6 +1,6 @@
 import type { IStorage } from "../storage";
 import type { Branch } from "@shared/schema";
-import { normalizeBranchName, ENTERPRISE_BRANCHES } from "@shared/branches";
+import { normalizeBranchName, ENTERPRISE_BRANCHES, pickEnterpriseBranchesForTransfer } from "@shared/branches";
 import {
   hasFullBranchAccess,
   isNexusManagingDirector,
@@ -39,7 +39,6 @@ function activeBranches(branches: Branch[]): Branch[] {
   return branches.filter((b) => b.isActive !== false);
 }
 
-const TRANSFER_BRANCH_CODES = new Set(ENTERPRISE_BRANCHES.map((b) => b.code));
 const TRANSFER_BRANCH_ORDER = ENTERPRISE_BRANCHES.map((b) => b.code);
 
 function transferBranchOrder(code: string | null | undefined): number {
@@ -54,9 +53,8 @@ export async function getTransferDestinationBranches(
   _role: string,
 ): Promise<Branch[]> {
   const all = await storage.getAllBranches();
-  return all
-    .filter((b) => TRANSFER_BRANCH_CODES.has(String(b.code ?? "").toUpperCase() as (typeof TRANSFER_BRANCH_ORDER)[number]))
-    .sort((a, b) => transferBranchOrder(a.code) - transferBranchOrder(b.code));
+  const picked = pickEnterpriseBranchesForTransfer(all);
+  return [...picked].sort((a, b) => transferBranchOrder(a.code) - transferBranchOrder(b.code));
 }
 
 export async function getAllowedBranchesForStaff(

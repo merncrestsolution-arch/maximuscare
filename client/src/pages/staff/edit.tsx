@@ -295,9 +295,9 @@ export default function StaffEditPage() {
   };
 
   return (
-    <div className={`${EDIT_PAGE_ROOT} pb-28 md:pb-8`}>
+    <div className={`${EDIT_PAGE_ROOT} pb-32 md:pb-8`}>
       <div className="max-w-[720px] mx-auto">
-        <div className="flex items-center gap-2 sticky top-0 bg-white z-20 py-3 px-4 border-b border-gray-200 safe-top">
+        <div className="flex items-center gap-2 bg-white py-3 px-4 border-b border-gray-200">
           <Button
             variant="ghost"
             size="icon"
@@ -527,7 +527,7 @@ export default function StaffEditPage() {
           </div>
         </div>
 
-        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white safe-area-bottom md:static md:z-auto md:border-0 md:bg-white">
+        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white safe-area-bottom md:static md:z-auto md:mt-4 md:rounded-xl md:border md:shadow-sm">
           <div className="mx-auto flex max-w-[720px] gap-3 p-4 md:justify-end md:px-6 md:pt-6 md:pb-0">
             <Button
               type="button"
