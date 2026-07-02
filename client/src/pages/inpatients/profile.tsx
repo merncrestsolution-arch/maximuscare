@@ -246,9 +246,10 @@ export default function InPatientProfilePage() {
         const shortName = branch.branchName ?? branch.name ?? "";
         const friendly =
           BRANCH_OPTIONS.find((option) => option.value === shortName)?.label ??
-          (shortName || branch.name);
+          (shortName || branch.name || "Branch");
         return { id: String(branch.id), label: friendly };
-      });
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
   }, [transferBranches]);
 
   const destinationBranches = useMemo(() => {
