@@ -20,6 +20,7 @@ import {
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
+  resolveSegmentDeductionFields,
   splitReAdmissionPayments,
   sumCarriedForwardAmounts,
   sumPaymentAmounts,
@@ -249,6 +250,28 @@ describe("inpatientBilling", () => {
     });
     expect(without.deductionAmount).toBe(0);
     expect(without.grandTotal).toBe(10_000);
+  });
+
+  it("keeps prior and current segment deductions separate after transfer", () => {
+    const transfers = [{ transferDate: "2026-06-10" }];
+    const admission = {
+      admitDate: "2026-06-01",
+      deductionType: "fixed" as const,
+      deductionValue: 1000,
+      deductionReason: "Prior branch discount",
+      deductionAppliedAt: "2026-06-08",
+      currentDeductionType: "fixed" as const,
+      currentDeductionValue: 500,
+      currentDeductionReason: "Current stay discount",
+    };
+
+    const prior = resolveSegmentDeductionFields(admission, transfers, 0);
+    const current = resolveSegmentDeductionFields(admission, transfers, "current");
+
+    expect(prior.deductionValue).toBe(1000);
+    expect(prior.deductionReason).toBe("Prior branch discount");
+    expect(current.deductionValue).toBe(500);
+    expect(current.deductionReason).toBe("Current stay discount");
   });
 
   it("replaces stored transfer carry-forward with live prior pending", () => {

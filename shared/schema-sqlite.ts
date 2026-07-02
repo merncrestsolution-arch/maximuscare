@@ -292,6 +292,13 @@ export const inPatientAdmissions = sqliteTable("in_patient_admissions", {
   deductionAppliedBy: text("deduction_applied_by"),
   deductionAppliedById: text("deduction_applied_by_id"),
   deductionAppliedAt: integer("deduction_applied_at", { mode: "timestamp" }),
+  // After a branch transfer, the closing branch stay keeps deduction_* above; the active stay uses these.
+  currentDeductionType: text("current_deduction_type"),
+  currentDeductionValue: text("current_deduction_value").notNull().default("0"),
+  currentDeductionReason: text("current_deduction_reason"),
+  currentDeductionAppliedBy: text("current_deduction_applied_by"),
+  currentDeductionAppliedById: text("current_deduction_applied_by_id"),
+  currentDeductionAppliedAt: integer("current_deduction_applied_at", { mode: "timestamp" }),
   reportsAttachments: text("reports_attachments"), // JSON string
   idCopyAttachments: text("id_copy_attachments"), // JSON string
   status: text("status").notNull().default("Admitted"),

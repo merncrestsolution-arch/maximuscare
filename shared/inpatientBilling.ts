@@ -302,6 +302,68 @@ export function deductionFieldsForSegment(
   return { deductionType: null, deductionValue: 0 };
 }
 
+export type AdmissionSegmentDeductionSource = {
+  admitDate: string;
+  deductionType?: "fixed" | "percentage" | null;
+  deductionValue?: number | string | null;
+  deductionReason?: string | null;
+  deductionAppliedAt?: Date | string | null;
+  currentDeductionType?: "fixed" | "percentage" | null;
+  currentDeductionValue?: number | string | null;
+  currentDeductionReason?: string | null;
+};
+
+export type SegmentDeductionFields = {
+  deductionType: "fixed" | "percentage" | null;
+  deductionValue: number;
+  deductionReason: string | null;
+};
+
+/** Resolve deduction type/value/reason for a specific branch-stay segment on an admission. */
+export function resolveSegmentDeductionFields(
+  admission: AdmissionSegmentDeductionSource,
+  transfers: Array<{ transferDate: string }>,
+  targetSegment: number | "current",
+): SegmentDeductionFields {
+  const priorType = admission.deductionType ?? null;
+  const priorValue = parseFloat(String(admission.deductionValue ?? 0)) || 0;
+  const priorReason = admission.deductionReason ?? null;
+  const currentType = admission.currentDeductionType ?? null;
+  const currentValue = parseFloat(String(admission.currentDeductionValue ?? 0)) || 0;
+  const currentReason = admission.currentDeductionReason ?? null;
+
+  if (targetSegment === "current") {
+    if (transfers.length > 0) {
+      return {
+        deductionType: currentType && currentValue > 0 ? currentType : null,
+        deductionValue: currentValue,
+        deductionReason: currentReason,
+      };
+    }
+    const ownerSegment = resolveDeductionSegmentIndex(
+      admission.deductionAppliedAt,
+      admission.admitDate,
+      transfers,
+    );
+    const fields = deductionFieldsForSegment(ownerSegment, "current", priorType, priorValue);
+    return {
+      ...fields,
+      deductionReason: fields.deductionValue > 0 ? priorReason : null,
+    };
+  }
+
+  const ownerSegment = resolveDeductionSegmentIndex(
+    admission.deductionAppliedAt,
+    admission.admitDate,
+    transfers,
+  );
+  const fields = deductionFieldsForSegment(ownerSegment, targetSegment, priorType, priorValue);
+  return {
+    ...fields,
+    deductionReason: fields.deductionValue > 0 ? priorReason : null,
+  };
+}
+
 /** Bill one branch-stay segment (expenses limited to segment dates; optional segment deduction). */
 export function computeBranchStaySegmentBilling(input: {
   admitDate: string;

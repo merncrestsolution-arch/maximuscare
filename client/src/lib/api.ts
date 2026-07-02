@@ -646,7 +646,12 @@ export const inPatientApi = {
   }),
   setDeduction: (
     id: string,
-    data: { deductionType: "fixed" | "percentage" | null; deductionValue: number; deductionReason?: string | null },
+    data: {
+      deductionType: "fixed" | "percentage" | null;
+      deductionValue: number;
+      deductionReason?: string | null;
+      targetSegment?: "current" | "prior";
+    },
   ) => apiRequest<any>(`/inpatients/${id}/deduction`, {
     method: 'PATCH',
     body: JSON.stringify(data),

@@ -3350,8 +3350,14 @@ export async function registerRoutes(
       const rawType = body.deductionType == null ? null : String(body.deductionType);
       const rawValue = Number(body.deductionValue ?? 0);
       const reason = body.deductionReason == null ? null : String(body.deductionReason).trim() || null;
+      const rawTarget = body.targetSegment == null ? "current" : String(body.targetSegment);
+      const targetSegment = rawTarget === "prior" ? "prior" : "current";
 
-      // Clearing the deduction (no type or zero value) resets every deduction field.
+      const transfers = await storage.getPatientTransferLogsByAdmission(id);
+      const hasTransfers = transfers.length > 0;
+      const useCurrentFields = hasTransfers && targetSegment === "current";
+
+      // Clearing the deduction (no type or zero value) resets the targeted segment only.
       const isClearing = !rawType || !Number.isFinite(rawValue) || rawValue <= 0;
       if (!isClearing) {
         if (!["fixed", "percentage"].includes(rawType!)) {
@@ -3362,29 +3368,62 @@ export async function registerRoutes(
         }
       }
 
-      const oldValue = {
-        deductionType: admission.deductionType ?? null,
-        deductionValue: admission.deductionValue ?? "0",
-        deductionReason: admission.deductionReason ?? null,
+      const admissionAny = admission as {
+        deductionType?: string | null;
+        deductionValue?: string | null;
+        deductionReason?: string | null;
+        currentDeductionType?: string | null;
+        currentDeductionValue?: string | null;
+        currentDeductionReason?: string | null;
       };
 
-      const update: Record<string, unknown> = isClearing
+      const oldValue = useCurrentFields
         ? {
-            deductionType: null,
-            deductionValue: "0",
-            deductionReason: null,
-            deductionAppliedBy: null,
-            deductionAppliedById: null,
-            deductionAppliedAt: null,
+            currentDeductionType: admissionAny.currentDeductionType ?? null,
+            currentDeductionValue: admissionAny.currentDeductionValue ?? "0",
+            currentDeductionReason: admissionAny.currentDeductionReason ?? null,
           }
         : {
-            deductionType: rawType,
-            deductionValue: String(rawValue),
-            deductionReason: reason,
-            deductionAppliedBy: user.name ?? user.email ?? "Unknown",
-            deductionAppliedById: user.staffId ?? null,
-            deductionAppliedAt: new Date(),
+            deductionType: admissionAny.deductionType ?? null,
+            deductionValue: admissionAny.deductionValue ?? "0",
+            deductionReason: admissionAny.deductionReason ?? null,
           };
+
+      const update: Record<string, unknown> = isClearing
+        ? useCurrentFields
+          ? {
+              currentDeductionType: null,
+              currentDeductionValue: "0",
+              currentDeductionReason: null,
+              currentDeductionAppliedBy: null,
+              currentDeductionAppliedById: null,
+              currentDeductionAppliedAt: null,
+            }
+          : {
+              deductionType: null,
+              deductionValue: "0",
+              deductionReason: null,
+              deductionAppliedBy: null,
+              deductionAppliedById: null,
+              deductionAppliedAt: null,
+            }
+        : useCurrentFields
+          ? {
+              currentDeductionType: rawType,
+              currentDeductionValue: String(rawValue),
+              currentDeductionReason: reason,
+              currentDeductionAppliedBy: user.name ?? user.email ?? "Unknown",
+              currentDeductionAppliedById: user.staffId ?? null,
+              currentDeductionAppliedAt: new Date(),
+            }
+          : {
+              deductionType: rawType,
+              deductionValue: String(rawValue),
+              deductionReason: reason,
+              deductionAppliedBy: user.name ?? user.email ?? "Unknown",
+              deductionAppliedById: user.staffId ?? null,
+              deductionAppliedAt: new Date(),
+            };
 
       const updated = await storage.updateInPatientAdmission(id, update as any);
       const actor = await auditActor(req);
@@ -3394,11 +3433,19 @@ export async function registerRoutes(
         action: isClearing ? "deduction.clear" : "deduction.apply",
         recordId: id,
         oldValue,
-        newValue: {
-          deductionType: update.deductionType,
-          deductionValue: update.deductionValue,
-          deductionReason: update.deductionReason,
-        },
+        newValue: isClearing
+          ? oldValue
+          : useCurrentFields
+            ? {
+                currentDeductionType: update.currentDeductionType,
+                currentDeductionValue: update.currentDeductionValue,
+                currentDeductionReason: update.currentDeductionReason,
+              }
+            : {
+                deductionType: update.deductionType,
+                deductionValue: update.deductionValue,
+                deductionReason: update.deductionReason,
+              },
       });
       return res.json(updated);
     } catch (error: any) {

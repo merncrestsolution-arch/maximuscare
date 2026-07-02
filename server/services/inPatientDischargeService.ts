@@ -9,9 +9,8 @@ import {
   computeBalanceDue,
   computeStayDays,
   computeTransferStayPaymentAllocation,
-  deductionFieldsForSegment,
   isCarriedForwardExpense,
-  resolveDeductionSegmentIndex,
+  resolveSegmentDeductionFields,
   type DischargeBillLine,
 } from "@shared/inpatientBilling";
 import { getTransferPriorBillingEpisodes } from "./inPatientAdmissionService";
@@ -104,16 +103,20 @@ export async function buildInPatientDischargeSummary(
         });
 
   const deduction = admissionDeductionFields(admission);
-  const deductionSegment = resolveDeductionSegmentIndex(
-    (admission as { deductionAppliedAt?: Date | string | null }).deductionAppliedAt ?? null,
-    admission.admitDate,
-    transferLogsAsc.map((transfer) => ({ transferDate: String(transfer.transferDate) })),
-  );
-  const currentSegmentDeduction = deductionFieldsForSegment(
-    deductionSegment,
+  const transferDates = transferLogsAsc.map((transfer) => ({ transferDate: String(transfer.transferDate) }));
+  const currentSegmentDeduction = resolveSegmentDeductionFields(
+    {
+      admitDate: admission.admitDate,
+      deductionType: deduction.deductionType,
+      deductionValue: deduction.deductionValue,
+      deductionReason: deduction.deductionReason,
+      deductionAppliedAt: (admission as { deductionAppliedAt?: Date | string | null }).deductionAppliedAt ?? null,
+      currentDeductionType: (admission as { currentDeductionType?: "fixed" | "percentage" | null }).currentDeductionType,
+      currentDeductionValue: (admission as { currentDeductionValue?: string | null }).currentDeductionValue,
+      currentDeductionReason: (admission as { currentDeductionReason?: string | null }).currentDeductionReason,
+    },
+    transferDates,
     "current",
-    deduction.deductionType,
-    deduction.deductionValue,
   );
 
   const priorTransferEpisodes = transferPriorEpisodes
@@ -210,7 +213,7 @@ export async function buildInPatientDischargeSummary(
     extraExpenseTotal: breakdown.extraExpenseTotal,
     deductionType: currentSegmentDeduction.deductionType,
     deductionValue: currentSegmentDeduction.deductionValue,
-    deductionReason: deduction.deductionReason,
+    deductionReason: currentSegmentDeduction.deductionReason,
   };
 }
 

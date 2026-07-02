@@ -12,10 +12,10 @@ import {
   computeTransferStayPaymentAllocation,
   getSessionsForCurrentStay,
   getSessionsForPriorTransferStays,
-  deductionFieldsForSegment,
   formatReadmitAdmissionSource,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
+  resolveSegmentDeductionFields,
   TRANSFER_BALANCE_MARKER,
   TRANSFER_CREDIT_MARKER,
 } from "@shared/inpatientBilling";
@@ -419,9 +419,24 @@ function admissionTransferDeductionContext(admission: InPatientAdmission, transf
   const deductionReason = (admission as { deductionReason?: string | null }).deductionReason ?? null;
   const deductionAppliedAt = (admission as { deductionAppliedAt?: Date | string | null }).deductionAppliedAt ?? null;
   const ownerSegment = resolveDeductionSegmentIndex(deductionAppliedAt, admission.admitDate, transfers);
+  const admissionDeductionSource = {
+    admitDate: admission.admitDate,
+    deductionType,
+    deductionValue,
+    deductionReason,
+    deductionAppliedAt,
+    currentDeductionType: (admission as { currentDeductionType?: "fixed" | "percentage" | null }).currentDeductionType,
+    currentDeductionValue: (admission as { currentDeductionValue?: string | null }).currentDeductionValue,
+    currentDeductionReason: (admission as { currentDeductionReason?: string | null }).currentDeductionReason,
+  };
 
-  const segmentDeduction = (targetSegment: number | "current") =>
-    deductionFieldsForSegment(ownerSegment, targetSegment, deductionType, deductionValue);
+  const segmentDeduction = (targetSegment: number | "current") => {
+    const fields = resolveSegmentDeductionFields(admissionDeductionSource, transfers, targetSegment);
+    return {
+      deductionType: fields.deductionType,
+      deductionValue: fields.deductionValue,
+    };
+  };
 
   return { deductionType, deductionValue, deductionReason, ownerSegment, segmentDeduction };
 }
@@ -495,6 +510,20 @@ export async function getTransferPriorBillingEpisodes(
       return day >= segment.startDate && day <= segment.endDate;
     }).length;
     const segmentDeductionFields = segmentDeduction(index);
+    const segmentReason = resolveSegmentDeductionFields(
+      {
+        admitDate: admission.admitDate,
+        deductionType,
+        deductionValue,
+        deductionReason,
+        deductionAppliedAt: (admission as { deductionAppliedAt?: Date | string | null }).deductionAppliedAt ?? null,
+        currentDeductionType: (admission as { currentDeductionType?: "fixed" | "percentage" | null }).currentDeductionType,
+        currentDeductionValue: (admission as { currentDeductionValue?: string | null }).currentDeductionValue,
+        currentDeductionReason: (admission as { currentDeductionReason?: string | null }).currentDeductionReason,
+      },
+      transfers,
+      index,
+    ).deductionReason;
 
     episodes.push({
       admissionId: `transfer:${segment.transferLogId}`,
@@ -518,7 +547,7 @@ export async function getTransferPriorBillingEpisodes(
         deductionAmount: breakdown.deductionAmount,
         deductionType: segmentDeductionFields.deductionType,
         deductionValue: segmentDeductionFields.deductionValue > 0 ? segmentDeductionFields.deductionValue : null,
-        deductionReason: breakdown.deductionAmount > 0 ? deductionReason : null,
+        deductionReason: breakdown.deductionAmount > 0 ? segmentReason : null,
         amountPerDay: parseFloat(String(admission.amountPerDay)) || 0,
         careTakerRatePerDay: parseFloat(String(admission.careTakerRatePerDay ?? 0)) || 0,
       },

@@ -24,7 +24,6 @@ import {
   computeStayDays,
   computeTransferStayPaymentAllocation,
   CARRIED_FORWARD_CREDIT_MARKER,
-  deductionFieldsForSegment,
   formatInpatientPaymentTimestamp,
   getPaymentsForCurrentStay,
   getPaymentsForPriorTransferStays,
@@ -34,6 +33,7 @@ import {
   isTransferCarriedForwardCredit,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
+  resolveSegmentDeductionFields,
   sumPaymentAmounts,
 } from "@shared/inpatientBilling";
 import { useToast } from "@/hooks/use-toast";
@@ -227,6 +227,7 @@ export default function InPatientProfilePage() {
 
   // Bug 3: in-patient bill deduction modal state.
   const [showDeductionModal, setShowDeductionModal] = useState(false);
+  const [deductionTargetSegment, setDeductionTargetSegment] = useState<"current" | "prior">("current");
   const [deductionForm, setDeductionForm] = useState({
     deductionType: "fixed" as "fixed" | "percentage",
     deductionValue: "",
@@ -505,14 +506,24 @@ export default function InPatientProfilePage() {
   // Server enforces the same set; this just gates the UI.
   const canApplyDeduction = isAdminMD || ["Manager", "Branch Manager", "Nexus MD"].includes(user?.role || "");
 
-  const openDeductionModal = () => {
+  const openDeductionModal = (target: "current" | "prior" = "current") => {
+    setDeductionTargetSegment(target);
+    const patientAny = patient as {
+      deductionType?: "fixed" | "percentage" | null;
+      deductionValue?: string | null;
+      deductionReason?: string | null;
+      currentDeductionType?: "fixed" | "percentage" | null;
+      currentDeductionValue?: string | null;
+      currentDeductionReason?: string | null;
+    };
+    const useCurrentFields = target === "current" && (transferLogs as any[]).length > 0;
+    const type = useCurrentFields ? patientAny.currentDeductionType : patientAny.deductionType;
+    const value = useCurrentFields ? patientAny.currentDeductionValue : patientAny.deductionValue;
+    const reason = useCurrentFields ? patientAny.currentDeductionReason : patientAny.deductionReason;
     setDeductionForm({
-      deductionType: ((patient as any)?.deductionType as "fixed" | "percentage") || "fixed",
-      deductionValue:
-        (patient as any)?.deductionType && parseFloat((patient as any)?.deductionValue ?? "0") > 0
-          ? String((patient as any).deductionValue)
-          : "",
-      deductionReason: (patient as any)?.deductionReason || "",
+      deductionType: (type as "fixed" | "percentage") || "fixed",
+      deductionValue: type && parseFloat(value ?? "0") > 0 ? String(value) : "",
+      deductionReason: reason || "",
     });
     setShowDeductionModal(true);
   };
@@ -534,6 +545,7 @@ export default function InPatientProfilePage() {
           deductionType: deductionForm.deductionType,
           deductionValue: value,
           deductionReason: deductionForm.deductionReason.trim() || null,
+          targetSegment: deductionTargetSegment,
         },
       });
       toast({ title: "Success", description: "Deduction applied" });
@@ -551,7 +563,12 @@ export default function InPatientProfilePage() {
     try {
       await setDeduction.mutateAsync({
         id: patientId,
-        data: { deductionType: null, deductionValue: 0, deductionReason: null },
+        data: {
+          deductionType: null,
+          deductionValue: 0,
+          deductionReason: null,
+          targetSegment: deductionTargetSegment,
+        },
       });
       toast({ title: "Success", description: "Deduction removed" });
       setShowDeductionModal(false);
@@ -813,16 +830,26 @@ export default function InPatientProfilePage() {
   })();
   const deductionType = (patient as any).deductionType as "fixed" | "percentage" | null;
   const deductionValue = parseFloat((patient as any).deductionValue ?? "0") || 0;
-  const deductionSegment = resolveDeductionSegmentIndex(
-    (patient as any).deductionAppliedAt ?? null,
-    patient.admitDate,
-    transferLogsAsc.map((transfer) => ({ transferDate: String(transfer.transferDate) })),
-  );
-  const currentSegmentDeduction = deductionFieldsForSegment(
-    deductionSegment,
-    "current",
+  const admissionDeductionSource = {
+    admitDate: patient.admitDate,
     deductionType,
     deductionValue,
+    deductionReason: (patient as any).deductionReason ?? null,
+    deductionAppliedAt: (patient as any).deductionAppliedAt ?? null,
+    currentDeductionType: (patient as any).currentDeductionType ?? null,
+    currentDeductionValue: (patient as any).currentDeductionValue ?? null,
+    currentDeductionReason: (patient as any).currentDeductionReason ?? null,
+  };
+  const transferDates = transferLogsAsc.map((transfer) => ({ transferDate: String(transfer.transferDate) }));
+  const deductionSegment = resolveDeductionSegmentIndex(
+    admissionDeductionSource.deductionAppliedAt,
+    patient.admitDate,
+    transferDates,
+  );
+  const currentSegmentDeduction = resolveSegmentDeductionFields(
+    admissionDeductionSource,
+    transferDates,
+    "current",
   );
   const deductionLabel =
     currentSegmentDeduction.deductionType === "percentage"
@@ -929,8 +956,10 @@ export default function InPatientProfilePage() {
   const carriedForwardExpenses = billingExtraExpenses.filter(isCarriedForwardExpense);
   const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
   const hasCurrentDeduction = currentDeductionAmount > 0;
-  const hasAdmissionDeduction = Boolean(deductionType && deductionValue > 0);
-  const hasDeduction = hasAdmissionDeduction;
+  const hasPriorSegmentDeduction =
+    hasTransferHistory && deductionSegment !== "current" && deductionType && deductionValue > 0;
+  const targetHasDeduction =
+    deductionTargetSegment === "current" ? hasCurrentDeduction : hasPriorSegmentDeduction;
 
   const transferPaymentAllocation =
     hasTransferHistory && priorTransferEpisodes.length > 0
@@ -1483,10 +1512,21 @@ export default function InPatientProfilePage() {
                     variant="outline"
                     size="compact"
                     className="h-7 min-h-7 shrink-0 border-[#D6E8F5] bg-white px-2.5 py-0 text-[11px] font-medium print:hidden sm:h-8 sm:px-3 sm:text-xs"
-                    onClick={openDeductionModal}
+                    onClick={() => openDeductionModal("current")}
                     data-testid="button-apply-deduction"
                   >
-                    {hasDeduction ? "Edit Deduction" : "Apply Deduction"}
+                    {hasCurrentDeduction ? "Edit Deduction" : "New Deduction"}
+                  </Button>
+                )}
+                {canApplyDeduction && showingPreviousBilling && hasPriorSegmentDeduction && (
+                  <Button
+                    variant="outline"
+                    size="compact"
+                    className="h-7 min-h-7 shrink-0 border-[#D6E8F5] bg-white px-2.5 py-0 text-[11px] font-medium print:hidden sm:h-8 sm:px-3 sm:text-xs"
+                    onClick={() => openDeductionModal("prior")}
+                    data-testid="button-edit-prior-deduction"
+                  >
+                    Edit Deduction
                   </Button>
                 )}
               </div>
@@ -2792,9 +2832,17 @@ export default function InPatientProfilePage() {
       <Dialog open={showDeductionModal} onOpenChange={setShowDeductionModal}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{hasDeduction ? "Edit Deduction" : "Apply Deduction"}</DialogTitle>
+            <DialogTitle>
+              {targetHasDeduction
+                ? "Edit Deduction"
+                : deductionTargetSegment === "current"
+                  ? "New Deduction"
+                  : "Apply Deduction"}
+            </DialogTitle>
             <DialogDescription>
-              Applied against the current stay subtotal of LKR {formatMoney(currentSubtotal)}.
+              {deductionTargetSegment === "current"
+                ? `Applied against the current stay subtotal of LKR ${formatMoney(currentSubtotal)}.`
+                : "Applied against the previous branch stay subtotal."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -2833,10 +2881,16 @@ export default function InPatientProfilePage() {
                 const priorTransferEpisodes = priorEpisodes
                   .filter((episode) => episode.episodeType === "transfer")
                   .sort((left, right) => left.admitDate.localeCompare(right.admitDate));
+                const priorPreviewIndex =
+                  deductionTargetSegment === "prior"
+                    ? deductionSegment === "current"
+                      ? priorTransferEpisodes.length - 1
+                      : (deductionSegment as number)
+                    : null;
                 const deductionPreviewSubtotal =
-                  deductionSegment === "current"
+                  deductionTargetSegment === "current"
                     ? currentSubtotal
-                    : priorTransferEpisodes[deductionSegment as number]?.breakdown?.subtotal ?? currentSubtotal;
+                    : priorTransferEpisodes[priorPreviewIndex ?? 0]?.breakdown?.subtotal ?? currentSubtotal;
                 const preview = computeDeductionAmount(
                   deductionPreviewSubtotal,
                   deductionForm.deductionType,
@@ -2844,16 +2898,16 @@ export default function InPatientProfilePage() {
                 );
                 if (v <= 0) return null;
                 const previewLabel =
-                  deductionSegment === "current" ? "Current stay" : "Prior branch stay";
+                  deductionTargetSegment === "current" ? "Current stay" : "Prior branch stay";
                 const newSegmentTotal = Math.max(0, deductionPreviewSubtotal - preview);
                 const newTotalBill =
-                  deductionSegment === "current"
+                  deductionTargetSegment === "current"
                     ? newSegmentTotal + carriedForwardTotal
                     : grandTotal - preview;
                 return (
                   <p className="text-xs text-muted-foreground" data-testid="text-deduction-preview">
                     Deduction: - LKR {formatMoney(preview)} → {previewLabel}: LKR {formatMoney(newSegmentTotal)}
-                    {deductionSegment === "current" && hasCarriedForwardBalance
+                    {deductionTargetSegment === "current" && hasCarriedForwardBalance
                       ? ` → Total bill: LKR ${formatMoney(newTotalBill)}`
                       : null}
                   </p>
@@ -2873,7 +2927,7 @@ export default function InPatientProfilePage() {
             </div>
 
             <div className="flex gap-3 pt-2">
-              {hasDeduction && (
+              {targetHasDeduction && (
                 <Button
                   type="button"
                   variant="outline"

@@ -420,7 +420,12 @@ export function useSetInPatientDeduction() {
   return useMutation({
     mutationFn: ({ id, data }: {
       id: string;
-      data: { deductionType: "fixed" | "percentage" | null; deductionValue: number; deductionReason?: string | null };
+      data: {
+        deductionType: "fixed" | "percentage" | null;
+        deductionValue: number;
+        deductionReason?: string | null;
+        targetSegment?: "current" | "prior";
+      };
     }) => inPatientApi.setDeduction(id, data),
     onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.id),
   });

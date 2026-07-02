@@ -284,6 +284,13 @@ export const inPatientAdmissions = pgTable("in_patient_admissions", {
   deductionAppliedBy: text("deduction_applied_by"),
   deductionAppliedById: text("deduction_applied_by_id"),
   deductionAppliedAt: timestamp("deduction_applied_at", { mode: "date" }),
+  // After a branch transfer, the closing branch stay keeps deduction_* above; the active stay uses these.
+  currentDeductionType: text("current_deduction_type"),
+  currentDeductionValue: decimal("current_deduction_value", { precision: 12, scale: 2 }).notNull().default("0"),
+  currentDeductionReason: text("current_deduction_reason"),
+  currentDeductionAppliedBy: text("current_deduction_applied_by"),
+  currentDeductionAppliedById: text("current_deduction_applied_by_id"),
+  currentDeductionAppliedAt: timestamp("current_deduction_applied_at", { mode: "date" }),
   reportsAttachments: text("reports_attachments").array(),
   idCopyAttachments: text("id_copy_attachments").array(),
   status: text("status").notNull().default("Admitted"),

@@ -233,6 +233,8 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart31StaffRoleCapabilities();
   const { runPart32MdOverviewCapsFix } = await import("./migrations/part32MdOverviewCapsFix");
   await runPart32MdOverviewCapsFix();
+  const { runPart33CurrentSegmentDeduction } = await import("./migrations/part33CurrentSegmentDeduction");
+  await runPart33CurrentSegmentDeduction();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -321,5 +323,11 @@ export async function ensurePostgresSchemaCompatibility() {
     await runPart32MdOverviewCapsFix();
   } catch (error) {
     console.error("[db] Part 32 MD overview caps fix failed (non-fatal):", error);
+  }
+  try {
+    const { runPart33CurrentSegmentDeduction } = await import("./migrations/part33CurrentSegmentDeduction");
+    await runPart33CurrentSegmentDeduction();
+  } catch (error) {
+    console.error("[db] Part 33 current segment deduction failed (non-fatal):", error);
   }
 }
