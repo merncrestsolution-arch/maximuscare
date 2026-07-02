@@ -21,9 +21,7 @@ let appPromise: Promise<ExpressApp> | null = null;
 async function getApp(): Promise<ExpressApp> {
   if (!appPromise) {
     appPromise = (async () => {
-      // Idempotent: safe to re-run on every cold start.
-      const { ensurePostgresBootColumns } = await import("./pgBootstrap");
-      await ensurePostgresBootColumns();
+      // Idempotent: safe to re-run on every cold start (bootstrap runs inside ensurePostgresSchemaCompatibility).
       await ensureSqliteSchemaCompatibility();
       await ensurePostgresSchemaCompatibility();
       await seedDefaultUsers();
@@ -61,14 +59,15 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   } catch (err) {
     console.error("[api] Failed to initialize serverless backend:", err);
     const detail = err instanceof Error ? err.message : String(err);
+    const quotaExceeded = /quota exceeded|data transfer quota/i.test(detail);
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify({
-        message:
-          "Backend initialization failed. Check that the database (DATABASE_URL / POSTGRES_URL) is set and reachable.",
-        detail: process.env.NODE_ENV === "production" ? detail : undefined,
-      })
+        message: quotaExceeded
+          ? detail
+          : "Backend initialization failed. Check that the database (DATABASE_URL / POSTGRES_URL) is set and reachable.",
+      }),
     );
   }
 }
