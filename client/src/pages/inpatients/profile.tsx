@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
-import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientBillingSummary, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats, useTransferBranches, useBranches } from "@/hooks/useData";
+import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientBillingSummary, useExcludePriorBilling, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats, useTransferBranches, useBranches } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
 import { getClinicalStaff } from "@/components/staff/treating-staff-combobox";
@@ -185,6 +185,7 @@ export default function InPatientProfilePage() {
   const updatePayment = useUpdateInPatientPayment();
   const updateInPatient = useUpdateInPatient();
   const setDeduction = useSetInPatientDeduction();
+  const excludePriorBilling = useExcludePriorBilling();
   const createExtraExpense = useCreateInPatientExtraExpense();
   const updateExtraExpense = useUpdateInPatientExtraExpense();
   const deleteExtraExpense = useDeleteInPatientExtraExpense();
@@ -246,6 +247,11 @@ export default function InPatientProfilePage() {
   });
 
   const [deleteExpenseId, setDeleteExpenseId] = useState<string | null>(null);
+  const [priorBillingToDelete, setPriorBillingToDelete] = useState<{
+    sourceId: string;
+    label: string;
+    pending: number;
+  } | null>(null);
   const [deleteSessionId, setSessionToDelete] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   // Bug 9: admit-date inline editing (Admin/MD) and re-admit date selection.
@@ -583,6 +589,27 @@ export default function InPatientProfilePage() {
     }
   };
 
+  const handleExcludePriorBilling = async () => {
+    if (!priorBillingToDelete) return;
+    try {
+      await excludePriorBilling.mutateAsync({
+        admissionId: patientId,
+        sourceId: priorBillingToDelete.sourceId,
+      });
+      toast({
+        title: "Removed",
+        description: "Previous billing record excluded. Balances have been recalculated.",
+      });
+      setPriorBillingToDelete(null);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to remove previous billing",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleSaveCaretakerRate = async () => {
     try {
       const data: any = {
@@ -894,21 +921,28 @@ export default function InPatientProfilePage() {
       !isTransferCarriedForwardCredit(expense),
   );
   const showingPreviousBilling = showBillingHistoryToggle && billingSummaryView === "previous";
+  const previousLineBySource = useMemo(
+    () => new Map((previousBilling?.lines ?? []).map((line) => [line.sourceId, line])),
+    [previousBilling?.lines],
+  );
   const getPriorEpisodeBilling = (episode: InPatientPriorEpisode) => {
-    const pending = episode.pendingBalance;
+    const line = previousLineBySource.get(episode.admissionId);
+    const appliedFromCurrent = line?.appliedFromCurrentPayments ?? 0;
+    const pending = line?.remainingPending ?? episode.pendingBalance;
     const credit = pending < 0 ? Math.abs(pending) : 0;
     return {
       grandTotal: episode.grandTotal ?? 0,
       paidDuringAdmission: episode.amountPaid,
-      paidAfterReadmit: 0,
-      paid: episode.amountPaid,
+      paidAfterReadmit: appliedFromCurrent,
+      paid: episode.amountPaid + appliedFromCurrent,
       pending: credit > 0 ? -credit : pending,
       credit,
+      grossPending: line?.pendingBalance ?? episode.pendingBalance,
     };
   };
-  const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode) => {
-    return sum + getPriorEpisodeBilling(episode).pending;
-  }, 0);
+  const totalPriorPendingBalance =
+    previousBilling?.totalPendingRemaining ??
+    priorEpisodes.reduce((sum, episode) => sum + getPriorEpisodeBilling(episode).pending, 0);
   const dischargeBalance = discharge ? netBalanceDue : 0;
   const pastDueAdmission = dischargeBalance > 0 ? dischargeBalance : 0;
   const pastDueOutpatient = Math.max(0, Number(linkedPatientStats?.outstandingAmount ?? 0));
@@ -1421,6 +1455,27 @@ export default function InPatientProfilePage() {
                               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
                                 {episode.episodeType === "transfer" ? "Transferred" : episode.status}
                               </span>
+                              {isAdminMD && (
+                                <Button
+                                  variant="ghost"
+                                  size="compact"
+                                  className="ml-auto h-7 min-h-7 px-2 text-xs text-destructive hover:text-destructive print:hidden"
+                                  onClick={() =>
+                                    setPriorBillingToDelete({
+                                      sourceId: episode.admissionId,
+                                      label:
+                                        episode.episodeType === "transfer"
+                                          ? `${episode.branchName ?? "Previous branch"} stay`
+                                          : `Admission ${format(new Date(episode.admitDate), "dd MMM yyyy")}`,
+                                      pending: getPriorEpisodeBilling(episode).pending,
+                                    })
+                                  }
+                                  data-testid={`button-delete-prior-billing-${episode.admissionId}`}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Delete
+                                </Button>
+                              )}
                               {episode.episodeType === "transfer" && (
                                 <span className="text-xs text-muted-foreground">
                                   {format(new Date(episode.admitDate), "dd MMM yyyy")}
@@ -1505,7 +1560,7 @@ export default function InPatientProfilePage() {
                             />
                             {billing.paidAfterReadmit > 0 && (
                               <BillingLine
-                                label="Paid after re-admit (this admission)"
+                                label="Auto-deducted from current bill payments"
                                 value={`LKR ${formatMoney(billing.paidAfterReadmit)}`}
                                 tone="success"
                               />
@@ -1553,13 +1608,13 @@ export default function InPatientProfilePage() {
                             testId="text-prior-balance"
                           />
                           <BillingLine
-                            label="Paid after re-admit (this admission)"
+                            label="Auto-deducted from current bill payments"
                             value={`LKR ${formatMoney(priorBalancePaid)}`}
                             tone="success"
                             testId="text-prior-paid"
                           />
                           <BillingLine
-                            label="Total paid toward previous due"
+                            label="Total auto-deducted toward previous due"
                             value={`LKR ${formatMoney(carriedForwardDebt - priorBalanceDue)}`}
                             tone="success"
                           />
@@ -1697,7 +1752,7 @@ export default function InPatientProfilePage() {
                           {hasCarriedForwardBalance && currentStayPaymentTotal > 0 && (
                             <>
                               <BillingLine
-                                label="Paid toward previous admission"
+                                label="Auto-deducted toward previous admission"
                                 value={`LKR ${formatMoney(priorBalancePaid)}`}
                                 tone="success"
                                 testId="text-transfer-prior-paid"
@@ -1721,7 +1776,7 @@ export default function InPatientProfilePage() {
                       ) : hasCarriedForwardBalance ? (
                         <>
                           <BillingLine
-                            label="Paid toward previous admission"
+                            label="Auto-deducted toward previous admission"
                             value={`LKR ${formatMoney(priorBalancePaid)}`}
                             tone="success"
                           />
@@ -3031,6 +3086,34 @@ export default function InPatientProfilePage() {
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-delete-expense">Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteExpense} data-testid="button-confirm-delete-expense">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!priorBillingToDelete}
+        onOpenChange={(open) => {
+          if (!open) setPriorBillingToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove previous billing record?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {priorBillingToDelete
+                ? `This will remove "${priorBillingToDelete.label}" from billing (pending LKR ${formatMoney(Math.max(0, priorBillingToDelete.pending))}) and recalculate the patient's total balance. Clinical history is kept. This action is logged for audit.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete-prior-billing">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleExcludePriorBilling}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-delete-prior-billing"
+            >
+              Remove from billing
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

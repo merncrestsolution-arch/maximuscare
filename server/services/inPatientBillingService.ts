@@ -15,6 +15,10 @@ import {
   sumPaymentAmounts,
 } from "@shared/inpatientBilling";
 import { getPriorInPatientEpisodes } from "./inPatientAdmissionService";
+import {
+  filterExcludedPriorEpisodes,
+  getExcludedPriorBillingSourceIds,
+} from "./inPatientPriorBillingService";
 
 function toPaymentLine(payment: InPatientPayment): CurrentBillingPaymentLine {
   return {
@@ -46,6 +50,8 @@ function episodeToPreviousLine(
     deductionAmount: breakdown?.deductionAmount ?? 0,
     deductionReason: breakdown?.deductionReason ?? null,
     pendingBalance: episode.pendingBalance,
+    appliedFromCurrentPayments: 0,
+    remainingPending: episode.pendingBalance,
   };
 }
 
@@ -65,13 +71,17 @@ export async function calculateAdmissionBilling(
   if (!admission) return null;
 
   const endDate = options?.asOfDate?.split("T")[0] || clinicDateString();
-  const [payments, extraExpenses, transfers, priorEpisodes, discharge] = await Promise.all([
+  const [payments, extraExpenses, transfers, priorEpisodesRaw, discharge, excludedSourceIds] =
+    await Promise.all([
     storage.getInPatientPaymentsByAdmission(admissionId),
     storage.getInPatientExtraExpensesByAdmission(admissionId),
     storage.getPatientTransferLogsByAdmission(admissionId),
     getPriorInPatientEpisodes(storage, admissionId),
     storage.getInPatientDischargeByAdmission(admissionId),
+    getExcludedPriorBillingSourceIds(storage, admissionId),
   ]);
+
+  const priorEpisodes = filterExcludedPriorEpisodes(priorEpisodesRaw, excludedSourceIds);
 
   const transferLogsAsc = [...transfers].sort((left, right) =>
     String(left.transferDate).localeCompare(String(right.transferDate)),

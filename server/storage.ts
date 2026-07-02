@@ -121,6 +121,7 @@ const {
   inPatientPayments,
   inPatientExtraExpenses,
   patientTransferLogs,
+  inPatientPriorBillingExclusions,
   expenses,
   incentiveSettings,
   appointments,
@@ -343,6 +344,7 @@ import type {
   HomeVisit,
   InsertHomeVisit,
   InsertStaffIncentive,
+  InPatientPriorBillingExclusion,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -474,6 +476,21 @@ export interface IStorage {
   deleteInPatientExtraExpense(id: string): Promise<boolean>;
   getExtraExpenseTotalByAdmission(admissionId: string): Promise<number>;
   getPatientTransferLogsByAdmission(admissionId: string): Promise<PatientTransferLog[]>;
+
+  // Prior billing exclusions (Admin soft-delete from billing view)
+  getInPatientPriorBillingExclusionsByAdmission(admissionId: string): Promise<InPatientPriorBillingExclusion[]>;
+  getInPatientPriorBillingExclusion(
+    admissionId: string,
+    sourceId: string,
+  ): Promise<InPatientPriorBillingExclusion | undefined>;
+  createInPatientPriorBillingExclusion(data: {
+    admissionId: string;
+    sourceId: string;
+    episodeType: string;
+    excludedByStaffId?: string | null;
+    excludedByName?: string | null;
+    snapshotJson?: string | null;
+  }): Promise<InPatientPriorBillingExclusion>;
 
   // Expense methods
   getExpense(id: string): Promise<Expense | undefined>;
@@ -1467,6 +1484,55 @@ export class DatabaseStorage implements IStorage {
       .from(patientTransferLogs)
       .where(eq(patientTransferLogs.admissionId, admissionId))
       .orderBy(asc(patientTransferLogs.transferDate), asc(patientTransferLogs.createdAt));
+  }
+
+  async getInPatientPriorBillingExclusionsByAdmission(
+    admissionId: string,
+  ): Promise<InPatientPriorBillingExclusion[]> {
+    return await db
+      .select()
+      .from(inPatientPriorBillingExclusions)
+      .where(eq(inPatientPriorBillingExclusions.admissionId, admissionId))
+      .orderBy(desc(inPatientPriorBillingExclusions.excludedAt));
+  }
+
+  async getInPatientPriorBillingExclusion(
+    admissionId: string,
+    sourceId: string,
+  ): Promise<InPatientPriorBillingExclusion | undefined> {
+    const result = await db
+      .select()
+      .from(inPatientPriorBillingExclusions)
+      .where(
+        and(
+          eq(inPatientPriorBillingExclusions.admissionId, admissionId),
+          eq(inPatientPriorBillingExclusions.sourceId, sourceId),
+        ),
+      )
+      .limit(1);
+    return result[0];
+  }
+
+  async createInPatientPriorBillingExclusion(data: {
+    admissionId: string;
+    sourceId: string;
+    episodeType: string;
+    excludedByStaffId?: string | null;
+    excludedByName?: string | null;
+    snapshotJson?: string | null;
+  }): Promise<InPatientPriorBillingExclusion> {
+    const result = await db
+      .insert(inPatientPriorBillingExclusions)
+      .values({
+        admissionId: data.admissionId,
+        sourceId: data.sourceId,
+        episodeType: data.episodeType,
+        excludedByStaffId: data.excludedByStaffId ?? null,
+        excludedByName: data.excludedByName ?? null,
+        snapshotJson: data.snapshotJson ?? null,
+      })
+      .returning();
+    return result[0];
   }
 
   // Expense methods

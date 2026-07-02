@@ -439,6 +439,19 @@ export const patientTransferLogs = sqliteTable("patient_transfer_logs", {
 });
 export type PatientTransferLog = typeof patientTransferLogs.$inferSelect;
 
+/** Admin soft-delete: exclude a prior billing episode from balance calculations. */
+export const inPatientPriorBillingExclusions = sqliteTable("in_patient_prior_billing_exclusions", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  admissionId: text("admission_id").notNull(),
+  sourceId: text("source_id").notNull(),
+  episodeType: text("episode_type").notNull(),
+  excludedAt: integer("excluded_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  excludedByStaffId: text("excluded_by_staff_id"),
+  excludedByName: text("excluded_by_name"),
+  snapshotJson: text("snapshot_json"),
+});
+export type InPatientPriorBillingExclusion = typeof inPatientPriorBillingExclusions.$inferSelect;
+
 // Expenses table
 export const expenses = sqliteTable("expenses", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),

@@ -149,6 +149,7 @@ describe("inPatientAdmissionService", () => {
         return [];
       },
       getPatientTransferLogsByAdmission: async () => [],
+      getInPatientPriorBillingExclusionsByAdmission: async () => [],
     };
 
     const previous = await getPreviousInPatientSessions(storage as any, "current");
@@ -205,6 +206,7 @@ describe("inPatientAdmissionService", () => {
       getInPatientSessionsByAdmission: async (id: string) =>
         id === "prior" ? ([{ id: "s1" }] as any) : [],
       getPatientTransferLogsByAdmission: async () => [],
+      getInPatientPriorBillingExclusionsByAdmission: async () => [],
     };
 
     const episodes = await getPriorInPatientEpisodes(storage as any, "current");
@@ -252,6 +254,7 @@ describe("inPatientAdmissionService", () => {
       getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async () => [],
       getPatientTransferLogsByAdmission: async () => [],
+      getInPatientPriorBillingExclusionsByAdmission: async () => [],
     };
 
     const episodes = await getPriorInPatientEpisodes(storage as any, "current");
@@ -285,6 +288,7 @@ describe("inPatientAdmissionService", () => {
       getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async () => [],
       getPatientTransferLogsByAdmission: async () => [],
+      getInPatientPriorBillingExclusionsByAdmission: async () => [],
     };
 
     const previous = await getPreviousInPatientSessions(storage as any, "dehiwala-sir");
@@ -326,6 +330,7 @@ describe("inPatientAdmissionService", () => {
           ? ([{ id: "s1", sessionDate: "2024-05-10", sessionNumber: 1, admissionId: "dehiwala-old" }] as any)
           : [],
       getPatientTransferLogsByAdmission: async () => [],
+      getInPatientPriorBillingExclusionsByAdmission: async () => [],
     };
 
     const previous = await getPreviousInPatientSessions(storage as any, "nexus-current");
@@ -374,6 +379,7 @@ describe("inPatientAdmissionService", () => {
           ? [{ id: "s2", sessionDate: "2024-07-02", sessionNumber: 2 } as any]
           : [{ id: "s1", sessionDate: "2024-06-05", sessionNumber: 1 } as any],
       getPatientTransferLogsByAdmission: async () => [],
+      getInPatientPriorBillingExclusionsByAdmission: async () => [],
     };
 
     const sessions = await getInPatientSessionsForAdmissionView(storage as any, "current");

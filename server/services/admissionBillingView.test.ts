@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildAdmissionBillingView } from "../../shared/admissionBillingView";
+import {
+  allocatePriorPaymentsAcrossLines,
+  buildAdmissionBillingView,
+} from "../../shared/admissionBillingView";
 import { computeAdmissionBillingBreakdown } from "../../shared/inpatientBilling";
 
 describe("admissionBillingView", () => {
@@ -27,6 +30,8 @@ describe("admissionBillingView", () => {
           deductionAmount: 2000,
           deductionReason: "no food",
           pendingBalance: 2000,
+          appliedFromCurrentPayments: 0,
+          remainingPending: 2000,
         },
       ],
       currentBreakdown,
@@ -49,6 +54,9 @@ describe("admissionBillingView", () => {
     expect(view.totals.currentBalancePaid).toBe(3000);
     expect(view.totals.totalBalanceDue).toBe(3500);
     expect(view.totals.overpaymentCredit).toBe(0);
+    expect(view.previousBilling.lines[0].appliedFromCurrentPayments).toBe(2000);
+    expect(view.previousBilling.lines[0].remainingPending).toBe(0);
+    expect(view.previousBilling.totalPendingRemaining).toBe(0);
   });
 
   it("sums pending across multiple prior readmit admissions", () => {
@@ -73,6 +81,8 @@ describe("admissionBillingView", () => {
           deductionAmount: 0,
           deductionReason: null,
           pendingBalance: 2000,
+          appliedFromCurrentPayments: 0,
+          remainingPending: 2000,
         },
         {
           sourceId: "a2",
@@ -86,6 +96,8 @@ describe("admissionBillingView", () => {
           deductionAmount: 0,
           deductionReason: null,
           pendingBalance: 1000,
+          appliedFromCurrentPayments: 0,
+          remainingPending: 1000,
         },
       ],
       currentBreakdown,
@@ -117,5 +129,96 @@ describe("admissionBillingView", () => {
     expect(view.previousBilling.totalPending).toBe(0);
     expect(view.totals.totalBill).toBe(21_000);
     expect(view.totals.totalBalanceDue).toBe(16_000);
+  });
+});
+
+describe("allocatePriorPaymentsAcrossLines", () => {
+  it("applies current-bill payments to oldest prior lines first", () => {
+    const lines = allocatePriorPaymentsAcrossLines(
+      [
+        {
+          sourceId: "a1",
+          sourceLabel: "Older",
+          episodeType: "readmit",
+          admitDate: "2026-06-01",
+          dischargeDate: "2026-06-10",
+          branchName: null,
+          grandTotal: 5000,
+          amountPaid: 3000,
+          deductionAmount: 0,
+          deductionReason: null,
+          pendingBalance: 2000,
+          appliedFromCurrentPayments: 0,
+          remainingPending: 2000,
+        },
+        {
+          sourceId: "a2",
+          sourceLabel: "Newer",
+          episodeType: "readmit",
+          admitDate: "2026-07-01",
+          dischargeDate: "2026-07-05",
+          branchName: null,
+          grandTotal: 3000,
+          amountPaid: 2000,
+          deductionAmount: 0,
+          deductionReason: null,
+          pendingBalance: 1000,
+          appliedFromCurrentPayments: 0,
+          remainingPending: 1000,
+        },
+      ],
+      2500,
+    );
+
+    expect(lines[0].appliedFromCurrentPayments).toBe(2000);
+    expect(lines[0].remainingPending).toBe(0);
+    expect(lines[1].appliedFromCurrentPayments).toBe(500);
+    expect(lines[1].remainingPending).toBe(500);
+  });
+});
+
+describe("payment auto-deduction from previous pending", () => {
+  it("reduces previous pending when patient pays on current bill", () => {
+    const currentBreakdown = computeAdmissionBillingBreakdown({
+      admitDate: "2026-07-05",
+      endDate: "2026-07-05",
+      amountPerDay: 5000,
+      careTakerRatePerDay: 0,
+    });
+
+    const view = buildAdmissionBillingView({
+      previousLines: [
+        {
+          sourceId: "prior",
+          sourceLabel: "Prior stay",
+          episodeType: "readmit",
+          admitDate: "2026-07-01",
+          dischargeDate: "2026-07-04",
+          branchName: null,
+          grandTotal: 4000,
+          amountPaid: 2000,
+          deductionAmount: 0,
+          deductionReason: null,
+          pendingBalance: 2000,
+          appliedFromCurrentPayments: 0,
+          remainingPending: 2000,
+        },
+      ],
+      currentBreakdown,
+      currentPayments: [
+        {
+          id: "p1",
+          paymentDate: "2026-07-05",
+          createdAt: null,
+          paymentMode: "Cash",
+          amount: 500,
+        },
+      ],
+      paymentsTotalForAllocation: 500,
+    });
+
+    expect(view.totals.priorBalancePaid).toBe(500);
+    expect(view.totals.priorBalanceRemaining).toBe(1500);
+    expect(view.previousBilling.lines[0].remainingPending).toBe(1500);
   });
 });

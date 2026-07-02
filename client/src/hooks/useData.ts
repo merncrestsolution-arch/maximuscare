@@ -481,6 +481,15 @@ export function useInPatientBillingSummary(admissionId: string, enabled = true, 
   });
 }
 
+export function useExcludePriorBilling() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ admissionId, sourceId }: { admissionId: string; sourceId: string }) =>
+      inPatientApi.excludePriorBilling(admissionId, sourceId),
+    onSuccess: (_data, variables) => invalidateInPatientQueries(queryClient, variables.admissionId),
+  });
+}
+
 export function useNextSessionNumber(admissionId: string, date: string) {
   return useQuery({
     queryKey: ['inpatients', admissionId, 'sessions', 'next-number', date],

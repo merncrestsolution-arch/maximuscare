@@ -2916,6 +2916,34 @@ export async function registerRoutes(
     }
   });
 
+  // Admin-only: soft-exclude a previous billing episode from calculations.
+  app.post(
+    "/api/inpatients/:admissionId/prior-billing/:sourceId/exclude",
+    requireAuth,
+    requireRole("Admin"),
+    async (req: Request, res: Response) => {
+      try {
+        const user = (req as any).user;
+        const { excludePriorBillingEpisode } = await import("./services/inPatientPriorBillingService");
+        const result = await excludePriorBillingEpisode(
+          storage,
+          param(req, "admissionId"),
+          param(req, "sourceId"),
+          {
+            staffId: user.staffId,
+            name: user.name ?? user.email ?? "Admin",
+            userId: user.id ?? user.staffId,
+          },
+        );
+        return res.status(201).json(result);
+      } catch (error: any) {
+        const message = error?.message ?? "Failed to exclude previous billing";
+        const status = message.includes("not found") ? 404 : message.includes("already excluded") ? 409 : 400;
+        return res.status(status).json({ message });
+      }
+    },
+  );
+
   // Get sessions from prior admissions for the same patient (read-only history).
   app.get("/api/inpatients/:admissionId/sessions/previous", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -3719,7 +3747,34 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Validation failed", details: parsed.error.flatten(), received: req.body });
       }
 
+      const admissionId = param(req, "admissionId");
+      const { calculateAdmissionBilling } = await import("./services/inPatientBillingService");
+      const billingBefore = await calculateAdmissionBilling(storage, admissionId);
+
       const payment = await storage.createInPatientPayment(parsed.data);
+
+      const billingAfter = await calculateAdmissionBilling(storage, admissionId);
+      const priorPaidDelta =
+        (billingAfter?.totals.priorBalancePaid ?? 0) - (billingBefore?.totals.priorBalancePaid ?? 0);
+      if (priorPaidDelta > 0) {
+        const actor = await auditActor(req);
+        await logAudit(storage, {
+          ...actor,
+          module: "inpatient",
+          action: "payment.prior_balance.auto_deduct",
+          recordId: admissionId,
+          oldValue: {
+            priorBalanceRemaining: billingBefore?.totals.priorBalanceRemaining ?? 0,
+          },
+          newValue: {
+            paymentId: payment.id,
+            paymentAmount: parseFloat(String(payment.amount)) || 0,
+            appliedToPriorBalance: priorPaidDelta,
+            priorBalanceRemaining: billingAfter?.totals.priorBalanceRemaining ?? 0,
+          },
+        });
+      }
+
       return res.status(201).json(payment);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });

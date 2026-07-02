@@ -674,6 +674,10 @@ export const inPatientApi = {
     const qs = asOfDate ? `?asOfDate=${encodeURIComponent(asOfDate)}` : "";
     return apiRequest<any>(`/inpatients/${admissionId}/billing-summary${qs}`);
   },
+  excludePriorBilling: (admissionId: string, sourceId: string) =>
+    apiRequest<any>(`/inpatients/${admissionId}/prior-billing/${encodeURIComponent(sourceId)}/exclude`, {
+      method: "POST",
+    }),
   getNextSessionNumber: (admissionId: string, date: string) =>
     apiRequest<{ nextSessionNumber: number }>(`/inpatients/${admissionId}/sessions/next-number?date=${date}`),
   createSession: (admissionId: string, data: any) => 

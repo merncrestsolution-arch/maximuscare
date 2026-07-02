@@ -68,6 +68,7 @@ describe("inPatientDischargeService", () => {
       getInPatientAdmissionsForPatient: async () => [],
       getPaymentTotalByAdmission: async () => 0,
       getInPatientSessionsByAdmission: async () => [],
+      getInPatientPriorBillingExclusionsByAdmission: async () => [],
     };
 
     const summary = await buildInPatientDischargeSummary(storage as any, "a1", "2026-07-03");
@@ -169,6 +170,7 @@ describe("inPatientDischargeService", () => {
       ],
       getPaymentTotalByAdmission: async (id: string) => (id === "prior" ? 0 : 0),
       getInPatientSessionsByAdmission: async () => [],
+      getInPatientPriorBillingExclusionsByAdmission: async () => [],
     };
 
     const summary = await buildInPatientDischargeSummary(storage as any, "a2", "2026-07-07");

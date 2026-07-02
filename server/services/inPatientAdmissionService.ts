@@ -19,6 +19,10 @@ import {
   TRANSFER_BALANCE_MARKER,
   TRANSFER_CREDIT_MARKER,
 } from "@shared/inpatientBilling";
+import {
+  filterExcludedPriorEpisodes,
+  getExcludedPriorBillingSourceIds,
+} from "./inPatientPriorBillingService";
 
 export {
   formatReadmitAdmissionSource,
@@ -651,7 +655,8 @@ export async function getPriorInPatientEpisodes(
   }
 
   const transferEpisodes = await getTransferPriorBillingEpisodes(storage, admissionId);
-  return [...transferEpisodes, ...episodes];
+  const excludedSourceIds = await getExcludedPriorBillingSourceIds(storage, admissionId);
+  return filterExcludedPriorEpisodes([...transferEpisodes, ...episodes], excludedSourceIds);
 }
 
 /**

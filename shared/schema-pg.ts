@@ -453,6 +453,19 @@ export const patientTransferLogs = pgTable("patient_transfer_logs", {
 });
 export type PatientTransferLog = typeof patientTransferLogs.$inferSelect;
 
+/** Admin soft-delete: exclude a prior billing episode from balance calculations. */
+export const inPatientPriorBillingExclusions = pgTable("in_patient_prior_billing_exclusions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  admissionId: varchar("admission_id").notNull(),
+  sourceId: text("source_id").notNull(),
+  episodeType: text("episode_type").notNull(),
+  excludedAt: timestamp("excluded_at", { mode: "date" }).notNull().defaultNow(),
+  excludedByStaffId: text("excluded_by_staff_id"),
+  excludedByName: text("excluded_by_name"),
+  snapshotJson: text("snapshot_json"),
+});
+export type InPatientPriorBillingExclusion = typeof inPatientPriorBillingExclusions.$inferSelect;
+
 export const expenses = pgTable("expenses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   expenseDate: date("expense_date").notNull(),

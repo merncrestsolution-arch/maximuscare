@@ -235,6 +235,8 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart32MdOverviewCapsFix();
   const { runPart33CurrentSegmentDeduction } = await import("./migrations/part33CurrentSegmentDeduction");
   await runPart33CurrentSegmentDeduction();
+  const { runPart34PriorBillingExclusions } = await import("./migrations/part34PriorBillingExclusions");
+  await runPart34PriorBillingExclusions();
 }
 
 /** Runs Part 2 migration on PostgreSQL (SQLite runs it inside ensureSqliteSchemaCompatibility). */
@@ -329,5 +331,11 @@ export async function ensurePostgresSchemaCompatibility() {
     await runPart33CurrentSegmentDeduction();
   } catch (error) {
     console.error("[db] Part 33 current segment deduction failed (non-fatal):", error);
+  }
+  try {
+    const { runPart34PriorBillingExclusions } = await import("./migrations/part34PriorBillingExclusions");
+    await runPart34PriorBillingExclusions();
+  } catch (error) {
+    console.error("[db] Part 34 prior billing exclusions failed (non-fatal):", error);
   }
 }

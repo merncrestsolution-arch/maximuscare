@@ -15,7 +15,12 @@ export type PreviousBillingLine = {
   amountPaid: number;
   deductionAmount: number;
   deductionReason: string | null;
+  /** Gross pending before current-bill payments are applied. */
   pendingBalance: number;
+  /** Portion of current-bill payments auto-applied to this line (FIFO). */
+  appliedFromCurrentPayments: number;
+  /** Remaining pending after current-bill payments. */
+  remainingPending: number;
 };
 
 export type CurrentBillingPaymentLine = {
@@ -31,7 +36,10 @@ export type AdmissionBillingView = {
   previousBilling: {
     applicable: boolean;
     lines: PreviousBillingLine[];
+    /** Sum of gross pending across all prior lines. */
     totalPending: number;
+    /** Sum of remaining pending after current-bill payments. */
+    totalPendingRemaining: number;
     totalDeduction: number;
   };
   currentBilling: {
@@ -65,6 +73,31 @@ export type AdmissionBillingView = {
   currentBreakdown: AdmissionBillingBreakdown;
 };
 
+export function allocatePriorPaymentsAcrossLines(
+  lines: PreviousBillingLine[],
+  priorBalancePaid: number,
+): PreviousBillingLine[] {
+  let remainingPaid = priorBalancePaid;
+  const sorted = [...lines].sort((left, right) => left.admitDate.localeCompare(right.admitDate));
+  const allocationBySource = new Map<string, number>();
+
+  for (const line of sorted) {
+    const grossDue = line.pendingBalance > 0 ? line.pendingBalance : 0;
+    const applied = Math.min(remainingPaid, grossDue);
+    allocationBySource.set(line.sourceId, applied);
+    remainingPaid = Math.max(0, remainingPaid - applied);
+  }
+
+  return lines.map((line) => {
+    const appliedFromCurrentPayments = allocationBySource.get(line.sourceId) ?? 0;
+    return {
+      ...line,
+      appliedFromCurrentPayments,
+      remainingPending: line.pendingBalance - appliedFromCurrentPayments,
+    };
+  });
+}
+
 export function buildAdmissionBillingView(input: {
   previousLines: PreviousBillingLine[];
   currentBreakdown: AdmissionBillingBreakdown;
@@ -81,6 +114,18 @@ export function buildAdmissionBillingView(input: {
     totalPreviousPending,
   );
 
+  const allocatedLines = allocatePriorPaymentsAcrossLines(
+    input.previousLines.map((line) => ({
+      ...line,
+      appliedFromCurrentPayments: 0,
+      remainingPending: line.pendingBalance,
+    })),
+    paymentSplit.priorBalancePaid,
+  );
+  const totalPendingRemaining = allocatedLines.reduce((sum, line) => {
+    return sum + (line.remainingPending > 0 ? line.remainingPending : 0);
+  }, 0);
+
   const totalBill = currentChargesTotal + totalPreviousPending;
   const totalBalanceDue =
     totalPreviousPending > 0
@@ -90,8 +135,9 @@ export function buildAdmissionBillingView(input: {
   return {
     previousBilling: {
       applicable: input.previousLines.length > 0 || totalPreviousPending !== 0,
-      lines: input.previousLines,
+      lines: allocatedLines,
       totalPending: totalPreviousPending,
+      totalPendingRemaining,
       totalDeduction: totalPreviousDeduction,
     },
     currentBilling: {
