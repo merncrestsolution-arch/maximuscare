@@ -728,7 +728,15 @@ export default function InPatientProfilePage() {
   const sortedDates = Object.keys(sessionsByDate).sort((a, b) => b.localeCompare(a));
   const hasPriorEpisodes = priorEpisodes.length > 0;
   const hasPreviousSessions = previousSessions.length > 0 || priorEpisodes.some((episode) => episode.sessionCount > 0);
-  const showSessionsHistoryToggle = hasPriorEpisodes || hasPreviousSessions;
+  const isReadmitAdmission = Boolean(
+    parseReadmitAdmissionSource((patient as { admissionSource?: string | null }).admissionSource),
+  );
+  const hasTransferHistory = (transferLogs as any[]).length > 0;
+  const showSessionsHistoryToggle =
+    hasPriorEpisodes ||
+    hasPreviousSessions ||
+    isReadmitAdmission ||
+    hasTransferHistory;
   const showingPreviousSessions = showSessionsHistoryToggle && sessionsView === "previous";
   const displayedSessions = showingPreviousSessions ? previousSessions : (sessions || []);
   const previousSessionsByAdmission = previousSessions.reduce<

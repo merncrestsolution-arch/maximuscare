@@ -1,5 +1,6 @@
 import type { InPatientAdmission } from "@shared/schema";
 import type { IStorage } from "../storage";
+import { organizationForBranch } from "@shared/branchAccess";
 import {
   collectReadmitChainPriorAdmissionIds,
   computeAdmissionBalanceDue,
@@ -217,6 +218,103 @@ export async function getRelatedInPatientAdmissions(
   return Array.from(matches.values());
 }
 
+/** Explicit patientId links within the same org (Maximus vs Nexus) — safe for transfer history. */
+export async function getOrgScopedPatientAdmissions(
+  storage: IStorage,
+  admission: InPatientAdmission,
+): Promise<InPatientAdmission[]> {
+  if (!admission.patientId) return [];
+  const patient = await storage.getPatient(admission.patientId);
+  if (!patient) return [];
+  const org = organizationForBranch(patient.branch);
+  const branches = await storage.getAllBranches();
+  const orgBranchIds = new Set(
+    branches
+      .filter((b) => organizationForBranch(b.branchName ?? b.name) === org)
+      .map((b) => b.id),
+  );
+  const linked = await storage.getInPatientAdmissionsForPatient(admission.patientId);
+  return linked.filter((a) => a.branchId && orgBranchIds.has(a.branchId));
+}
+
+/**
+ * Prior admission IDs whose sessions belong in "Previous" history after re-admit or transfer.
+ * Uses readmit chain + legacy transferred rows + org-scoped discharged episodes for linked patients.
+ */
+export function collectPriorAdmissionIdsForSessionHistory(
+  admission: InPatientAdmission,
+  related: InPatientAdmission[],
+  orgLinked: InPatientAdmission[] = [],
+  allPatientLinked: InPatientAdmission[] = [],
+): Set<string> {
+  const byId = new Map<string, InPatientAdmission>();
+  for (const entry of [...related, ...orgLinked, ...allPatientLinked]) {
+    byId.set(entry.id, entry);
+  }
+
+  const ids = new Set<string>();
+  for (const id of collectReadmitChainPriorAdmissionIds(admission, byId)) {
+    ids.add(id);
+  }
+
+  const directPrior = parseReadmitAdmissionSource(admission.admissionSource);
+  if (directPrior) ids.add(directPrior);
+
+  if (admission.patientId) {
+    for (const entry of allPatientLinked) {
+      if (entry.id === admission.id) continue;
+      if (entry.patientId !== admission.patientId) continue;
+      if (normalizeAdmissionListStatus(entry.status) === "transferred") {
+        ids.add(entry.id);
+      }
+    }
+  }
+
+  if (directPrior && admission.patientId) {
+    for (const entry of orgLinked) {
+      if (entry.id === admission.id) continue;
+      if (entry.patientId !== admission.patientId) continue;
+      const st = normalizeAdmissionListStatus(entry.status);
+      if (st === "discharged" || st === "transferred") {
+        ids.add(entry.id);
+      }
+    }
+  }
+
+  return ids;
+}
+
+async function loadSessionsForPriorAdmissions(
+  storage: IStorage,
+  priorAdmissions: InPatientAdmission[],
+) {
+  const results: Array<
+    Awaited<ReturnType<IStorage["getInPatientSessionsByAdmission"]>>[number] & {
+      admissionAdmitDate: string;
+      admissionStatus: string;
+      priorAdmissionId: string;
+    }
+  > = [];
+
+  for (const prior of priorAdmissions) {
+    const sessions = await storage.getInPatientSessionsByAdmission(prior.id);
+    for (const session of sessions) {
+      results.push({
+        ...session,
+        admissionAdmitDate: prior.admitDate,
+        admissionStatus: prior.status,
+        priorAdmissionId: prior.id,
+      });
+    }
+  }
+
+  return results.sort((left, right) => {
+    const dateCmp = right.sessionDate.localeCompare(left.sessionDate);
+    if (dateCmp !== 0) return dateCmp;
+    return left.sessionNumber - right.sessionNumber;
+  });
+}
+
 export interface PriorInPatientEpisode {
   admissionId: string;
   admitDate: string;
@@ -326,9 +424,20 @@ export async function getInPatientSessionsForAdmissionView(
 
   const primary = await storage.getInPatientSessionsByAdmission(admissionId);
   const related = await getRelatedInPatientAdmissions(storage, admission);
-  const legacyTransferred = related.filter(
+  const orgLinked = await getOrgScopedPatientAdmissions(storage, admission);
+  const allPatientLinked = admission.patientId
+    ? await storage.getInPatientAdmissionsForPatient(admission.patientId)
+    : [];
+  const priorIds = collectPriorAdmissionIdsForSessionHistory(
+    admission,
+    related,
+    orgLinked,
+    allPatientLinked,
+  );
+  const legacyTransferred = [...related, ...orgLinked, ...allPatientLinked].filter(
     (entry) =>
       entry.id !== admissionId &&
+      priorIds.has(entry.id) &&
       normalizeAdmissionListStatus(entry.status) === "transferred",
   );
 
@@ -351,42 +460,28 @@ export async function getInPatientSessionsForAdmissionView(
   });
 }
 
-/** Sessions from prior admission episodes for the same person (read-only history). */
-/** Sessions from prior readmit-chain episodes only (same person, same branch). */
+/** Sessions from prior admission episodes (re-admit chain, transfers, linked patient history). */
 export async function getPreviousInPatientSessions(storage: IStorage, admissionId: string) {
   const admission = await storage.getInPatientAdmission(admissionId);
   if (!admission) return [];
 
   const related = await getRelatedInPatientAdmissions(storage, admission);
-  const relatedById = new Map(related.map((entry) => [entry.id, entry]));
-  const readmitChainIds = new Set(collectReadmitChainPriorAdmissionIds(admission, relatedById));
-  const priorAdmissions = related
-    .filter((entry) => entry.id !== admissionId && readmitChainIds.has(entry.id))
+  const orgLinked = await getOrgScopedPatientAdmissions(storage, admission);
+  const allPatientLinked = admission.patientId
+    ? await storage.getInPatientAdmissionsForPatient(admission.patientId)
+    : [];
+  const priorIds = collectPriorAdmissionIdsForSessionHistory(
+    admission,
+    related,
+    orgLinked,
+    allPatientLinked,
+  );
+  const byId = new Map([...related, ...orgLinked, ...allPatientLinked].map((entry) => [entry.id, entry]));
+
+  const priorAdmissions = [...priorIds]
+    .map((id) => byId.get(id))
+    .filter((entry): entry is InPatientAdmission => Boolean(entry))
     .sort(compareAdmissionRecency);
 
-  const results: Array<
-    Awaited<ReturnType<IStorage["getInPatientSessionsByAdmission"]>>[number] & {
-      admissionAdmitDate: string;
-      admissionStatus: string;
-      priorAdmissionId: string;
-    }
-  > = [];
-
-  for (const prior of priorAdmissions) {
-    const sessions = await storage.getInPatientSessionsByAdmission(prior.id);
-    for (const session of sessions) {
-      results.push({
-        ...session,
-        admissionAdmitDate: prior.admitDate,
-        admissionStatus: prior.status,
-        priorAdmissionId: prior.id,
-      });
-    }
-  }
-
-  return results.sort((left, right) => {
-    const dateCmp = right.sessionDate.localeCompare(left.sessionDate);
-    if (dateCmp !== 0) return dateCmp;
-    return left.sessionNumber - right.sessionNumber;
-  });
+  return loadSessionsForPriorAdmissions(storage, priorAdmissions);
 }

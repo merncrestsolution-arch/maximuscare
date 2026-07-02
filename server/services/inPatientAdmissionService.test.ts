@@ -7,6 +7,7 @@ import {
   getPreviousInPatientSessions,
   getPriorInPatientEpisodes,
   getInPatientSessionsForAdmissionView,
+  collectPriorAdmissionIdsForSessionHistory,
   parseReadmitAdmissionSource,
   formatReadmitAdmissionSource,
 } from "./inPatientAdmissionService";
@@ -95,6 +96,10 @@ describe("inPatientAdmissionService", () => {
         }
         return undefined;
       },
+      getPatient: async () => ({ id: "p1", branch: "Dehiwala", patientCode: "PC1" }) as any,
+      getAllBranches: async () => [
+        { id: "branch-a", branchName: "Dehiwala", name: "Dehiwala Main Branch" },
+      ] as any,
       getInPatientAdmissionsForPatient: async () => [
         { id: "prior", patientId: "p1", branchId: "branch-a", admitDate: "2024-05-01", status: "Discharged", createdAt: new Date("2024-05-01") },
         { id: "current", patientId: "p1", branchId: "branch-a", admitDate: "2024-07-01", status: "Admitted", admissionSource: "readmit:prior", createdAt: new Date("2024-07-01") },
@@ -280,19 +285,82 @@ describe("inPatientAdmissionService", () => {
     expect(previous).toHaveLength(0);
   });
 
+  it("includes cross-branch transferred sessions for the same linked patient", async () => {
+    const storage = {
+      getInPatientAdmission: async (id: string) => {
+        if (id === "nexus-current") {
+          return {
+            id: "nexus-current",
+            patientId: "p1",
+            branchId: "branch-nexus",
+            admitDate: "2024-08-01",
+            status: "Admitted",
+          } as any;
+        }
+        return undefined;
+      },
+      getPatient: async () => ({ id: "p1", branch: "Nexus Physio", patientCode: "NX1" }) as any,
+      getAllBranches: async () => [
+        { id: "branch-dehiwala", branchName: "Dehiwala", name: "Dehiwala Main Branch" },
+        { id: "branch-nexus", branchName: "Nexus Physio", name: "Nexus Physio & Rehab Center" },
+      ] as any,
+      getInPatientAdmissionsForPatient: async () => [
+        { id: "dehiwala-old", patientId: "p1", branchId: "branch-dehiwala", status: "Transferred", admitDate: "2024-05-01" },
+        { id: "nexus-current", patientId: "p1", branchId: "branch-nexus", status: "Admitted", admitDate: "2024-08-01" },
+      ] as any,
+      getAllInPatientAdmissions: async (branchId?: string) => {
+        const rows = [
+          { id: "dehiwala-old", patientId: "p1", branchId: "branch-dehiwala", status: "Transferred", admitDate: "2024-05-01" },
+          { id: "nexus-current", patientId: "p1", branchId: "branch-nexus", status: "Admitted", admitDate: "2024-08-01" },
+        ] as any;
+        return branchId ? rows.filter((r) => r.branchId === branchId) : rows;
+      },
+      getInPatientSessionsByAdmission: async (id: string) =>
+        id === "dehiwala-old"
+          ? ([{ id: "s1", sessionDate: "2024-05-10", sessionNumber: 1, admissionId: "dehiwala-old" }] as any)
+          : [],
+    };
+
+    const previous = await getPreviousInPatientSessions(storage as any, "nexus-current");
+    expect(previous).toHaveLength(1);
+    expect(previous[0].id).toBe("s1");
+    expect(previous[0].priorAdmissionId).toBe("dehiwala-old");
+  });
+
+  it("collects prior admission ids for re-admit without unrelated patients", () => {
+    const current = {
+      id: "current",
+      patientId: "p1",
+      admissionSource: "readmit:prior",
+      status: "Admitted",
+    } as any;
+    const related = [
+      current,
+      { id: "prior", patientId: "p1", status: "Discharged" },
+    ] as any;
+    const orgLinked = [
+      { id: "prior", patientId: "p1", status: "Discharged" },
+    ] as any;
+    const allPatientLinked = orgLinked;
+    const ids = collectPriorAdmissionIdsForSessionHistory(current, related, orgLinked, allPatientLinked);
+    expect([...ids]).toEqual(["prior"]);
+  });
+
   it("merges sessions from legacy transferred admissions into the current view", async () => {
     const storage = {
       getInPatientAdmission: async (id: string) =>
         id === "current"
-          ? ({ id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01" } as any)
-          : ({ id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01" } as any),
+          ? ({ id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01", branchId: "b1" } as any)
+          : ({ id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01", branchId: "b1" } as any),
+      getPatient: async () => ({ id: "p1", branch: "Dehiwala", patientCode: "PC1" }) as any,
+      getAllBranches: async () => [{ id: "b1", branchName: "Dehiwala", name: "Dehiwala Main Branch" }] as any,
       getInPatientAdmissionsForPatient: async () => [
-        { id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01" },
-        { id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01" },
+        { id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01", branchId: "b1" },
+        { id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01", branchId: "b1" },
       ],
       getAllInPatientAdmissions: async () => [
-        { id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01" },
-        { id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01" },
+        { id: "current", patientId: "p1", patientCode: "PC1", status: "Admitted", admitDate: "2024-07-01", branchId: "b1" },
+        { id: "old", patientId: "p1", patientCode: "PC1", status: "Transferred", admitDate: "2024-06-01", branchId: "b1" },
       ],
       getInPatientSessionsByAdmission: async (id: string) =>
         id === "current"
