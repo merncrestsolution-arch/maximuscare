@@ -1,6 +1,7 @@
 export const CLINIC_TIMEZONE = "Asia/Colombo";
 
 export const CARRIED_FORWARD_EXPENSE_MARKER = "previous admission balance carried forward";
+export const CARRIED_FORWARD_CREDIT_MARKER = "previous admission credit carried forward";
 
 /** Net balance: positive = owed, zero = settled, negative = credit/advance. */
 export function computeBalanceDue(totalBilled: number | string, totalPaid: number | string): number {
@@ -35,7 +36,14 @@ export function parseReadmitAdmissionSource(admissionSource?: string | null): st
 }
 
 export function isCarriedForwardExpense(expense: { description?: string | null }): boolean {
-  return String(expense.description || "").toLowerCase().includes(CARRIED_FORWARD_EXPENSE_MARKER);
+  const desc = String(expense.description || "").toLowerCase();
+  return (
+    desc.includes(CARRIED_FORWARD_EXPENSE_MARKER) || desc.includes(CARRIED_FORWARD_CREDIT_MARKER)
+  );
+}
+
+export function isCarriedForwardCredit(expense: { description?: string | null }): boolean {
+  return String(expense.description || "").toLowerCase().includes(CARRIED_FORWARD_CREDIT_MARKER);
 }
 
 export function sumCarriedForwardAmounts(
@@ -52,13 +60,27 @@ export function splitReAdmissionPayments(
   currentEpisodeGrandTotal: number,
   carriedForwardTotal: number,
 ) {
-  const priorBalancePaid = Math.min(paymentTotal, Math.max(0, carriedForwardTotal));
+  const grandTotal = currentEpisodeGrandTotal + carriedForwardTotal;
+  const overpaymentCredit = Math.max(0, paymentTotal - grandTotal);
+
+  // Prior overpayment credit is already deducted from the bill total — no "pay prior first" step.
+  if (carriedForwardTotal <= 0) {
+    const amountDue = Math.max(0, grandTotal);
+    const appliedToBill = Math.min(paymentTotal, amountDue);
+    return {
+      currentEpisodePaid: appliedToBill,
+      priorBalancePaid: 0,
+      currentBalanceDue: grandTotal - paymentTotal,
+      priorBalanceDue: 0,
+      overpaymentCredit,
+    };
+  }
+
+  const priorBalancePaid = Math.min(paymentTotal, carriedForwardTotal);
   const remainder = Math.max(0, paymentTotal - priorBalancePaid);
   const currentEpisodePaid = Math.min(remainder, Math.max(0, currentEpisodeGrandTotal));
   const currentBalanceDue = currentEpisodeGrandTotal - currentEpisodePaid;
   const priorBalanceDue = carriedForwardTotal - priorBalancePaid;
-  const grandTotal = Math.max(0, carriedForwardTotal) + Math.max(0, currentEpisodeGrandTotal);
-  const overpaymentCredit = Math.max(0, paymentTotal - grandTotal);
 
   return {
     currentEpisodePaid,
@@ -105,12 +127,21 @@ export function buildDischargeBillLines(
     });
   }
 
-  if (breakdown.carriedForwardTotal > 0) {
+  if (breakdown.carriedForwardDebt > 0) {
     lines.push({
       description: "Previous Admission Balance",
       quantity: "-",
       rate: null,
-      amount: breakdown.carriedForwardTotal,
+      amount: breakdown.carriedForwardDebt,
+    });
+  }
+
+  if (breakdown.carriedForwardCreditApplied > 0) {
+    lines.push({
+      description: "Previous Overpayment Credit Applied",
+      quantity: "-",
+      rate: null,
+      amount: -breakdown.carriedForwardCreditApplied,
     });
   }
 
@@ -146,8 +177,12 @@ export type AdmissionBillingBreakdown = {
   caretakerCharges: number;
   /** Extra expenses for this stay only (excludes carried-forward prior balance). */
   extraExpenseTotal: number;
-  /** Prior admission balance brought forward on re-admit. */
+  /** Prior admission balance brought forward on re-admit (positive = debt, negative = credit). */
   carriedForwardTotal: number;
+  /** Prior admission debt carried forward (≥ 0). */
+  carriedForwardDebt: number;
+  /** Prior overpayment credit auto-deducted from this bill (≥ 0). */
+  carriedForwardCreditApplied: number;
   /** Room + caretaker + current extra expenses + carried forward, before deduction. */
   subtotal: number;
   /** Room + caretaker + current extra expenses, before deduction. */
@@ -168,6 +203,8 @@ export function computeAdmissionBillingBreakdown(input: AdmissionBillingInput): 
   const careTakerDays = input.careTakerDaysOverride ?? stayDays;
   const caretakerCharges = careTakerRate * careTakerDays;
   const carriedForwardTotal = sumCarriedForwardAmounts(input.extraExpenses);
+  const carriedForwardDebt = Math.max(0, carriedForwardTotal);
+  const carriedForwardCreditApplied = Math.max(0, -carriedForwardTotal);
   const extraExpenseTotal = (input.extraExpenses || [])
     .filter((expense) => !isCarriedForwardExpense(expense))
     .reduce((sum, expense) => sum + (parseFloat(String(expense.amount)) || 0), 0);
@@ -185,6 +222,8 @@ export function computeAdmissionBillingBreakdown(input: AdmissionBillingInput): 
     caretakerCharges,
     extraExpenseTotal,
     carriedForwardTotal,
+    carriedForwardDebt,
+    carriedForwardCreditApplied,
     subtotal,
     currentSubtotal,
     deductionAmount,
@@ -218,7 +257,9 @@ export function computeAdmissionBalanceSummary(
     overpaymentCredit,
     totalBalanceDue,
     priorPendingForCurrentAdmission,
-    hasCarriedForwardBalance: breakdown.carriedForwardTotal > 0,
+    carriedForwardCreditApplied: breakdown.carriedForwardCreditApplied,
+    hasCarriedForwardBalance: breakdown.carriedForwardDebt > 0,
+    hasCarriedForwardCredit: breakdown.carriedForwardCreditApplied > 0,
     hasPriorPendingInSummary: priorPendingForCurrentAdmission > 0,
   };
 }

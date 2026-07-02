@@ -3239,9 +3239,9 @@ export async function registerRoutes(
       let carriedForwardBalance = 0;
       let carriedForwardExpenseId: string | null = null;
       const priorBalance = await computePriorAdmissionBalance(storage, admissionId);
+      const priorDischarge = await storage.getInPatientDischargeByAdmission(admissionId);
+      const staffInfo = await storage.getStaff(user.staffId);
       if (priorBalance > 0) {
-        const staffInfo = await storage.getStaff(user.staffId);
-        const priorDischarge = await storage.getInPatientDischargeByAdmission(admissionId);
         const expense = await storage.createInPatientExtraExpense({
           admissionId: newAdmission.id,
           expenseDate: requestedAdmit,
@@ -3250,6 +3250,21 @@ export async function registerRoutes(
           description: priorDischarge
             ? `Previous admission balance carried forward (discharged ${priorDischarge.dischargeDate})`
             : "Previous admission balance carried forward",
+          createdByStaffId: user.staffId,
+          createdByStaffName: staffInfo?.name || "System",
+        });
+        carriedForwardBalance = priorBalance;
+        carriedForwardExpenseId = expense.id;
+      } else if (priorBalance < 0) {
+        const creditAmount = Math.abs(priorBalance);
+        const expense = await storage.createInPatientExtraExpense({
+          admissionId: newAdmission.id,
+          expenseDate: requestedAdmit,
+          category: "Others",
+          amount: (-creditAmount).toFixed(2),
+          description: priorDischarge
+            ? `Previous admission credit carried forward (discharged ${priorDischarge.dischargeDate})`
+            : "Previous admission credit carried forward",
           createdByStaffId: user.staffId,
           createdByStaffName: staffInfo?.name || "System",
         });

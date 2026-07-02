@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { useLocation, useRoute, useSearch } from "wouter";
 import { useInPatient, useInPatientSessions, useInPatientPreviousSessions, useInPatientPriorEpisodes, useInPatientDischarge, useDeleteInPatient, useReadmitInPatient, useUpdateInPatientAdmitDate, useTransferInPatient, useInPatientTransfers, useInPatientPayments, useInPatientPaymentTotal, useCreateInPatientPayment, useUpdateInPatientPayment, useInPatientExtraExpenses, useInPatientExtraExpenseTotal, useCreateInPatientExtraExpense, useUpdateInPatientExtraExpense, useDeleteInPatientExtraExpense, useUpdateInPatient, useSetInPatientDeduction, useTreatingStaff, useUpdateInPatientSession, useDeleteInPatientSession, usePatientStats, useTransferBranches, useBranches } from "@/hooks/useData";
 import { useAuth } from "@/context/auth-context";
@@ -70,6 +70,33 @@ function DueBalanceBanner({ due, testId }: { due: number; testId?: string }) {
   );
 }
 
+function BillingSection({
+  title,
+  variant = "charges",
+  children,
+}: {
+  title: string;
+  variant?: "charges" | "prior-debt" | "prior-credit" | "payments" | "total";
+  children: ReactNode;
+}) {
+  const styles = {
+    charges: { bg: "bg-[#E8F2FA]", border: "border-[#B8D4E8]", text: "text-[#105691]" },
+    "prior-debt": { bg: "bg-amber-50", border: "border-amber-200", text: "text-amber-900" },
+    "prior-credit": { bg: "bg-emerald-50", border: "border-emerald-200", text: "text-emerald-900" },
+    payments: { bg: "bg-green-50", border: "border-green-200", text: "text-green-900" },
+    total: { bg: "bg-slate-50", border: "border-slate-200", text: "text-slate-900" },
+  }[variant];
+
+  return (
+    <div className={`rounded-lg border ${styles.border} overflow-hidden`}>
+      <div className={`px-3 py-2 ${styles.bg}`}>
+        <p className={`text-xs font-bold uppercase tracking-wide ${styles.text}`}>{title}</p>
+      </div>
+      <div className="space-y-0.5 bg-white px-3 py-2">{children}</div>
+    </div>
+  );
+}
+
 function BillingLine({
   label,
   value,
@@ -80,13 +107,19 @@ function BillingLine({
 }: {
   label: string;
   value: string;
-  tone?: "default" | "success" | "danger";
+  tone?: "default" | "success" | "danger" | "credit";
   emphasized?: boolean;
   sublabel?: string;
   testId?: string;
 }) {
   const valueTone =
-    tone === "success" ? "text-green-700" : tone === "danger" ? "text-red-600" : "text-foreground";
+    tone === "success"
+      ? "text-green-700"
+      : tone === "danger"
+        ? "text-red-600"
+        : tone === "credit"
+          ? "text-emerald-700"
+          : "text-foreground";
 
   return (
     <div
@@ -739,6 +772,8 @@ export default function InPatientProfilePage() {
     caretakerCharges,
     extraExpenseTotal: currentExtraExpenseTotal,
     carriedForwardTotal,
+    carriedForwardDebt,
+    carriedForwardCreditApplied,
     currentSubtotal,
     deductionAmount: currentDeductionAmount,
     currentGrandTotal,
@@ -746,12 +781,14 @@ export default function InPatientProfilePage() {
   } = breakdown;
   const amountPerDay = parseFloat(patient.amountPerDay) || 0;
   const careTakerRate = parseFloat(patient.careTakerRatePerDay) || 0;
-  const hasCarriedForwardBalance = carriedForwardTotal > 0;
+  const hasCarriedForwardBalance = carriedForwardDebt > 0;
+  const hasCarriedForwardCredit = carriedForwardCreditApplied > 0;
+  const hasPriorAdjustment = hasCarriedForwardBalance || hasCarriedForwardCredit;
   const isReadmitAdmission =
     Boolean(parseReadmitAdmissionSource((patient as { admissionSource?: string | null }).admissionSource)) ||
-    hasCarriedForwardBalance;
+    hasPriorAdjustment;
   const showBillingHistoryToggle =
-    hasCarriedForwardBalance || (isReadmitAdmission && hasPriorEpisodes);
+    hasPriorAdjustment || (isReadmitAdmission && hasPriorEpisodes);
   const carriedForwardExpenses = (extraExpenses || []).filter(isCarriedForwardExpense);
   const priorDischargeNote = carriedForwardExpenses[0]?.description?.match(/discharged ([^)]+)\)/i)?.[1];
   const hasCurrentDeduction = currentDeductionAmount > 0;
@@ -813,9 +850,11 @@ export default function InPatientProfilePage() {
         description:
           carriedForward > 0
             ? `Patient re-admitted. Previous admission balance LKR ${formatMoney(carriedForward)} added to billing.`
-            : totalPastDue > 0
-              ? `Patient re-admitted. Past due balance: LKR ${formatMoney(totalPastDue)}`
-              : "Patient re-admitted",
+            : carriedForward < 0
+              ? `Patient re-admitted. Previous overpayment credit LKR ${formatMoney(Math.abs(carriedForward))} auto-deducted from this bill.`
+              : totalPastDue > 0
+                ? `Patient re-admitted. Past due balance: LKR ${formatMoney(totalPastDue)}`
+                : "Patient re-admitted",
       });
       setReadmitDate("");
       setReadmitOpen(false);
@@ -862,12 +901,22 @@ export default function InPatientProfilePage() {
           ];
         })
       : [
-          {
-            item: "Previous Admission Balance",
-            quantity: "-",
-            rate: "-",
-            amount: formatMoney(carriedForwardTotal),
-          },
+          ...(hasCarriedForwardBalance
+            ? [{
+                item: "Previous Admission Balance",
+                quantity: "-",
+                rate: "-",
+                amount: formatMoney(carriedForwardDebt),
+              }]
+            : []),
+          ...(hasCarriedForwardCredit
+            ? [{
+                item: "Previous Overpayment Credit Applied",
+                quantity: "-",
+                rate: "-",
+                amount: `-${formatMoney(carriedForwardCreditApplied)}`,
+              }]
+            : []),
           { item: "Amount Paid", quantity: "-", rate: "-", amount: formatMoney(priorBalancePaid) },
           { item: "Pending Balance", quantity: "-", rate: "-", amount: formatMoney(priorBalanceDue) },
         ]
@@ -881,7 +930,10 @@ export default function InPatientProfilePage() {
           : []),
         { item: "Current Stay Total", quantity: "-", rate: "-", amount: formatMoney(currentGrandTotal) },
         ...(hasCarriedForwardBalance
-          ? [{ item: "Previous Admission Balance", quantity: "-", rate: "-", amount: formatMoney(carriedForwardTotal) }]
+          ? [{ item: "Previous Admission Balance", quantity: "-", rate: "-", amount: formatMoney(carriedForwardDebt) }]
+          : []),
+        ...(hasCarriedForwardCredit
+          ? [{ item: "Previous Overpayment Credit Applied", quantity: "-", rate: "-", amount: `-${formatMoney(carriedForwardCreditApplied)}` }]
           : []),
         { item: "Total Bill", quantity: "-", rate: "-", amount: formatMoney(grandTotal) },
         ...(hasCarriedForwardBalance
@@ -1313,9 +1365,13 @@ export default function InPatientProfilePage() {
                               tone="success"
                             />
                             <BillingLine
-                              label="Pending Balance"
-                              value={`LKR ${formatMoney(billing.pending)}`}
-                              tone={billing.pending > 0 ? "danger" : "success"}
+                              label={billing.credit > 0 ? "Credit Balance" : "Pending Balance"}
+                              value={
+                                billing.credit > 0
+                                  ? `LKR ${formatMoney(billing.credit)}`
+                                  : `LKR ${formatMoney(billing.pending)}`
+                              }
+                              tone={billing.pending > 0 ? "danger" : billing.credit > 0 ? "credit" : "success"}
                               emphasized
                             />
                           </div>
@@ -1331,174 +1387,209 @@ export default function InPatientProfilePage() {
                       )}
                     </div>
                   ) : (
-                    <>
+                    <div className="space-y-3">
                       {priorDischargeNote && (
                         <BillingLine label="Previous Discharge Date" value={priorDischargeNote} />
                       )}
-                      <BillingLine
-                        label="Previous Admission Balance"
-                        value={`LKR ${formatMoney(carriedForwardTotal)}`}
-                        testId="text-prior-balance"
-                      />
-                      <BillingLine
-                        label="Paid after re-admit (this admission)"
-                        value={`LKR ${formatMoney(priorBalancePaid)}`}
-                        tone="success"
-                        testId="text-prior-paid"
-                      />
-                      <BillingLine
-                        label="Total paid toward previous due"
-                        value={`LKR ${formatMoney(carriedForwardTotal - priorBalanceDue)}`}
-                        tone="success"
-                      />
-                      <BillingLine
-                        label="Pending Balance"
-                        value={`LKR ${formatMoney(priorBalanceDue)}`}
-                        tone={priorBalanceDue > 0 ? "danger" : "success"}
-                        emphasized
-                        testId="text-prior-balance-due"
-                      />
-                    </>
+                      {hasCarriedForwardBalance && (
+                        <BillingSection title="Previous Admission — Balance Due" variant="prior-debt">
+                          <BillingLine
+                            label="Previous Admission Balance"
+                            value={`LKR ${formatMoney(carriedForwardDebt)}`}
+                            tone="danger"
+                            testId="text-prior-balance"
+                          />
+                          <BillingLine
+                            label="Paid after re-admit (this admission)"
+                            value={`LKR ${formatMoney(priorBalancePaid)}`}
+                            tone="success"
+                            testId="text-prior-paid"
+                          />
+                          <BillingLine
+                            label="Total paid toward previous due"
+                            value={`LKR ${formatMoney(carriedForwardDebt - priorBalanceDue)}`}
+                            tone="success"
+                          />
+                          <BillingLine
+                            label="Pending Balance"
+                            value={`LKR ${formatMoney(priorBalanceDue)}`}
+                            tone={priorBalanceDue > 0 ? "danger" : "success"}
+                            emphasized
+                            testId="text-prior-balance-due"
+                          />
+                        </BillingSection>
+                      )}
+                      {hasCarriedForwardCredit && (
+                        <BillingSection title="Previous Admission — Overpayment Credit" variant="prior-credit">
+                          <BillingLine
+                            label="Previous Overpayment Credit Applied"
+                            value={`- LKR ${formatMoney(carriedForwardCreditApplied)}`}
+                            tone="credit"
+                            sublabel="Auto-deducted from current bill"
+                            testId="text-prior-credit"
+                          />
+                        </BillingSection>
+                      )}
+                    </div>
                   )
                 ) : (
-                  <>
-                    {hasCarriedForwardBalance && (
-                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#105691]/80">
-                        Current stay charges
-                      </p>
-                    )}
-                    <BillingLine
-                      label="Stay Days"
-                      value={`${stayDays} day${stayDays > 1 ? "s" : ""}`}
-                      testId="text-stay-days"
-                    />
-                    <BillingLine
-                      label={`Room Charges (${formatMoney(amountPerDay)} × ${stayDays})`}
-                      value={`LKR ${formatMoney(roomCharges)}`}
-                      testId="text-room-charges"
-                    />
-                    <BillingLine
-                      label={`Caretaker Charges (${formatMoney(careTakerRate)} × ${careTakerDays})`}
-                      value={`LKR ${formatMoney(caretakerCharges)}`}
-                      testId="text-caretaker-charges"
-                    />
-                    <BillingLine
-                      label="Extra Expenses"
-                      value={`LKR ${formatMoney(currentExtraExpenseTotal)}`}
-                      testId="text-extra-expenses-total"
-                    />
-                    <BillingLine
-                      label="Subtotal (current stay)"
-                      value={`LKR ${formatMoney(currentSubtotal)}`}
-                      emphasized
-                      testId="text-subtotal"
-                    />
-                    {hasCurrentDeduction && (
+                  <div className="space-y-3">
+                    <BillingSection title="Current Stay Charges" variant="charges">
                       <BillingLine
-                        label={deductionLabel}
-                        value={`- LKR ${formatMoney(currentDeductionAmount)}`}
-                        tone="danger"
-                        sublabel={(patient as any).deductionReason || undefined}
-                        testId="text-deduction"
+                        label="Stay Days"
+                        value={`${stayDays} day${stayDays > 1 ? "s" : ""}`}
+                        testId="text-stay-days"
                       />
-                    )}
-                    <BillingLine
-                      label="Current Stay Total"
-                      value={`LKR ${formatMoney(currentGrandTotal)}`}
-                      emphasized
-                      testId="text-current-stay-total"
-                    />
-                    {hasCarriedForwardBalance && (
                       <BillingLine
-                        label="Previous Admission Balance"
-                        value={`LKR ${formatMoney(carriedForwardTotal)}`}
-                        testId="text-carried-forward"
+                        label={`Room Charges (${formatMoney(amountPerDay)} × ${stayDays})`}
+                        value={`LKR ${formatMoney(roomCharges)}`}
+                        testId="text-room-charges"
                       />
-                    )}
-                    <BillingLine
-                      label="Total Bill"
-                      value={`LKR ${formatMoney(grandTotal)}`}
-                      emphasized
-                      testId="text-grand-total"
-                    />
+                      <BillingLine
+                        label={`Caretaker Charges (${formatMoney(careTakerRate)} × ${careTakerDays})`}
+                        value={`LKR ${formatMoney(caretakerCharges)}`}
+                        testId="text-caretaker-charges"
+                      />
+                      <BillingLine
+                        label="Extra Expenses"
+                        value={`LKR ${formatMoney(currentExtraExpenseTotal)}`}
+                        testId="text-extra-expenses-total"
+                      />
+                      <BillingLine
+                        label="Subtotal"
+                        value={`LKR ${formatMoney(currentSubtotal)}`}
+                        emphasized
+                        testId="text-subtotal"
+                      />
+                      {hasCurrentDeduction && (
+                        <BillingLine
+                          label={deductionLabel}
+                          value={`- LKR ${formatMoney(currentDeductionAmount)}`}
+                          tone="danger"
+                          sublabel={(patient as any).deductionReason || undefined}
+                          testId="text-deduction"
+                        />
+                      )}
+                      <BillingLine
+                        label="Current Stay Total"
+                        value={`LKR ${formatMoney(currentGrandTotal)}`}
+                        emphasized
+                        testId="text-current-stay-total"
+                      />
+                    </BillingSection>
 
                     {hasCarriedForwardBalance && (
-                      <>
-                        <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-[#105691]/80">
-                          Payments (previous due cleared first)
-                        </p>
-                        <BillingLine
-                          label="Paid toward previous admission"
-                          value={`LKR ${formatMoney(priorBalancePaid)}`}
-                          tone="success"
-                        />
-                        <BillingLine
-                          label="Paid toward current stay"
-                          value={`LKR ${formatMoney(currentEpisodePaid)}`}
-                          tone="success"
-                        />
-                      </>
-                    )}
-                    <BillingLine
-                      label="Total Payments Recorded"
-                      value={`LKR ${formatMoney(paymentTotal)}`}
-                      tone="success"
-                      testId="text-total-paid"
-                    />
-                    {overpaymentCredit > 0 && (
-                      <BillingLine
-                        label="Overpayment / Credit"
-                        value={`LKR ${formatMoney(overpaymentCredit)}`}
-                        tone="success"
-                        testId="text-overpayment-credit"
-                      />
-                    )}
-
-                    <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-[#105691]/80">
-                      Balance
-                    </p>
-                    {hasPriorPendingInSummary && priorPendingForCurrentAdmission > 0 && (
-                      <BillingLine
-                        label="Previous admission due"
-                        value={`LKR ${formatMoney(priorPendingForCurrentAdmission)}`}
-                        tone="danger"
-                        testId="text-prior-balance-due-inline"
-                      />
-                    )}
-                    {hasPriorPendingInSummary && priorPendingForCurrentAdmission < 0 && (
-                      <BillingLine
-                        label="Previous admission credit"
-                        value={`LKR ${formatMoney(Math.abs(priorPendingForCurrentAdmission))}`}
-                        tone="success"
-                        testId="text-prior-balance-credit-inline"
-                      />
-                    )}
-                    {!hasPriorPendingInSummary && (
-                      <DueBalanceBanner due={netBalanceDue} testId="text-balance-due" />
-                    )}
-                    {hasPriorPendingInSummary && (
-                      <>
-                        {currentBalanceDue !== 0 && (
-                          <BillingLine
-                            label={currentBalanceDue > 0 ? "Current stay due" : "Current stay credit"}
-                            value={
-                              currentBalanceDue > 0
-                                ? `LKR ${formatMoney(currentBalanceDue)}`
-                                : `LKR ${formatMoney(Math.abs(currentBalanceDue))}`
-                            }
-                            tone={currentBalanceDue > 0 ? "danger" : "success"}
-                            testId="text-current-balance-due"
-                          />
+                      <BillingSection title="Previous Admission — Balance Due" variant="prior-debt">
+                        {priorDischargeNote && (
+                          <BillingLine label="Discharged on" value={priorDischargeNote} />
                         )}
-                        <div className="mt-2">
-                          <DueBalanceBanner due={netBalanceDue} testId="text-total-balance-due" />
-                        </div>
-                      </>
+                        <BillingLine
+                          label="Previous Admission Balance"
+                          value={`LKR ${formatMoney(carriedForwardDebt)}`}
+                          tone="danger"
+                          testId="text-carried-forward"
+                        />
+                      </BillingSection>
                     )}
+
+                    {hasCarriedForwardCredit && (
+                      <BillingSection title="Previous Admission — Overpayment Credit" variant="prior-credit">
+                        {priorDischargeNote && (
+                          <BillingLine label="Discharged on" value={priorDischargeNote} />
+                        )}
+                        <BillingLine
+                          label="Previous Overpayment Credit Applied"
+                          value={`- LKR ${formatMoney(carriedForwardCreditApplied)}`}
+                          tone="credit"
+                          sublabel="Auto-deducted from this bill"
+                          testId="text-carried-forward-credit"
+                        />
+                      </BillingSection>
+                    )}
+
+                    <BillingSection title="Total Bill" variant="total">
+                      <BillingLine
+                        label="Total Bill"
+                        value={`LKR ${formatMoney(grandTotal)}`}
+                        emphasized
+                        testId="text-grand-total"
+                      />
+                    </BillingSection>
+
+                    <BillingSection title="Payments" variant="payments">
+                      {hasCarriedForwardBalance && (
+                        <>
+                          <BillingLine
+                            label="Paid toward previous admission"
+                            value={`LKR ${formatMoney(priorBalancePaid)}`}
+                            tone="success"
+                          />
+                          <BillingLine
+                            label="Paid toward current stay"
+                            value={`LKR ${formatMoney(currentEpisodePaid)}`}
+                            tone="success"
+                          />
+                        </>
+                      )}
+                      <BillingLine
+                        label="Total Payments Recorded"
+                        value={`LKR ${formatMoney(paymentTotal)}`}
+                        tone="success"
+                        testId="text-total-paid"
+                      />
+                      {overpaymentCredit > 0 && (
+                        <BillingLine
+                          label="Overpayment / Credit"
+                          value={`LKR ${formatMoney(overpaymentCredit)}`}
+                          tone="credit"
+                          sublabel="Paid more than total bill"
+                          testId="text-overpayment-credit"
+                        />
+                      )}
+                    </BillingSection>
+
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Balance</p>
+                      {hasPriorPendingInSummary && priorPendingForCurrentAdmission > 0 && (
+                        <BillingLine
+                          label="Previous admission due"
+                          value={`LKR ${formatMoney(priorPendingForCurrentAdmission)}`}
+                          tone="danger"
+                          testId="text-prior-balance-due-inline"
+                        />
+                      )}
+                      {hasPriorPendingInSummary && priorPendingForCurrentAdmission < 0 && (
+                        <BillingLine
+                          label="Previous admission credit"
+                          value={`LKR ${formatMoney(Math.abs(priorPendingForCurrentAdmission))}`}
+                          tone="credit"
+                          testId="text-prior-balance-credit-inline"
+                        />
+                      )}
+                      {!hasPriorPendingInSummary && (
+                        <DueBalanceBanner due={netBalanceDue} testId="text-balance-due" />
+                      )}
+                      {hasPriorPendingInSummary && (
+                        <>
+                          {currentBalanceDue !== 0 && (
+                            <BillingLine
+                              label={currentBalanceDue > 0 ? "Current stay due" : "Current stay credit"}
+                              value={
+                                currentBalanceDue > 0
+                                  ? `LKR ${formatMoney(currentBalanceDue)}`
+                                  : `LKR ${formatMoney(Math.abs(currentBalanceDue))}`
+                              }
+                              tone={currentBalanceDue > 0 ? "danger" : "credit"}
+                              testId="text-current-balance-due"
+                            />
+                          )}
+                          <DueBalanceBanner due={netBalanceDue} testId="text-total-balance-due" />
+                        </>
+                      )}
+                    </div>
 
                     <div
-                      className="mt-3 rounded-lg px-3 py-2.5 text-xs text-slate-700"
-                      style={{ backgroundColor: "#EEF5FB" }}
+                      className="rounded-lg border border-[#B8D4E8] bg-[#F8FBFE] px-3 py-2.5 text-xs text-slate-700"
                       data-testid="text-stay-summary"
                     >
                       Admitted: {format(new Date(patient.admitDate), "dd MMM yyyy")} →{" "}
@@ -1510,12 +1601,21 @@ export default function InPatientProfilePage() {
                         {stayDays} day{stayDays !== 1 ? "s" : ""}
                       </strong>
                     </div>
-                  </>
+                  </div>
                 )}
 
-                {showBillingHistoryToggle && !showingPreviousBilling && hasPriorPendingInSummary && (
-                  <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="text-prior-balance-note">
-                    Payments are applied to the previous admission balance first, then to the current stay.
+                {showBillingHistoryToggle && !showingPreviousBilling && hasPriorAdjustment && (
+                  <p
+                    className={`mt-3 rounded-lg px-3 py-2 text-xs ${
+                      hasCarriedForwardCredit
+                        ? "border border-emerald-200 bg-emerald-50 text-emerald-900"
+                        : "border border-amber-200 bg-amber-50 text-amber-900"
+                    }`}
+                    data-testid="text-prior-balance-note"
+                  >
+                    {hasCarriedForwardCredit
+                      ? `Previous overpayment credit of LKR ${formatMoney(carriedForwardCreditApplied)} has been auto-deducted from this bill.`
+                      : "Payments are applied to the previous admission balance first, then to the current stay."}{" "}
                     Switch to <span className="font-semibold">Previous</span> for the full discharge bill breakdown.
                   </p>
                 )}

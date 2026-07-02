@@ -96,10 +96,48 @@ describe("inpatientBilling", () => {
     });
     expect(breakdown.extraExpenseTotal).toBe(200);
     expect(breakdown.carriedForwardTotal).toBe(5000);
+    expect(breakdown.carriedForwardDebt).toBe(5000);
+    expect(breakdown.carriedForwardCreditApplied).toBe(0);
     expect(breakdown.currentSubtotal).toBe(1000 * 3 + 200);
     expect(breakdown.deductionAmount).toBe(320);
     expect(breakdown.currentGrandTotal).toBe(2880);
     expect(breakdown.grandTotal).toBe(7880);
+  });
+
+  it("auto-deducts prior overpayment credit from current bill", () => {
+    const breakdown = computeAdmissionBillingBreakdown({
+      admitDate: "2026-07-01",
+      endDate: "2026-07-03",
+      amountPerDay: 1000,
+      extraExpenses: [{ description: "Previous admission credit carried forward", amount: "-2000" }],
+    });
+    expect(breakdown.carriedForwardTotal).toBe(-2000);
+    expect(breakdown.carriedForwardCreditApplied).toBe(2000);
+    expect(breakdown.carriedForwardDebt).toBe(0);
+    expect(breakdown.currentGrandTotal).toBe(3000);
+    expect(breakdown.grandTotal).toBe(1000);
+
+    const summary = computeAdmissionBalanceSummary(breakdown, 0);
+    expect(summary.netBalanceDue).toBe(1000);
+    expect(summary.hasCarriedForwardCredit).toBe(true);
+    expect(summary.hasCarriedForwardBalance).toBe(false);
+  });
+
+  it("allocates payments when prior credit reduces the bill", () => {
+    expect(splitReAdmissionPayments(500, 5000, -2000)).toEqual({
+      priorBalancePaid: 0,
+      currentEpisodePaid: 500,
+      priorBalanceDue: 0,
+      currentBalanceDue: 2500,
+      overpaymentCredit: 0,
+    });
+    expect(splitReAdmissionPayments(4000, 5000, -2000)).toEqual({
+      priorBalancePaid: 0,
+      currentEpisodePaid: 3000,
+      priorBalanceDue: 0,
+      currentBalanceDue: -1000,
+      overpaymentCredit: 1000,
+    });
   });
 
   it("computes admission balance summary with payment split", () => {
