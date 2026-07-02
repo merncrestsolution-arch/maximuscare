@@ -25,12 +25,16 @@ import {
   computeTransferStayPaymentAllocation,
   CARRIED_FORWARD_CREDIT_MARKER,
   deductionFieldsForSegment,
+  formatInpatientPaymentTimestamp,
+  getPaymentsForCurrentStay,
+  getPaymentsForPriorTransferStays,
   isCarriedForwardCredit,
   isCarriedForwardExpense,
   isTransferCarriedForwardExpense,
   isTransferCarriedForwardCredit,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
+  sumPaymentAmounts,
 } from "@shared/inpatientBilling";
 import { useToast } from "@/hooks/use-toast";
 import type { InPatientSession, InPatientDischarge, InPatientPayment, InPatientExtraExpense, InPatientPreviousSession, InPatientPriorEpisode } from "@/lib/types";
@@ -781,6 +785,19 @@ export default function InPatientProfilePage() {
   const transferLogsAsc = [...(transferLogs as any[])].sort((left, right) =>
     String(left.transferDate).localeCompare(String(right.transferDate)),
   );
+  const currentStayPayments = getPaymentsForCurrentStay(payments ?? [], transferLogsAsc).sort(
+    (left, right) =>
+      new Date(right.createdAt ?? right.paymentDate).getTime() -
+      new Date(left.createdAt ?? left.paymentDate).getTime(),
+  );
+  const priorStayPayments = hasTransferHistory
+    ? getPaymentsForPriorTransferStays(payments ?? [], transferLogsAsc).sort(
+        (left, right) =>
+          new Date(right.createdAt ?? right.paymentDate).getTime() -
+          new Date(left.createdAt ?? left.paymentDate).getTime(),
+      )
+    : [];
+  const currentStayPaymentTotal = sumPaymentAmounts(currentStayPayments);
   const billingSegmentStartDate =
     transferLogsAsc.length > 0
       ? String(transferLogsAsc[transferLogsAsc.length - 1].transferDate).split("T")[0]
@@ -1108,21 +1125,19 @@ export default function InPatientProfilePage() {
           ? [{ item: "Previous Overpayment Credit Applied", quantity: "-", rate: "-", amount: `-${formatMoney(carriedForwardCreditApplied)}` }]
           : []),
         { item: "Total Bill", quantity: "-", rate: "-", amount: formatMoney(grandTotal) },
-        ...(transferPaymentAllocation
+        ...(hasTransferHistory
           ? [
-              ...(transferPaymentAllocation.priorSegmentsPaid > 0
-                ? [{
-                    item: "Paid toward previous branch",
-                    quantity: "-",
-                    rate: "-",
-                    amount: formatMoney(transferPaymentAllocation.priorSegmentsPaid),
-                  }]
-                : []),
+              ...currentStayPayments.map((payment) => ({
+                item: `Payment — ${formatInpatientPaymentTimestamp(payment)}`,
+                quantity: payment.paymentMode,
+                rate: "-",
+                amount: formatMoney(payment.amount),
+              })),
               {
-                item: "Paid toward current stay",
+                item: "Total paid (current stay)",
                 quantity: "-",
                 rate: "-",
-                amount: formatMoney(transferPaymentAllocation.currentSegmentPaid),
+                amount: formatMoney(currentStayPaymentTotal),
               },
             ]
           : hasCarriedForwardBalance
@@ -1130,10 +1145,15 @@ export default function InPatientProfilePage() {
               { item: "Paid toward previous due", quantity: "-", rate: "-", amount: formatMoney(priorBalancePaid) },
               { item: "Paid toward current stay", quantity: "-", rate: "-", amount: formatMoney(currentEpisodePaid) },
             ]
-          : []),
-        ...(!transferPaymentAllocation
-          ? [{ item: "Total Payments Recorded", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) }]
-          : []),
+          : [
+              ...((payments ?? []).map((payment) => ({
+                item: `Payment — ${formatInpatientPaymentTimestamp(payment)}`,
+                quantity: payment.paymentMode,
+                rate: "-",
+                amount: formatMoney(payment.amount),
+              }))),
+              { item: "Total Payments Recorded", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
+            ]),
         ...(overpaymentCredit > 0
           ? [{ item: "Overpayment / Credit", quantity: "-", rate: "-", amount: formatMoney(overpaymentCredit) }]
           : []),
@@ -1554,6 +1574,26 @@ export default function InPatientProfilePage() {
                             <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-amber-900/80">
                               Payments
                             </p>
+                            {episode.episodeType === "transfer" && priorStayPayments.length > 0 ? (
+                              <>
+                                {priorStayPayments.map((payment) => (
+                                  <BillingLine
+                                    key={payment.id}
+                                    label={formatInpatientPaymentTimestamp(payment)}
+                                    value={`LKR ${formatMoney(payment.amount)}`}
+                                    tone="success"
+                                    sublabel={payment.paymentMode}
+                                  />
+                                ))}
+                                <BillingLine
+                                  label="Total paid (previous branch)"
+                                  value={`LKR ${formatMoney(sumPaymentAmounts(priorStayPayments))}`}
+                                  tone="success"
+                                  emphasized
+                                />
+                              </>
+                            ) : (
+                              <>
                             <BillingLine
                               label="Paid during that admission"
                               value={`LKR ${formatMoney(billing.paidDuringAdmission)}`}
@@ -1571,6 +1611,8 @@ export default function InPatientProfilePage() {
                               value={`LKR ${formatMoney(billing.paid)}`}
                               tone="success"
                             />
+                              </>
+                            )}
                             <BillingLine
                               label={billing.credit > 0 ? "Credit Balance" : "Pending Balance"}
                               value={
@@ -1728,20 +1770,31 @@ export default function InPatientProfilePage() {
                     </BillingSection>
 
                     <BillingSection title="Payments" variant="payments">
-                      {transferPaymentAllocation ? (
+                      {hasTransferHistory ? (
                         <>
-                          {transferPaymentAllocation.priorSegmentsPaid > 0 && (
+                          {currentStayPayments.length > 0 ? (
+                            currentStayPayments.map((payment) => (
+                              <BillingLine
+                                key={payment.id}
+                                label={formatInpatientPaymentTimestamp(payment)}
+                                value={`LKR ${formatMoney(payment.amount)}`}
+                                tone="success"
+                                sublabel={payment.paymentMode}
+                                testId={`text-current-payment-${payment.id}`}
+                              />
+                            ))
+                          ) : (
                             <BillingLine
-                              label="Paid toward previous branch"
-                              value={`LKR ${formatMoney(transferPaymentAllocation.priorSegmentsPaid)}`}
+                              label="No payments recorded for current stay"
+                              value="LKR 0.00"
                               tone="success"
-                              testId="text-prior-branch-paid"
                             />
                           )}
                           <BillingLine
-                            label="Paid toward current stay"
-                            value={`LKR ${formatMoney(transferPaymentAllocation.currentSegmentPaid)}`}
+                            label="Total paid (current stay)"
+                            value={`LKR ${formatMoney(currentStayPaymentTotal)}`}
                             tone="success"
+                            emphasized
                             testId="text-current-stay-paid"
                           />
                         </>
@@ -1759,12 +1812,24 @@ export default function InPatientProfilePage() {
                           />
                         </>
                       ) : (
-                        <BillingLine
-                          label="Total Payments Recorded"
-                          value={`LKR ${formatMoney(paymentTotal)}`}
-                          tone="success"
-                          testId="text-total-paid"
-                        />
+                        <>
+                          {(payments ?? []).map((payment) => (
+                            <BillingLine
+                              key={payment.id}
+                              label={formatInpatientPaymentTimestamp(payment)}
+                              value={`LKR ${formatMoney(payment.amount)}`}
+                              tone="success"
+                              sublabel={payment.paymentMode}
+                            />
+                          ))}
+                          <BillingLine
+                            label="Total Payments Recorded"
+                            value={`LKR ${formatMoney(paymentTotal)}`}
+                            tone="success"
+                            emphasized
+                            testId="text-total-paid"
+                          />
+                        </>
                       )}
                       {overpaymentCredit > 0 && (
                         <BillingLine
@@ -1888,7 +1953,7 @@ export default function InPatientProfilePage() {
                   />
                   <BillingLine
                     label="Amount Paid"
-                    value={`LKR ${formatMoney(transferPaymentAllocation ? transferPaymentAllocation.currentSegmentPaid : effectivePaymentTotal)}`}
+                    value={`LKR ${formatMoney(hasTransferHistory ? currentStayPaymentTotal : effectivePaymentTotal)}`}
                     tone="success"
                   />
                   <div className="mt-2">
@@ -2223,34 +2288,26 @@ export default function InPatientProfilePage() {
             <div className="bg-white rounded-lg p-3 mb-4 border">
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">
-                  {transferPaymentAllocation ? "Paid toward current stay:" : "Payment Done (Total):"}
+                  {hasTransferHistory ? "Paid (current stay):" : "Payment Done (Total):"}
                 </span>
                 <span className="font-bold text-lg text-green-700" data-testid="text-payment-total">
                   LKR{" "}
-                  {(transferPaymentAllocation
-                    ? transferPaymentAllocation.currentSegmentPaid
-                    : paymentTotal
-                  ).toLocaleString()}
+                  {(hasTransferHistory ? currentStayPaymentTotal : paymentTotal).toLocaleString()}
                 </span>
               </div>
-              {transferPaymentAllocation && transferPaymentAllocation.priorSegmentsPaid > 0 && (
-                <div className="mt-2 flex justify-between items-center text-sm text-muted-foreground">
-                  <span>Paid toward previous branch:</span>
-                  <span className="font-medium text-green-700 tabular-nums">
-                    LKR {transferPaymentAllocation.priorSegmentsPaid.toLocaleString()}
-                  </span>
-                </div>
-              )}
             </div>
 
-            {payments && payments.length > 0 && (
+            {(hasTransferHistory ? currentStayPayments : payments) &&
+            (hasTransferHistory ? currentStayPayments : payments)!.length > 0 ? (
               <div className="space-y-2">
-                <div className="text-sm font-medium text-muted-foreground mb-2">Payment History:</div>
-                {payments.map((payment: InPatientPayment) => (
+                <div className="text-sm font-medium text-muted-foreground mb-2">
+                  {hasTransferHistory ? "Current stay payments:" : "Payment History:"}
+                </div>
+                {(hasTransferHistory ? currentStayPayments : payments)!.map((payment: InPatientPayment) => (
                   <div key={payment.id} className="bg-white rounded p-3 border text-sm" data-testid={`payment-${payment.id}`}>
                     <div className="flex justify-between items-start gap-2">
                       <span className="text-slate-700 text-sm">
-                        {format(new Date(payment.paymentDate), "dd MMM yyyy")} — {payment.paymentMode}
+                        {formatInpatientPaymentTimestamp(payment)} — {payment.paymentMode}
                       </span>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-[#16A34A] text-sm tabular-nums">
@@ -2282,7 +2339,11 @@ export default function InPatientProfilePage() {
                   </div>
                 ))}
               </div>
-            )}
+            ) : hasTransferHistory ? (
+              <div className="text-sm text-muted-foreground py-2" data-testid="text-no-current-payments">
+                No payments recorded for the current stay yet.
+              </div>
+            ) : null}
           </div>
         )}
 

@@ -134,6 +134,79 @@ export function computeTransferStayPaymentAllocation(input: {
   };
 }
 
+export type InpatientPaymentLike = {
+  paymentDate: string;
+  createdAt?: string | Date | null;
+};
+
+export type TransferLogLike = {
+  transferDate: string;
+  createdAt?: string | Date | null;
+};
+
+function paymentInstant(payment: InpatientPaymentLike): number {
+  if (payment.createdAt) {
+    return new Date(payment.createdAt).getTime();
+  }
+  const day = dateOnly(payment.paymentDate);
+  return new Date(`${day}T12:00:00+05:30`).getTime();
+}
+
+function transferInstant(transfer: TransferLogLike): number {
+  if (transfer.createdAt) {
+    return new Date(transfer.createdAt).getTime();
+  }
+  const day = dateOnly(transfer.transferDate);
+  return new Date(`${day}T23:59:59.999+05:30`).getTime();
+}
+
+/** Payments recorded after the most recent branch transfer (current stay only). */
+export function getPaymentsForCurrentStay<T extends InpatientPaymentLike>(
+  payments: T[],
+  transferLogsAsc: TransferLogLike[],
+): T[] {
+  if (transferLogsAsc.length === 0) return [...payments];
+
+  const lastTransfer = transferLogsAsc[transferLogsAsc.length - 1];
+  const transferAt = transferInstant(lastTransfer);
+
+  return payments.filter((payment) => paymentInstant(payment) > transferAt);
+}
+
+/** Payments recorded before or at the most recent branch transfer (prior stay). */
+export function getPaymentsForPriorTransferStays<T extends InpatientPaymentLike>(
+  payments: T[],
+  transferLogsAsc: TransferLogLike[],
+): T[] {
+  if (transferLogsAsc.length === 0) return [];
+
+  const current = new Set(getPaymentsForCurrentStay(payments, transferLogsAsc));
+  return payments.filter((payment) => !current.has(payment));
+}
+
+export function sumPaymentAmounts(payments: Array<{ amount: string | number }>): number {
+  return payments.reduce((sum, payment) => sum + (parseFloat(String(payment.amount)) || 0), 0);
+}
+
+/** Display label for an in-patient payment (date + time in clinic timezone). */
+export function formatInpatientPaymentTimestamp(payment: InpatientPaymentLike): string {
+  const raw = payment.createdAt ?? payment.paymentDate;
+  const normalized =
+    typeof raw === "string" && !raw.includes("T")
+      ? `${raw.split("T")[0]}T12:00:00+05:30`
+      : raw;
+  const date = new Date(normalized);
+  return date.toLocaleString("en-GB", {
+    timeZone: CLINIC_TIMEZONE,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 function dateOnly(value: string): string {
   return String(value).split("T")[0];
 }

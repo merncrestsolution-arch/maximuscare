@@ -12,11 +12,15 @@ import {
   computeAdmissionBillingBreakdown,
   computeBranchStaySegmentBilling,
   computeTransferStayPaymentAllocation,
+  formatInpatientPaymentTimestamp,
+  getPaymentsForCurrentStay,
+  getPaymentsForPriorTransferStays,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
   splitReAdmissionPayments,
   sumCarriedForwardAmounts,
+  sumPaymentAmounts,
 } from "../../shared/inpatientBilling";
 
 describe("inpatientBilling", () => {
@@ -281,5 +285,18 @@ describe("inpatientBilling", () => {
     expect(fullyPaidPrior.priorSegmentsPaid).toBe(10_000);
     expect(fullyPaidPrior.currentSegmentPaid).toBe(2000);
     expect(fullyPaidPrior.currentSegmentPending).toBe(1000);
+  });
+
+  it("splits payments by branch transfer using recorded timestamps", () => {
+    const transferAt = "2026-07-02T10:00:00.000Z";
+    const payments = [
+      { paymentDate: "2026-07-02", createdAt: "2026-07-02T08:00:00.000Z", amount: "6000" },
+      { paymentDate: "2026-07-02", createdAt: "2026-07-02T12:00:00.000Z", amount: "4000" },
+    ];
+    const transfers = [{ transferDate: "2026-07-02", createdAt: transferAt }];
+    expect(getPaymentsForPriorTransferStays(payments, transfers)).toHaveLength(1);
+    expect(getPaymentsForCurrentStay(payments, transfers)).toHaveLength(1);
+    expect(sumPaymentAmounts(getPaymentsForCurrentStay(payments, transfers))).toBe(4000);
+    expect(formatInpatientPaymentTimestamp(payments[0])).toContain("2026");
   });
 });
