@@ -9,6 +9,9 @@ import {
   computeAdmissionGrandTotal,
   allocatePaymentsAcrossSegments,
   computeBranchStaySegmentBilling,
+  computeTransferStayPaymentAllocation,
+  getSessionsForCurrentStay,
+  getSessionsForPriorTransferStays,
   deductionFieldsForSegment,
   formatReadmitAdmissionSource,
   parseReadmitAdmissionSource,
@@ -319,6 +322,32 @@ async function loadSessionsForPriorAdmissions(
     const dateCmp = right.sessionDate.localeCompare(left.sessionDate);
     if (dateCmp !== 0) return dateCmp;
     return left.sessionNumber - right.sessionNumber;
+  });
+}
+
+async function loadTransferPriorSessionsOnSameAdmission(
+  storage: IStorage,
+  admission: InPatientAdmission,
+  transfersAsc: Array<{ id: string; transferDate: string; createdAt?: Date | string | null }>,
+) {
+  if (transfersAsc.length === 0) return [];
+
+  const allSessions = await storage.getInPatientSessionsByAdmission(admission.id);
+  const priorSessions = getSessionsForPriorTransferStays(allSessions, transfersAsc);
+  const priorSegments = buildTransferStaySegments(admission.admitDate, transfersAsc);
+
+  return priorSessions.map((session) => {
+    const day = String(session.sessionDate).split("T")[0];
+    const segment =
+      priorSegments.find((entry) => day >= entry.startDate && day <= entry.endDate) ??
+      priorSegments[priorSegments.length - 1];
+
+    return {
+      ...session,
+      admissionAdmitDate: segment?.startDate ?? admission.admitDate,
+      admissionStatus: "Transferred",
+      priorAdmissionId: `transfer:${segment?.transferLogId ?? transfersAsc[transfersAsc.length - 1].id}`,
+    };
   });
 }
 
@@ -654,7 +683,13 @@ export async function getInPatientSessionsForAdmissionView(
     }
   }
 
-  return merged.sort((left, right) => {
+  const transfers = await storage.getPatientTransferLogsByAdmission(admissionId);
+  const transfersAsc = [...transfers].sort((left, right) =>
+    String(left.transferDate).localeCompare(String(right.transferDate)),
+  );
+  const currentSessions = getSessionsForCurrentStay(merged, transfersAsc);
+
+  return currentSessions.sort((left, right) => {
     const dateCmp = right.sessionDate.localeCompare(left.sessionDate);
     if (dateCmp !== 0) return dateCmp;
     return left.sessionNumber - right.sessionNumber;
@@ -684,7 +719,18 @@ export async function getPreviousInPatientSessions(storage: IStorage, admissionI
     .filter((entry): entry is InPatientAdmission => Boolean(entry))
     .sort(compareAdmissionRecency);
 
-  return loadSessionsForPriorAdmissions(storage, priorAdmissions);
+  const legacyPrior = await loadSessionsForPriorAdmissions(storage, priorAdmissions);
+  const transfers = await storage.getPatientTransferLogsByAdmission(admissionId);
+  const transfersAsc = [...transfers].sort((left, right) =>
+    String(left.transferDate).localeCompare(String(right.transferDate)),
+  );
+  const transferPrior = await loadTransferPriorSessionsOnSameAdmission(storage, admission, transfersAsc);
+
+  return [...legacyPrior, ...transferPrior].sort((left, right) => {
+    const dateCmp = right.sessionDate.localeCompare(left.sessionDate);
+    if (dateCmp !== 0) return dateCmp;
+    return left.sessionNumber - right.sessionNumber;
+  });
 }
 
 /** Resolve display branch for each session (session branchId, else parent admission branch). */

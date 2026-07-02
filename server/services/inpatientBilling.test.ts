@@ -15,6 +15,8 @@ import {
   formatInpatientPaymentTimestamp,
   getPaymentsForCurrentStay,
   getPaymentsForPriorTransferStays,
+  getSessionsForCurrentStay,
+  getSessionsForPriorTransferStays,
   isCarriedForwardExpense,
   parseReadmitAdmissionSource,
   resolveDeductionSegmentIndex,
@@ -298,5 +300,16 @@ describe("inpatientBilling", () => {
     expect(getPaymentsForCurrentStay(payments, transfers)).toHaveLength(1);
     expect(sumPaymentAmounts(getPaymentsForCurrentStay(payments, transfers))).toBe(4000);
     expect(formatInpatientPaymentTimestamp(payments[0])).toContain("2026");
+  });
+
+  it("splits sessions by branch transfer using recorded timestamps", () => {
+    const transferAt = "2026-07-02T10:00:00.000Z";
+    const sessions = [
+      { sessionDate: "2026-07-02", createdAt: "2026-07-02T08:00:00.000Z" },
+      { sessionDate: "2026-07-02", createdAt: "2026-07-02T12:00:00.000Z" },
+    ];
+    const transfers = [{ transferDate: "2026-07-02", createdAt: transferAt }];
+    expect(getSessionsForPriorTransferStays(sessions, transfers)).toHaveLength(1);
+    expect(getSessionsForCurrentStay(sessions, transfers)).toHaveLength(1);
   });
 });

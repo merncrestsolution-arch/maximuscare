@@ -148,6 +148,7 @@ describe("inPatientAdmissionService", () => {
         }
         return [];
       },
+      getPatientTransferLogsByAdmission: async () => [],
     };
 
     const previous = await getPreviousInPatientSessions(storage as any, "current");
@@ -283,6 +284,7 @@ describe("inPatientAdmissionService", () => {
       getPaymentTotalByAdmission: async () => 0,
       getInPatientExtraExpensesByAdmission: async () => [],
       getInPatientSessionsByAdmission: async () => [],
+      getPatientTransferLogsByAdmission: async () => [],
     };
 
     const previous = await getPreviousInPatientSessions(storage as any, "dehiwala-sir");
@@ -323,6 +325,7 @@ describe("inPatientAdmissionService", () => {
         id === "dehiwala-old"
           ? ([{ id: "s1", sessionDate: "2024-05-10", sessionNumber: 1, admissionId: "dehiwala-old" }] as any)
           : [],
+      getPatientTransferLogsByAdmission: async () => [],
     };
 
     const previous = await getPreviousInPatientSessions(storage as any, "nexus-current");
@@ -370,6 +373,7 @@ describe("inPatientAdmissionService", () => {
         id === "current"
           ? [{ id: "s2", sessionDate: "2024-07-02", sessionNumber: 2 } as any]
           : [{ id: "s1", sessionDate: "2024-06-05", sessionNumber: 1 } as any],
+      getPatientTransferLogsByAdmission: async () => [],
     };
 
     const sessions = await getInPatientSessionsForAdmissionView(storage as any, "current");
@@ -484,5 +488,58 @@ describe("inPatientAdmissionService", () => {
     expect(episodes[0].breakdown?.deductionAmount).toBe(500);
     expect(episodes[0].breakdown?.deductionReason).toBe("Staff discount");
     expect(episodes[0].grandTotal).toBe(10_000 - 500);
+  });
+
+  it("moves pre-transfer sessions on the same admission into previous session history", async () => {
+    const admission = {
+      id: "current",
+      patientId: "p1",
+      admitDate: "2026-07-02",
+      status: "Admitted",
+      branchId: "branch-neuro",
+    } as any;
+    const storage = {
+      getInPatientAdmission: async (id: string) => (id === "current" ? admission : undefined),
+      getPatientTransferLogsByAdmission: async () => [
+        {
+          id: "t1",
+          admissionId: "current",
+          fromBranchId: "branch-nexus",
+          toBranchId: "branch-neuro",
+          transferDate: "2026-07-02",
+          createdAt: "2026-07-02T10:00:00.000Z",
+        },
+      ],
+      getRelatedInPatientAdmissions: async () => [admission],
+      getOrgScopedPatientAdmissions: async () => [],
+      getInPatientAdmissionsForPatient: async () => [admission],
+      getPatient: async () => ({ id: "p1", branch: "Neuro Rehabilitation" }) as any,
+      getInPatientSessionsByAdmission: async () => [
+        {
+          id: "s-nexus",
+          admissionId: "current",
+          sessionDate: "2026-07-02",
+          createdAt: "2026-07-02T08:00:00.000Z",
+          sessionNumber: 1,
+          branchId: "branch-nexus",
+        } as any,
+        {
+          id: "s-neuro",
+          admissionId: "current",
+          sessionDate: "2026-07-02",
+          createdAt: "2026-07-02T12:00:00.000Z",
+          sessionNumber: 2,
+          branchId: "branch-neuro",
+        } as any,
+      ],
+      getAllBranches: async () => [],
+      getAllInPatientAdmissions: async () => [admission],
+    };
+
+    const current = await getInPatientSessionsForAdmissionView(storage as any, "current");
+    const previous = await getPreviousInPatientSessions(storage as any, "current");
+    expect(current.map((session) => session.id)).toEqual(["s-neuro"]);
+    expect(previous.map((session) => session.id)).toEqual(["s-nexus"]);
+    expect(previous[0].priorAdmissionId).toBe("transfer:t1");
   });
 });

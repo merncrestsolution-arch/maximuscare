@@ -160,6 +160,43 @@ function transferInstant(transfer: TransferLogLike): number {
   return new Date(`${day}T23:59:59.999+05:30`).getTime();
 }
 
+export type InpatientSessionLike = {
+  sessionDate: string;
+  createdAt?: string | Date | null;
+};
+
+function sessionInstant(session: InpatientSessionLike): number {
+  if (session.createdAt) {
+    return new Date(session.createdAt).getTime();
+  }
+  const day = dateOnly(session.sessionDate);
+  return new Date(`${day}T12:00:00+05:30`).getTime();
+}
+
+/** Sessions recorded after the most recent branch transfer (current stay only). */
+export function getSessionsForCurrentStay<T extends InpatientSessionLike>(
+  sessions: T[],
+  transferLogsAsc: TransferLogLike[],
+): T[] {
+  if (transferLogsAsc.length === 0) return [...sessions];
+
+  const lastTransfer = transferLogsAsc[transferLogsAsc.length - 1];
+  const transferAt = transferInstant(lastTransfer);
+
+  return sessions.filter((session) => sessionInstant(session) > transferAt);
+}
+
+/** Sessions recorded before or at the most recent branch transfer (prior stay). */
+export function getSessionsForPriorTransferStays<T extends InpatientSessionLike>(
+  sessions: T[],
+  transferLogsAsc: TransferLogLike[],
+): T[] {
+  if (transferLogsAsc.length === 0) return [];
+
+  const current = new Set(getSessionsForCurrentStay(sessions, transferLogsAsc));
+  return sessions.filter((session) => !current.has(session));
+}
+
 /** Payments recorded after the most recent branch transfer (current stay only). */
 export function getPaymentsForCurrentStay<T extends InpatientPaymentLike>(
   payments: T[],
