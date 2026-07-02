@@ -266,21 +266,6 @@ export function registerExtendedRoutes(app: Express) {
       const data = updateBranchSchema.parse(req.body);
       const branch = await storage.updateBranch(branchId, data as any);
       if (!branch) return errorResponse(res, "Branch not found", 404);
-      if (
-        data.verifiedByAdmin !== undefined &&
-        Boolean(data.verifiedByAdmin) !== Boolean(existing.verifiedByAdmin)
-      ) {
-        const editor = await storage.getStaff(user.staffId);
-        await logAudit(storage, {
-          userId: user.staffId,
-          userName: editor?.name ?? "",
-          module: "branch",
-          action: data.verifiedByAdmin ? "verify" : "unverify",
-          recordId: branchId,
-          oldValue: { verifiedByAdmin: existing.verifiedByAdmin },
-          newValue: { verifiedByAdmin: branch.verifiedByAdmin, verifiedAt: new Date().toISOString() },
-        });
-      }
       return successResponse(res, branch);
     } catch (error: any) {
       return errorResponse(res, error.message, 500);

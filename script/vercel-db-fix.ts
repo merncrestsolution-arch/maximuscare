@@ -31,7 +31,6 @@ const columns: Array<[string, string, "true" | "false"]> = [
 ];
 
 const newColumns: Array<[string, string, string]> = [
-  ["branches", "verified_by_admin", "BOOLEAN NOT NULL DEFAULT FALSE"],
   ["patients", "data_version", "INTEGER NOT NULL DEFAULT 2"],
   ["patients", "data_migrated_at", "TIMESTAMP"],
   ["patients", "qr_token", "TEXT"],

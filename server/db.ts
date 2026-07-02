@@ -221,8 +221,6 @@ export async function ensureSqliteSchemaCompatibility() {
   await runPart24AdmissionSource();
   const { runPart25SalaryLineItems } = await import("./migrations/part25SalaryLineItems");
   await runPart25SalaryLineItems();
-  const { runPart26BranchVerification } = await import("./migrations/part26BranchVerification");
-  await runPart26BranchVerification();
   const { runPart27PatientDataVersion } = await import("./migrations/part27PatientDataVersion");
   await runPart27PatientDataVersion();
   const { runPart28InpatientStatusReconcile } = await import("./migrations/part28InpatientStatusReconcile");
@@ -288,8 +286,6 @@ export async function ensurePostgresSchemaCompatibility() {
   await runPart24AdmissionSource();
   const { runPart25SalaryLineItems } = await import("./migrations/part25SalaryLineItems");
   await runPart25SalaryLineItems();
-  const { runPart26BranchVerification } = await import("./migrations/part26BranchVerification");
-  await runPart26BranchVerification();
   try {
     const { runPart27PatientDataVersion } = await import("./migrations/part27PatientDataVersion");
     await runPart27PatientDataVersion();

@@ -39,24 +39,28 @@ describe("inpatientBilling", () => {
       currentEpisodePaid: 0,
       priorBalanceDue: 7000,
       currentBalanceDue: 5000,
+      overpaymentCredit: 0,
     });
     expect(splitReAdmissionPayments(8000, 5000, 10000)).toEqual({
       priorBalancePaid: 8000,
       currentEpisodePaid: 0,
       priorBalanceDue: 2000,
       currentBalanceDue: 5000,
+      overpaymentCredit: 0,
     });
     expect(splitReAdmissionPayments(12000, 5000, 10000)).toEqual({
       priorBalancePaid: 10000,
       currentEpisodePaid: 2000,
       priorBalanceDue: 0,
       currentBalanceDue: 3000,
+      overpaymentCredit: 0,
     });
     expect(splitReAdmissionPayments(16000, 5000, 10000)).toEqual({
       priorBalancePaid: 10000,
       currentEpisodePaid: 5000,
       priorBalanceDue: 0,
       currentBalanceDue: 0,
+      overpaymentCredit: 1000,
     });
   });
 

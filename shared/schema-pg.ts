@@ -556,7 +556,6 @@ export const branches = pgTable("branches", {
   code: text("code"),
   address: text("address"),
   isActive: boolean("is_active").notNull().default(true),
-  verifiedByAdmin: boolean("verified_by_admin").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

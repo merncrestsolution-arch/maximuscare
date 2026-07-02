@@ -763,6 +763,7 @@ export default function InPatientProfilePage() {
     currentBalanceDue,
     priorBalanceDue,
     netBalanceDue,
+    overpaymentCredit,
     totalBalanceDue,
     priorPendingForCurrentAdmission,
     hasPriorPendingInSummary,
@@ -776,13 +777,20 @@ export default function InPatientProfilePage() {
     const totalPaid = paidDuringAdmission + paidAfterReadmit;
     const pending =
       isMostRecentPrior && hasCarriedForwardBalance ? priorBalanceDue : episode.pendingBalance;
+    const credit =
+      isMostRecentPrior && hasCarriedForwardBalance && priorBalanceDue < 0
+        ? Math.abs(priorBalanceDue)
+        : pending < 0
+          ? Math.abs(pending)
+          : 0;
 
     return {
       grandTotal: episode.grandTotal ?? 0,
       paidDuringAdmission,
       paidAfterReadmit,
       paid: totalPaid,
-      pending,
+      pending: credit > 0 ? -credit : pending,
+      credit,
     };
   };
   const totalPriorPendingBalance = priorEpisodes.reduce((sum, episode, index) => {
@@ -848,7 +856,9 @@ export default function InPatientProfilePage() {
           ? [{ item: "Paid after re-admit", quantity: "-", rate: "-", amount: formatMoney(billing.paidAfterReadmit) }]
           : []),
         { item: "Total Paid", quantity: "-", rate: "-", amount: formatMoney(billing.paid) },
-        { item: "Pending Balance", quantity: "-", rate: "-", amount: formatMoney(billing.pending) },
+        billing.credit > 0
+          ? { item: "Credit Balance", quantity: "-", rate: "-", amount: formatMoney(billing.credit) }
+          : { item: "Pending Balance", quantity: "-", rate: "-", amount: formatMoney(billing.pending) },
           ];
         })
       : [
@@ -881,6 +891,9 @@ export default function InPatientProfilePage() {
             ]
           : []),
         { item: "Total Payments Recorded", quantity: "-", rate: "-", amount: formatMoney(paymentTotal) },
+        ...(overpaymentCredit > 0
+          ? [{ item: "Overpayment / Credit", quantity: "-", rate: "-", amount: formatMoney(overpaymentCredit) }]
+          : []),
         ...(hasPriorPendingInSummary
           ? [
               {
@@ -1432,6 +1445,14 @@ export default function InPatientProfilePage() {
                       tone="success"
                       testId="text-total-paid"
                     />
+                    {overpaymentCredit > 0 && (
+                      <BillingLine
+                        label="Overpayment / Credit"
+                        value={`LKR ${formatMoney(overpaymentCredit)}`}
+                        tone="success"
+                        testId="text-overpayment-credit"
+                      />
+                    )}
 
                     <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-[#105691]/80">
                       Balance
@@ -1470,7 +1491,7 @@ export default function InPatientProfilePage() {
                           />
                         )}
                         <div className="mt-2">
-                          <DueBalanceBanner due={totalBalanceDue} testId="text-total-balance-due" />
+                          <DueBalanceBanner due={netBalanceDue} testId="text-total-balance-due" />
                         </div>
                       </>
                     )}

@@ -14,7 +14,9 @@ import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { EDIT_PAGE_ROOT } from "@/lib/editPageShell";
 import { useBranchOptions } from "@/hooks/use-branch-options";
+import { useBranch } from "@/context/branch-context";
 import { BranchMultiSelectField } from "@/components/branch/branch-multi-select-field";
+import { normalizeBranchName } from "@shared/branches";
 import { RoleCapabilitiesSection } from "@/components/staff/role-capabilities-section";
 import { isAdminRole } from "@/lib/permissions";
 import {
@@ -62,6 +64,7 @@ export default function StaffEditPage() {
   const { user: currentUser, refreshStaff } = useAuth();
   const { toast } = useToast();
   const { options: branchOptions, defaultValue: defaultBranch } = useBranchOptions({ forRegistration: true });
+  const { selectedBranchId } = useBranch();
 
   const isNew = !!matchNew;
   const staffId = matchEdit ? editParams?.id : undefined;
@@ -114,7 +117,9 @@ export default function StaffEditPage() {
       return;
     }
     if (existing.branch && branchOptions.length > 0) {
-      const match = branchOptions.find((b) => b.value === existing.branch);
+      const match = branchOptions.find(
+        (b) => normalizeBranchName(b.value) === normalizeBranchName(existing.branch),
+      );
       setBranchIds(match ? [match.id] : []);
     }
   }, [isEdit, existing?.id, existing?.branch, branchOptionsKey]);
@@ -122,19 +127,30 @@ export default function StaffEditPage() {
   useEffect(() => {
     if (isEdit) return;
     hydratedStaffIdRef.current = null;
-    if (newStaffInitializedRef.current) return;
-    if (!defaultBranch && branchOptions.length === 0) return;
-    newStaffInitializedRef.current = true;
 
+    const readyOptions = branchOptions.filter((b) => !b.id.startsWith("static-"));
+    if (readyOptions.length === 0) return;
+
+    let defaultId: string | undefined;
+    if (selectedBranchId && readyOptions.some((b) => b.id === selectedBranchId)) {
+      defaultId = selectedBranchId;
+    } else {
+      defaultId = readyOptions.find(
+        (b) => normalizeBranchName(b.value) === normalizeBranchName(defaultBranch),
+      )?.id;
+    }
+    if (!defaultId) return;
+
+    const matched = readyOptions.find((b) => b.id === defaultId);
+    newStaffInitializedRef.current = true;
     setFormData({
       ...DEFAULT_STAFF,
-      branch: defaultBranch || DEFAULT_STAFF.branch,
+      branch: matched?.value ?? defaultBranch ?? DEFAULT_STAFF.branch,
       password: "",
       confirmPassword: "",
     });
-    const defaultOption = branchOptions.find((b) => b.value === defaultBranch);
-    setBranchIds(defaultOption ? [defaultOption.id] : branchOptions[0] ? [branchOptions[0].id] : []);
-  }, [isEdit, defaultBranch, branchOptionsKey]);
+    setBranchIds([defaultId]);
+  }, [isEdit, defaultBranch, branchOptionsKey, selectedBranchId]);
 
   if (!currentUser) return null;
 
@@ -219,6 +235,10 @@ export default function StaffEditPage() {
     try {
       if (branchIds.length === 0) {
         toast({ title: "Error", description: "Select at least one branch", variant: "destructive" });
+        return;
+      }
+      if (branchIds.some((id) => id.startsWith("static-"))) {
+        toast({ title: "Error", description: "Branch list is still loading — please wait and try again", variant: "destructive" });
         return;
       }
       if (isEdit) {

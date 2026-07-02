@@ -351,10 +351,7 @@ async function resolvePrimaryBranchLabel(branchIds: string[]): Promise<string | 
   const all = await storage.getAllBranches();
   const selected = all.filter((b) => branchIds.includes(b.id));
   if (selected.length === 0) return undefined;
-  if (selected.length === 1) {
-    return selected[0].branchName ?? selected[0].name;
-  }
-  return "Both";
+  return normalizeBranchName(selected[0].branchName ?? selected[0].name);
 }
 
 async function autoMarkMissingAttendanceForPreviousDay() {
@@ -838,7 +835,14 @@ export async function registerRoutes(
   app.post("/api/staff", requireAuth, requireStaffManage, async (req: Request, res: Response) => {
     try {
       const body = req.body as Record<string, unknown>;
-      const branchIds = extractBranchIds(body);
+      let branchIds = extractBranchIds(body);
+      if (!branchIds?.length) {
+        const sessionBranchId = getSelectedBranchId(req as any);
+        if (sessionBranchId) branchIds = [sessionBranchId];
+      }
+      if (branchIds?.some((id) => id.startsWith("static-"))) {
+        return res.status(400).json({ message: "Invalid branch selection — please refresh and try again" });
+      }
       const roleCapabilities = isAdminRole((req as any).user?.role)
         ? extractRoleCapabilities(body)
         : undefined;
@@ -914,6 +918,9 @@ export async function registerRoutes(
       const currentUser = (req as any).user;
       const body = req.body as Record<string, unknown>;
       const branchIds = extractBranchIds(body);
+      if (branchIds?.some((id) => id.startsWith("static-"))) {
+        return res.status(400).json({ message: "Invalid branch selection — please refresh and try again" });
+      }
       const roleCapabilities = isAdminRole(currentUser.role)
         ? extractRoleCapabilities(body)
         : undefined;

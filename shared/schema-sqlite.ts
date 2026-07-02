@@ -548,7 +548,6 @@ export const branches = sqliteTable("branches", {
   code: text("code"),
   address: text("address"),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
-  verifiedByAdmin: integer("verified_by_admin", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });

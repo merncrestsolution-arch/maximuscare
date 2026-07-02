@@ -57,12 +57,15 @@ export function splitReAdmissionPayments(
   const currentEpisodePaid = Math.min(remainder, Math.max(0, currentEpisodeGrandTotal));
   const currentBalanceDue = currentEpisodeGrandTotal - currentEpisodePaid;
   const priorBalanceDue = carriedForwardTotal - priorBalancePaid;
+  const grandTotal = Math.max(0, carriedForwardTotal) + Math.max(0, currentEpisodeGrandTotal);
+  const overpaymentCredit = Math.max(0, paymentTotal - grandTotal);
 
   return {
     currentEpisodePaid,
     priorBalancePaid,
     currentBalanceDue,
     priorBalanceDue,
+    overpaymentCredit,
   };
 }
 
@@ -201,6 +204,7 @@ export function computeAdmissionBalanceSummary(
     breakdown.carriedForwardTotal,
   );
   const netBalanceDue = computeBalanceDue(breakdown.grandTotal, paymentTotal);
+  const overpaymentCredit = Math.max(0, paymentTotal - breakdown.grandTotal);
   const priorPendingForCurrentAdmission =
     breakdown.carriedForwardTotal > 0 ? paymentSplit.priorBalanceDue : 0;
   const totalBalanceDue =
@@ -211,6 +215,7 @@ export function computeAdmissionBalanceSummary(
   return {
     ...paymentSplit,
     netBalanceDue,
+    overpaymentCredit,
     totalBalanceDue,
     priorPendingForCurrentAdmission,
     hasCarriedForwardBalance: breakdown.carriedForwardTotal > 0,

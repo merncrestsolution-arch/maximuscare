@@ -90,11 +90,6 @@ export async function runPart2SchemaMigration() {
   // ── branches ──
   await addColumn("branches", "branch_name", "TEXT");
   await addColumn("branches", "address", "TEXT");
-  await addColumn(
-    "branches",
-    "verified_by_admin",
-    usePostgres ? "BOOLEAN NOT NULL DEFAULT FALSE" : "INTEGER NOT NULL DEFAULT 0",
-  );
 
   // ── staff_fines (fines) ──
   await addColumn("staff_fines", "updated_by_staff_id", "TEXT");
